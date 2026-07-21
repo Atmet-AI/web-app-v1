@@ -20,7 +20,6 @@
     "hooks": "@/hooks"
   },
   "registries": {
-    "@coss": "https://coss.com/ui/r/{name}.json",
-    "@nexus-ui": "https://nexus-ui.dev/r/{name}.json"
+    "@coss": "https://coss.com/ui/r/{name}.json"
   }
 }

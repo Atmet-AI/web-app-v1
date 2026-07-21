@@ -70,6 +70,11 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardDescription,
+  CardFrame,
+  CardFrameAction,
+  CardFrameDescription,
+  CardFrameHeader,
+  CardFrameTitle,
   CardHeader,
   CardPanel,
   CardTitle,
@@ -79,6 +84,9 @@ import {
   CollapsiblePanel,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import CommandPalette, {
+  type CommandPaletteGroup,
+} from "@/components/p-command-1";
 import {
   Dialog,
   DialogClose,
@@ -107,6 +115,11 @@ import {
   MenuTrigger,
 } from "@/components/ui/menu";
 import {
+  Progress,
+  ProgressIndicator,
+  ProgressTrack,
+} from "@/components/ui/progress";
+import {
   Sheet,
   SheetDescription,
   SheetHeader,
@@ -131,24 +144,10 @@ import {
   TooltipPopup,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  PromptInput,
-  PromptInputAction,
-  PromptInputActionGroup,
-  PromptInputActions,
-  PromptInputTextarea,
-} from "@/components/nexus-ui/prompt-input";
-import { TextShimmer } from "@/components/nexus-ui/text-shimmer";
-import {
-  Thread,
-  ThreadContent,
-  ThreadScrollToBottom,
-} from "@/components/nexus-ui/thread";
 import { cn } from "@/lib/utils";
 
 type PageKey =
   | "chat"
-  | "chat2"
   | "brain"
   | "agents"
   | "skills"
@@ -166,7 +165,6 @@ type NavigationItem = {
 
 const primaryNavigation = [
   { key: "chat", label: "New chat", icon: PlusSignIcon },
-  { key: "chat2", label: "New chat 2", icon: PlusSignIcon },
   { key: "agents", label: "Workflow Agents", icon: WorkflowSquare01Icon },
   { key: "brain", label: "Brain", icon: Brain03Icon },
   { key: "skills", label: "Skills", icon: BoxesIcon },
@@ -429,38 +427,77 @@ const skills = [
   },
 ] satisfies SkillItem[];
 
+type ConnectorItem = {
+  category: string;
+  description: string;
+  gradient: string;
+  logo: string;
+  name: string;
+  paragraph: string;
+};
+
 const connectors = [
   {
     name: "Google Drive",
     description: "Search, read, and organize shared workspace files.",
+    category: "Storage",
+    gradient:
+      "from-sky-100 via-stone-50 to-emerald-100 dark:from-sky-950/40 dark:via-stone-950 dark:to-emerald-950/40",
     logo: "GD",
+    paragraph:
+      "Connect Google Drive to let Atmet find workspace documents, summarize file context, and reference approved knowledge inside chats, skills, and workflow agents.",
   },
   {
     name: "Slack",
     description: "Summarize channels and turn decisions into tasks.",
+    category: "Communication",
+    gradient:
+      "from-violet-100 via-stone-50 to-amber-100 dark:from-violet-950/40 dark:via-stone-950 dark:to-amber-950/40",
     logo: "SL",
+    paragraph:
+      "Connect Slack to keep important channel discussions available for summaries, follow-ups, team handoffs, and agent-driven status updates.",
   },
   {
     name: "GitHub",
     description: "Track pull requests, issues, reviews, and releases.",
+    category: "Development",
+    gradient:
+      "from-stone-200 via-stone-50 to-cyan-100 dark:from-stone-800 dark:via-stone-950 dark:to-cyan-950/40",
     logo: "GH",
+    paragraph:
+      "Connect GitHub to give Atmet visibility into repositories, pull requests, issues, release notes, and engineering workflow context.",
   },
   {
     name: "Notion",
     description: "Keep docs, projects, and knowledge bases connected.",
+    category: "Knowledge",
+    gradient:
+      "from-fuchsia-100 via-stone-50 to-lime-100 dark:from-fuchsia-950/40 dark:via-stone-950 dark:to-lime-950/40",
     logo: "NO",
+    paragraph:
+      "Connect Notion so Atmet can reference product docs, project pages, decisions, and internal knowledge while keeping workspace context organized.",
   },
   {
     name: "Figma",
     description: "Reference design files and product specs in context.",
+    category: "Design",
+    gradient:
+      "from-orange-100 via-stone-50 to-blue-100 dark:from-orange-950/40 dark:via-stone-950 dark:to-blue-950/40",
     logo: "FI",
+    paragraph:
+      "Connect Figma to make design files, product specs, comments, and handoff context available while planning or running Atmet workflows.",
   },
   {
     name: "Calendar",
     description: "Use meetings, availability, and follow-ups in Atmet.",
+    category: "Scheduling",
+    gradient:
+      "from-rose-100 via-stone-50 to-teal-100 dark:from-rose-950/40 dark:via-stone-950 dark:to-teal-950/40",
     logo: "CA",
+    paragraph:
+      "Connect Calendar to help Atmet reason about meeting context, availability, reminders, and follow-up actions across your workspace.",
   },
-];
+] satisfies ConnectorItem[];
 
 const settingsTabs = [
   { value: "profile", label: "Profile", icon: UserRound },
@@ -534,7 +571,7 @@ const pageDescriptions = {
   agents:
     "Build and monitor agent workflows that can run across connected apps.",
   brain:
-    "Store reusable workspace knowledge and context for future agent memory.",
+    "Personalize Atmet with your preferences, business details, and output style.",
   changelogs:
     "Track product updates, release notes, and workspace-facing changes.",
   connectors:
@@ -544,7 +581,7 @@ const pageDescriptions = {
   skills:
     "Add reusable capabilities that agents and chats can call when work gets specific.",
   usage:
-    "Review workspace activity, limits, and consumption once reporting is ready.",
+    "Usage summary for workspace activity, personal usage, and member limits.",
 } satisfies Partial<Record<PageKey, string>>;
 
 type SidebarChat = {
@@ -787,10 +824,52 @@ export default function Home() {
     setActivePage("agents");
   }
 
+  const commandPaletteGroups: CommandPaletteGroup[] = [
+    {
+      items: [
+        ...primaryNavigation,
+        ...secondaryNavigation,
+        settingsNavigation,
+      ].map((item, index) => ({
+        action: () => selectPage(item.key),
+        icon: (
+          <Icon
+            className="mr-2 size-4 text-muted-foreground"
+            icon={item.icon}
+          />
+        ),
+        label: item.label,
+        shortcut: index < 9 ? `⌘${index + 1}` : undefined,
+        value: `${item.key}-page`,
+      })),
+      value: "Pages",
+    },
+    {
+      items: sidebarChats.map((chat) => ({
+        action: () => openSidebarChat(chat.id),
+        icon: (
+          <Icon
+            className="mr-2 size-4 text-muted-foreground"
+            icon={Chat01Icon}
+          />
+        ),
+        label: chat.title,
+        suffix: chat.pinned ? (
+          <Icon
+            className="ml-2 size-3.5 text-muted-foreground"
+            icon={PinIcon}
+          />
+        ) : undefined,
+        value: `${chat.id}-chat`,
+      })),
+      value: "Chats",
+    },
+  ];
+
   return (
     <main className="min-h-svh bg-sidebar text-foreground">
       <div className="flex min-h-svh flex-col">
-        <div className="flex h-10 shrink-0 items-center justify-between gap-3 px-3 pt-1.5 md:px-4">
+        <div className="grid h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-3 py-2 md:px-4">
           <div className="flex min-w-0 items-center gap-2">
             {!sidebarOpen && (
               <Tooltip>
@@ -820,7 +899,14 @@ export default function Home() {
               onTogglePin={toggleSidebarChatPin}
             />
           </div>
-          <UserIdentity />
+          <CommandPalette
+            groups={commandPaletteGroups}
+            triggerIcon={<Icon className="size-3.5" icon={Search01Icon} />}
+            triggerLabel="Search or command"
+          />
+          <div className="flex min-w-0 justify-end">
+            <UserIdentity />
+          </div>
         </div>
 
         <div className="flex min-h-0 flex-1 gap-0">
@@ -916,7 +1002,6 @@ export default function Home() {
                   draftRequest={chatDraftRequest}
                 />
               )}
-              {activePage === "chat2" && <NexusChatPage />}
               {activePage === "agents" && (
                 <AgentsPage
                   agents={agentList}
@@ -928,10 +1013,7 @@ export default function Home() {
                 />
               )}
               {activePage === "brain" && (
-                <EmptyPage
-                  description={pageDescriptions.brain}
-                  title="Brain"
-                />
+                <BrainPage />
               )}
               {activePage === "skills" && (
                 <SkillsPage
@@ -941,12 +1023,7 @@ export default function Home() {
                 />
               )}
               {activePage === "connectors" && <ConnectorsPage />}
-              {activePage === "usage" && (
-                <EmptyPage
-                  description={pageDescriptions.usage}
-                  title="Usage"
-                />
-              )}
+              {activePage === "usage" && <UsagePage />}
               {activePage === "changelogs" && (
                 <EmptyPage
                   description={pageDescriptions.changelogs}
@@ -981,18 +1058,76 @@ function WorkspaceIdentity({
   onRenameChat: (chatId: string) => void;
   onTogglePin: (chatId: string) => void;
 }) {
+  const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
+  const [invitePeopleOpen, setInvitePeopleOpen] = useState(false);
+  const [selectedWorkspace, setSelectedWorkspace] = useState("Atmet Workspace");
+  const workspaces = [
+    "Atmet Workspace",
+    "Product Ops",
+    "Research Lab",
+  ] satisfies string[];
+
   return (
     <div className="flex min-w-0 items-center gap-2">
       <AtmetLogo className="size-5" plain />
       <div className="h-4 w-px shrink-0 bg-sidebar-border" />
-      <div className="flex min-w-0 items-center gap-1.5">
-        <div className="grid size-6 shrink-0 place-items-center rounded-md bg-background text-[0.625rem] font-semibold leading-none text-foreground">
-          AW
-        </div>
-        <p className="truncate text-xs font-medium leading-none text-sidebar-foreground">
-          Atmet Workspace
-        </p>
-      </div>
+      <Menu>
+        <MenuTrigger className="flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1 outline-none transition-[background-color] hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+          <div className="grid size-6 shrink-0 place-items-center rounded-md bg-background text-[0.625rem] font-semibold leading-none text-foreground">
+            {getOptionInitials(selectedWorkspace)}
+          </div>
+          <p className="truncate text-xs font-medium leading-none text-sidebar-foreground">
+            {selectedWorkspace}
+          </p>
+          <Icon
+            className="size-3.5 text-muted-foreground"
+            icon={ChevronDownIcon}
+          />
+        </MenuTrigger>
+        <MenuPopup align="start" className="min-w-64" sideOffset={8}>
+          <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+            Workspaces
+          </div>
+          {workspaces.map((workspace) => (
+            <MenuItem
+              key={workspace}
+              onClick={() => setSelectedWorkspace(workspace)}
+            >
+              <span className="grid size-6 place-items-center rounded-md bg-muted text-[0.625rem] font-semibold">
+                {getOptionInitials(workspace)}
+              </span>
+              <span className="min-w-0 flex-1 truncate">{workspace}</span>
+              <Icon
+                className={cn(
+                  selectedWorkspace === workspace
+                    ? "opacity-100"
+                    : "opacity-0",
+                )}
+                icon={CheckIcon}
+              />
+            </MenuItem>
+          ))}
+          <MenuSeparator />
+          <MenuItem onClick={() => setCreateWorkspaceOpen(true)}>
+            <Icon icon={PlusSignIcon} />
+            Create workspace
+          </MenuItem>
+          <MenuItem onClick={() => setInvitePeopleOpen(true)}>
+            <Icon icon={Users} />
+            Invite people
+          </MenuItem>
+        </MenuPopup>
+      </Menu>
+      <WorkspaceCreateDialog
+        onCreate={(workspaceName) => setSelectedWorkspace(workspaceName)}
+        onOpenChange={setCreateWorkspaceOpen}
+        open={createWorkspaceOpen}
+      />
+      <WorkspaceInviteDialog
+        onOpenChange={setInvitePeopleOpen}
+        open={invitePeopleOpen}
+        workspaceName={selectedWorkspace}
+      />
       {activeChat && (
         <>
           <span className="shrink-0 text-xs text-muted-foreground">/</span>
@@ -1013,6 +1148,148 @@ function WorkspaceIdentity({
         </>
       )}
     </div>
+  );
+}
+
+function WorkspaceCreateDialog({
+  onCreate,
+  onOpenChange,
+  open,
+}: {
+  onCreate: (workspaceName: string) => void;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+}) {
+  const [name, setName] = useState("");
+  const trimmedName = name.trim();
+
+  function resetForm() {
+    setName("");
+  }
+
+  function submitWorkspace(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!trimmedName) {
+      return;
+    }
+
+    onCreate(trimmedName);
+    resetForm();
+    onOpenChange(false);
+  }
+
+  return (
+    <Dialog
+      onOpenChange={(nextOpen) => {
+        onOpenChange(nextOpen);
+        if (!nextOpen) {
+          resetForm();
+        }
+      }}
+      open={open}
+    >
+      <DialogPopup className="max-w-md rounded-xl">
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={submitWorkspace}>
+          <DialogHeader className="gap-1 border-b border-border/70 px-4 py-3">
+            <DialogTitle className="text-base leading-6">
+              Create workspace
+            </DialogTitle>
+            <DialogDescription className="text-xs leading-5">
+              Create a new workspace and switch to it in this dashboard.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="grid gap-2 p-4" scrollFade={false}>
+            <Label htmlFor="workspace-create-name">Workspace name</Label>
+            <Input
+              autoFocus
+              id="workspace-create-name"
+              onChange={(event) => setName(event.target.value)}
+              placeholder="e.g. Product Ops"
+              value={name}
+            />
+          </DialogPanel>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button disabled={!trimmedName} type="submit">
+              Create workspace
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+function WorkspaceInviteDialog({
+  onOpenChange,
+  open,
+  workspaceName,
+}: {
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  workspaceName: string;
+}) {
+  const [email, setEmail] = useState("");
+  const trimmedEmail = email.trim();
+
+  function resetForm() {
+    setEmail("");
+  }
+
+  function submitInvite(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!trimmedEmail) {
+      return;
+    }
+
+    resetForm();
+    onOpenChange(false);
+  }
+
+  return (
+    <Dialog
+      onOpenChange={(nextOpen) => {
+        onOpenChange(nextOpen);
+        if (!nextOpen) {
+          resetForm();
+        }
+      }}
+      open={open}
+    >
+      <DialogPopup className="max-w-md rounded-xl">
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={submitInvite}>
+          <DialogHeader className="gap-1 border-b border-border/70 px-4 py-3">
+            <DialogTitle className="text-base leading-6">
+              Invite people
+            </DialogTitle>
+            <DialogDescription className="text-xs leading-5">
+              Invite teammates to {workspaceName}.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="grid gap-2 p-4" scrollFade={false}>
+            <Label htmlFor="workspace-invite-email">Email address</Label>
+            <Input
+              autoFocus
+              id="workspace-invite-email"
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="teammate@company.com"
+              type="email"
+              value={email}
+            />
+          </DialogPanel>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button disabled={!trimmedEmail} type="submit">
+              Send invite
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogPopup>
+    </Dialog>
   );
 }
 
@@ -1247,7 +1524,7 @@ function ChatActionItem({
 function UserIdentity() {
   return (
     <Menu>
-      <MenuTrigger className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md outline-none transition-[background-color] hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+      <MenuTrigger className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-lg px-1.5 py-1 outline-none transition-[background-color] hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
         <div className="grid size-6 shrink-0 place-items-center rounded-md bg-background text-[0.625rem] font-semibold leading-none text-foreground">
           AH
         </div>
@@ -1257,7 +1534,7 @@ function UserIdentity() {
           </p>
         </div>
         <Icon
-          className="size-3.5 text-sidebar-foreground opacity-70"
+          className="size-3.5 text-muted-foreground"
           icon={ChevronDownIcon}
         />
       </MenuTrigger>
@@ -1439,593 +1716,6 @@ function ChatPage({
       }
       key={activeChatId ?? "new-chat"}
     />
-  );
-}
-
-type NexusChatMessage = {
-  demo?: NexusDemoKey;
-  from: "assistant" | "user";
-  id: string;
-  pending?: boolean;
-  text: string;
-};
-
-type NexusDemoKey =
-  | "attachments"
-  | "citation"
-  | "message"
-  | "model"
-  | "prompt"
-  | "suggestions"
-  | "thread";
-
-type NexusContextToken = {
-  kind: "app" | "skill";
-  logo: string;
-  name: string;
-};
-
-const nexusDemoButtons = [
-  ["Prompt input", "prompt"],
-  ["Suggestions", "suggestions"],
-  ["Model selector", "model"],
-  ["Attachments", "attachments"],
-  ["Message", "message"],
-  ["Thread", "thread"],
-  ["Citation", "citation"],
-] satisfies readonly [string, NexusDemoKey][];
-
-const nexusAppOptions = [
-  { kind: "app", logo: "GD", name: "Google Drive" },
-  { kind: "app", logo: "SL", name: "Slack" },
-  { kind: "app", logo: "GH", name: "GitHub" },
-  { kind: "app", logo: "NO", name: "Notion" },
-  { kind: "app", logo: "FI", name: "Figma" },
-] satisfies NexusContextToken[];
-
-const nexusSkillOptions = skills.slice(0, 6).map((skill) => ({
-  kind: "skill" as const,
-  logo: getOptionInitials(skill.name),
-  name: skill.name,
-}));
-
-function NexusChatPage() {
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<NexusChatMessage[]>([
-    {
-      from: "assistant",
-      id: "welcome",
-      text: "This is the temporary Nexus UI chat surface. Ask anything and I will fake a response so you can test the interaction safely.",
-    },
-  ]);
-  const [contextTokens, setContextTokens] = useState<NexusContextToken[]>([]);
-  const [picker, setPicker] = useState<{
-    kind: "app" | "skill";
-    query: string;
-  } | null>(null);
-  const pickerRef = useRef<HTMLDivElement>(null);
-  const fakeResponseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const isLoading = messages.some((message) => message.pending);
-  const pickerOptions = picker
-    ? (picker.kind === "app" ? nexusAppOptions : nexusSkillOptions).filter(
-        (option) =>
-          option.name.toLowerCase().includes(picker.query.toLowerCase()),
-      )
-    : [];
-
-  useEffect(() => {
-    return () => {
-      if (fakeResponseTimeoutRef.current) {
-        clearTimeout(fakeResponseTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!picker) {
-      return;
-    }
-
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (target instanceof Node && pickerRef.current?.contains(target)) {
-        return;
-      }
-
-      setPicker(null);
-    }
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [picker]);
-
-  function submitMessage(value: string) {
-    const trimmed = value.trim();
-
-    if ((!trimmed && contextTokens.length === 0) || isLoading) {
-      return;
-    }
-
-    const pendingId = `pending-${Date.now()}`;
-    const contextText = contextTokens
-      .map((token) => `${token.kind === "app" ? "@" : "/"}${token.name}`)
-      .join(" ");
-
-    setInput("");
-    setContextTokens([]);
-    setPicker(null);
-    setMessages((current) => [
-      ...current,
-      {
-        from: "user",
-        id: `user-${Date.now()}`,
-        text: [contextText, trimmed].filter(Boolean).join(" "),
-      },
-      {
-        from: "assistant",
-        id: pendingId,
-        pending: true,
-        text: "Thinking through the Atmet workspace context",
-      },
-    ]);
-
-    fakeResponseTimeoutRef.current = setTimeout(() => {
-      setMessages((current) =>
-        current.map((message) =>
-          message.id === pendingId
-            ? {
-                ...message,
-                pending: false,
-                text:
-                  "I would handle this with Nexus UI primitives: a sticky prompt input, a scroll-safe thread, and Atmet-styled message states. This page is isolated, so the original chat composer stays untouched.",
-              }
-            : message,
-        ),
-      );
-    }, 900);
-  }
-
-  function updateInput(value: string) {
-    setInput(value);
-
-    const match = value.match(/(?:^|\s)([@/])([^\s@/]*)$/);
-    if (!match) {
-      setPicker(null);
-      return;
-    }
-
-    setPicker({
-      kind: match[1] === "@" ? "app" : "skill",
-      query: match[2] ?? "",
-    });
-  }
-
-  function selectContextToken(token: NexusContextToken) {
-    setContextTokens((current) => {
-      if (current.some((item) => item.kind === token.kind && item.name === token.name)) {
-        return current;
-      }
-
-      return [...current, token];
-    });
-    setInput((current) => current.replace(/(?:^|\s)([@/])([^\s@/]*)$/, " "));
-    setPicker(null);
-  }
-
-  function addDemoMessage(demo: NexusDemoKey) {
-    const label =
-      nexusDemoButtons.find(([, key]) => key === demo)?.[0] ?? "Component";
-
-    setMessages((current) => [
-      ...current,
-      {
-        demo,
-        from: "assistant",
-        id: `demo-${demo}-${Date.now()}`,
-        text: `${label} demo`,
-      },
-    ]);
-  }
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <Thread className="min-h-0 flex-1">
-        <ThreadContent className="mx-auto w-full max-w-3xl gap-4 px-0 pb-32 pt-10">
-          <NexusDemoToolbar onSelect={addDemoMessage} />
-          {messages.map((message) => (
-            <NexusChatBubble key={message.id} message={message} />
-          ))}
-        </ThreadContent>
-        <ThreadScrollToBottom />
-      </Thread>
-
-      <div className="sticky bottom-0 mx-auto w-full max-w-3xl bg-background/92 pb-4 pt-3 backdrop-blur supports-[backdrop-filter]:bg-background/78">
-        {picker && (
-          <div
-            className="absolute bottom-[calc(100%-0.5rem)] left-0 z-20 w-72 overflow-hidden rounded-2xl border border-border bg-popover p-1.5 text-popover-foreground shadow-lg/10"
-            ref={pickerRef}
-          >
-            <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-              {picker.kind === "app" ? "Connect an app" : "Use a skill"}
-            </div>
-            <div className="grid gap-1">
-              {pickerOptions.map((option) => (
-                <button
-                  className="flex items-center gap-2 rounded-xl px-2 py-2 text-left text-sm transition-[background-color] hover:bg-accent"
-                  key={`${option.kind}-${option.name}`}
-                  onClick={() => selectContextToken(option)}
-                  type="button"
-                >
-                  <span className="grid size-6 place-items-center rounded-lg bg-foreground text-[0.625rem] font-semibold text-background">
-                    {option.logo}
-                  </span>
-                  <span className="min-w-0 truncate">{option.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        <PromptInput
-          className="rounded-2xl border-border/80 bg-background dark:bg-input/24"
-          onSubmit={submitMessage}
-        >
-          {contextTokens.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 px-5 pt-4">
-              {contextTokens.map((token) => (
-                <button
-                  className="inline-flex h-6 items-center gap-1 rounded-lg bg-secondary px-1.5 text-xs font-medium text-secondary-foreground transition-[background-color] hover:bg-secondary/80"
-                  key={`${token.kind}-${token.name}`}
-                  onClick={() =>
-                    setContextTokens((current) =>
-                      current.filter(
-                        (item) =>
-                          item.kind !== token.kind || item.name !== token.name,
-                      ),
-                    )
-                  }
-                  type="button"
-                >
-                  <span className="grid size-4 place-items-center rounded-md bg-foreground text-[0.5rem] font-semibold text-background">
-                    {token.logo}
-                  </span>
-                  {token.name}
-                </button>
-              ))}
-            </div>
-          )}
-          <PromptInputTextarea
-            disabled={isLoading}
-            onChange={(event) => updateInput(event.target.value)}
-            placeholder="Use / to add a skill or @ to connect an app."
-            value={input}
-          />
-          <PromptInputActions>
-            <PromptInputActionGroup>
-              <PromptInputAction asChild tooltip="Add context">
-                <Button
-                  aria-label="Add context"
-                  className="rounded-full active:scale-[0.96]"
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={() => setPicker({ kind: "app", query: "" })}
-                >
-                  <Icon icon={PlusSignIcon} />
-                </Button>
-              </PromptInputAction>
-              <Button
-                className="h-7 rounded-full px-2 text-xs"
-                onClick={() => setPicker({ kind: "app", query: "" })}
-                size="sm"
-                variant="ghost"
-              >
-                Apps
-                <Icon icon={PlusSignIcon} />
-              </Button>
-              <Button
-                className="h-7 rounded-full px-2 text-xs"
-                onClick={() => setPicker({ kind: "skill", query: "" })}
-                size="sm"
-                variant="ghost"
-              >
-                Skills
-                <Icon icon={PlusSignIcon} />
-              </Button>
-              <Button
-                className="h-7 rounded-full px-2 text-xs"
-                size="sm"
-                variant="ghost"
-              >
-                <AtmetLogo className="size-4" plain />
-                Atmet
-                <Icon icon={ChevronDownIcon} />
-              </Button>
-            </PromptInputActionGroup>
-            <PromptInputActionGroup>
-              <PromptInputAction
-                asChild
-                tooltip={{ content: "Send message", shortcut: "Enter" }}
-              >
-                <Button
-                  className="h-8 rounded-full px-3 active:scale-[0.96]"
-                  disabled={isLoading || (!input.trim() && contextTokens.length === 0)}
-                  onClick={() => submitMessage(input)}
-                  size="sm"
-                >
-                  Send
-                  <Icon icon={SendHorizontal} />
-                </Button>
-              </PromptInputAction>
-            </PromptInputActionGroup>
-          </PromptInputActions>
-        </PromptInput>
-      </div>
-    </div>
-  );
-}
-
-function NexusChatBubble({ message }: { message: NexusChatMessage }) {
-  const fromUser = message.from === "user";
-
-  return (
-    <article
-      className={cn(
-        "flex w-full items-start gap-2",
-        fromUser ? "justify-end" : "justify-start",
-      )}
-    >
-      {!fromUser && (
-        <div className="grid size-7 shrink-0 place-items-center rounded-lg bg-foreground text-[0.625rem] font-semibold text-background">
-          A
-        </div>
-      )}
-      <div
-        className={cn(
-          "max-w-[82%] rounded-2xl px-4 py-2.5 text-sm leading-6",
-          fromUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted/55 text-foreground dark:bg-input/30",
-        )}
-      >
-        {message.pending ? (
-          <TextShimmer className="text-muted-foreground" duration={1.1}>
-            {message.text}
-          </TextShimmer>
-        ) : message.demo ? (
-          <NexusDemoOutput demo={message.demo} />
-        ) : (
-          message.text
-        )}
-      </div>
-    </article>
-  );
-}
-
-function NexusDemoToolbar({
-  onSelect,
-}: {
-  onSelect: (demo: NexusDemoKey) => void;
-}) {
-  return (
-    <div className="rounded-2xl border border-border/70 bg-muted/25 p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium">Output test buttons</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Temporary demos for the Nexus UI chat component set.
-          </p>
-        </div>
-        <Badge variant="outline">Temp</Badge>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {nexusDemoButtons.map(([label, key]) => (
-          <Button
-            className="h-7 rounded-full px-2.5 text-xs"
-            key={key}
-            onClick={() => onSelect(key)}
-            size="sm"
-            variant="outline"
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function NexusDemoOutput({ demo }: { demo: NexusDemoKey }) {
-  if (demo === "prompt") {
-    return <NexusPromptOutputDemo />;
-  }
-
-  if (demo === "suggestions") {
-    return <NexusSuggestionsOutputDemo />;
-  }
-
-  if (demo === "model") {
-    return <NexusModelSelectorOutputDemo />;
-  }
-
-  if (demo === "attachments") {
-    return <NexusAttachmentsOutputDemo />;
-  }
-
-  if (demo === "thread") {
-    return <NexusThreadOutputDemo />;
-  }
-
-  if (demo === "citation") {
-    return <NexusCitationOutputDemo />;
-  }
-
-  return (
-    <div className="grid gap-3">
-      <p>
-        Message demo: assistant and user bubbles align naturally inside the
-        thread and keep Atmet&apos;s compact rounded surface.
-      </p>
-      <div className="flex justify-end">
-        <div className="rounded-2xl bg-primary px-3 py-2 text-primary-foreground">
-          User message
-        </div>
-      </div>
-      <div className="flex justify-start">
-        <div className="rounded-2xl bg-background px-3 py-2">
-          Assistant response with clean readable markdown-style spacing.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function NexusPromptOutputDemo() {
-  return (
-    <div className="grid gap-3">
-      <p className="font-medium">Prompt Input</p>
-      <div className="rounded-2xl border border-border bg-background p-3">
-        <div className="min-h-16 text-muted-foreground">
-          Use / to add a skill or @ to connect an app.
-        </div>
-        <div className="flex items-center justify-between border-t border-border pt-2">
-          <div className="flex items-center gap-1.5">
-            <span className="grid size-7 place-items-center rounded-full bg-muted">
-              <Icon className="size-3.5" icon={PlusSignIcon} />
-            </span>
-            <span className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-xs">
-              <AtmetLogo className="size-4" plain />
-              Atmet
-              <Icon className="size-3" icon={ChevronDownIcon} />
-            </span>
-          </div>
-          <Button className="h-7 rounded-full px-2.5 text-xs" size="sm">
-            Send
-            <Icon icon={SendHorizontal} />
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function NexusSuggestionsOutputDemo() {
-  const prompts = [
-    "Summarize workspace activity",
-    "Draft a launch checklist",
-    "Find connector risks",
-  ];
-
-  return (
-    <div className="grid gap-3">
-      <p className="font-medium">Suggestions</p>
-      <div className="flex flex-wrap gap-2">
-        {prompts.map((prompt) => (
-          <span
-            className="rounded-full border border-border bg-background px-3 py-1.5 text-xs"
-            key={prompt}
-          >
-            {prompt}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function NexusModelSelectorOutputDemo() {
-  const models = ["Atmet", "Gemini 3", "GPT-5 mini", "Claude 4.5 Sonnet"];
-
-  return (
-    <div className="w-72 overflow-hidden rounded-2xl border border-border bg-background p-1.5">
-      <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-        Model selector
-      </div>
-      {models.map((model, index) => (
-        <div
-          className="flex items-center justify-between rounded-xl px-2 py-2 text-sm"
-          key={model}
-        >
-          <span className="flex items-center gap-2">
-            {index === 0 ? (
-              <AtmetLogo className="size-5" plain />
-            ) : (
-              <span className="grid size-5 place-items-center rounded-md bg-muted text-[0.55rem] font-semibold">
-                {getOptionInitials(model)}
-              </span>
-            )}
-            {model}
-          </span>
-          {index === 0 && <Icon className="size-4 text-success" icon={CheckIcon} />}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function NexusAttachmentsOutputDemo() {
-  const files = [
-    ["workspace-summary.md", "12 KB"],
-    ["connector-audit.csv", "84 KB"],
-  ];
-
-  return (
-    <div className="grid gap-2">
-      <p className="font-medium">Attachments</p>
-      {files.map(([name, size]) => (
-        <div
-          className="flex items-center justify-between rounded-xl border border-border bg-background px-3 py-2"
-          key={name}
-        >
-          <span className="flex items-center gap-2">
-            <span className="grid size-8 place-items-center rounded-lg bg-muted">
-              <Icon className="size-4" icon={File01Icon} />
-            </span>
-            <span>
-              <span className="block text-sm">{name}</span>
-              <span className="block text-xs text-muted-foreground">{size}</span>
-            </span>
-          </span>
-          <Badge variant="outline">Ready</Badge>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function NexusThreadOutputDemo() {
-  return (
-    <div className="grid gap-2">
-      <p className="font-medium">Thread</p>
-      <div className="rounded-2xl border border-border bg-background p-3">
-        <div className="flex h-32 flex-col justify-end gap-2 overflow-hidden rounded-xl bg-muted/35 p-3">
-          <div className="h-3 w-36 rounded-full bg-foreground/15" />
-          <div className="h-3 w-52 rounded-full bg-foreground/15" />
-          <div className="ml-auto h-8 w-48 rounded-2xl bg-primary/85" />
-        </div>
-        <p className="mt-2 text-xs text-muted-foreground">
-          Stick-to-bottom thread behavior for long chats.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function NexusCitationOutputDemo() {
-  return (
-    <div className="grid gap-3">
-      <p>
-        Atmet can cite connected workspace context
-        <sup className="mx-1 rounded bg-background px-1 text-[0.65rem]">1</sup>
-        and connector events
-        <sup className="mx-1 rounded bg-background px-1 text-[0.65rem]">2</sup>
-        inline.
-      </p>
-      <div className="grid gap-1 border-t border-border pt-2 text-xs text-muted-foreground">
-        <div>1 Workspace memory summary - Atmet</div>
-        <div>2 Google Drive connector log - Atmet</div>
-      </div>
-    </div>
   );
 }
 
@@ -5244,33 +4934,849 @@ function renderInlineMarkdown(text: string) {
     });
 }
 
+function BrainPage() {
+  const [brainValues, setBrainValues] = useState({
+    businessDetails:
+      "Atmet is a workspace intelligence platform for AI chats, reusable skills, workflow agents, and connected business apps.",
+    outputStyle:
+      "Use concise answers, clear sections, direct recommendations, and practical next steps. Keep the tone calm, premium, and operational.",
+    personalization:
+      "Remember that Anas prefers minimal interfaces, direct answers, and product decisions that keep the platform polished and fast.",
+  });
+  const [savedBrainValues, setSavedBrainValues] = useState(brainValues);
+  const [knowledgeDialogOpen, setKnowledgeDialogOpen] = useState(false);
+  const brainChanged =
+    JSON.stringify(brainValues) !== JSON.stringify(savedBrainValues);
+
+  return (
+    <>
+      <PageHeader
+        description={pageDescriptions.brain}
+        title="Brain"
+      />
+
+      <BuildKnowledgeBaseDialog
+        onOpenChange={setKnowledgeDialogOpen}
+        open={knowledgeDialogOpen}
+      />
+
+      <CardFrame className="overflow-hidden">
+        <CardFrameHeader>
+          <CardFrameTitle>Workspace brain</CardFrameTitle>
+          <CardFrameDescription>
+            Tell Atmet what to remember about you, your business, and how
+            outputs should sound.
+          </CardFrameDescription>
+          <CardFrameAction>
+            <Button
+              className="active:scale-[0.96]"
+              disabled={!brainChanged}
+              onClick={() => setSavedBrainValues(brainValues)}
+              size="sm"
+            >
+              <Icon icon={SaveIcon} />
+              Save changes
+            </Button>
+          </CardFrameAction>
+        </CardFrameHeader>
+        <CardPanel className="grid gap-3 p-3">
+          <BrainTextField
+            description="Personal preferences, context, and working style Atmet should keep in mind."
+            label="Personalization"
+            onChange={(value) =>
+              setBrainValues((current) => ({
+                ...current,
+                personalization: value,
+              }))
+            }
+            value={brainValues.personalization}
+          />
+          <BrainTextField
+            description="Company details, customers, services, policies, and domain knowledge."
+            label="Business details"
+            onChange={(value) =>
+              setBrainValues((current) => ({
+                ...current,
+                businessDetails: value,
+              }))
+            }
+            value={brainValues.businessDetails}
+          />
+          <BrainTextField
+            description="Tone, structure, format, level of detail, and preferred response style."
+            label="Output style"
+            onChange={(value) =>
+              setBrainValues((current) => ({
+                ...current,
+                outputStyle: value,
+              }))
+            }
+            value={brainValues.outputStyle}
+          />
+        </CardPanel>
+      </CardFrame>
+
+      <CardFrame className="mt-3 overflow-hidden">
+        <CardPanel className="flex flex-col items-center justify-center gap-4 p-6 text-center">
+          <div>
+            <p className="text-sm font-semibold">Or ...</p>
+            <p className="mt-1 max-w-md text-pretty text-sm leading-6 text-muted-foreground">
+              Upload business material and let Atmet build a knowledge base or
+              graph from it.
+            </p>
+          </div>
+          <Button
+            className="active:scale-[0.96]"
+            onClick={() => setKnowledgeDialogOpen(true)}
+          >
+            <Icon icon={Brain03Icon} />
+            Build knowledge base/graph
+          </Button>
+        </CardPanel>
+      </CardFrame>
+    </>
+  );
+}
+
+function BrainTextField({
+  description,
+  label,
+  onChange,
+  value,
+}: {
+  description: string;
+  label: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  return (
+    <div className="grid gap-2 rounded-xl border border-border/70 bg-background p-3">
+      <div>
+        <Label className="text-sm font-semibold">{label}</Label>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+      <Textarea
+        className="min-h-40 resize-y"
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      />
+    </div>
+  );
+}
+
+function BuildKnowledgeBaseDialog({
+  onOpenChange,
+  open,
+}: {
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+}) {
+  const [fileNames, setFileNames] = useState<string[]>([]);
+
+  function resetForm() {
+    setFileNames([]);
+  }
+
+  return (
+    <Dialog
+      onOpenChange={(nextOpen) => {
+        onOpenChange(nextOpen);
+        if (!nextOpen) {
+          resetForm();
+        }
+      }}
+      open={open}
+    >
+      <DialogPopup className="max-w-md rounded-xl">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <DialogHeader className="gap-1 border-b border-border/70 px-4 py-3">
+            <DialogTitle className="text-base leading-6">
+              Build knowledge base/graph
+            </DialogTitle>
+            <DialogDescription className="text-xs leading-5">
+              Upload any data that talks about your business and our model will
+              build a knowledge base for you.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="grid gap-4 p-4" scrollFade={false}>
+            <label className="grid min-h-36 cursor-pointer place-items-center rounded-xl border border-dashed border-border bg-muted/35 px-4 py-6 text-center transition-[background-color,border-color] hover:border-foreground/20 hover:bg-muted">
+              <input
+                className="hidden"
+                multiple
+                onChange={(event) =>
+                  setFileNames(
+                    Array.from(event.target.files ?? []).map(
+                      (file) => file.name,
+                    ),
+                  )
+                }
+                type="file"
+              />
+              <span className="grid gap-2">
+                <span className="mx-auto grid size-10 place-items-center rounded-lg bg-background text-muted-foreground shadow-xs/5">
+                  <Icon icon={FileUploadIcon} />
+                </span>
+                <span className="text-sm font-medium">
+                  {fileNames.length > 0
+                    ? `${fileNames.length} file${fileNames.length === 1 ? "" : "s"} selected`
+                    : "Upload business data"}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Docs, markdown, PDFs, CSVs, exports, or notes.
+                </span>
+              </span>
+            </label>
+            {fileNames.length > 0 && (
+              <div className="grid gap-1 rounded-lg border border-border/70 bg-muted/25 p-2">
+                {fileNames.map((fileName) => (
+                  <p
+                    className="truncate text-xs text-muted-foreground"
+                    key={fileName}
+                  >
+                    {fileName}
+                  </p>
+                ))}
+              </div>
+            )}
+          </DialogPanel>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button disabled={fileNames.length === 0}>Start build</Button>
+          </DialogFooter>
+        </div>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+type UsagePeriod = "month" | "quarter" | "week";
+type UsageScope = "my" | "workspace";
+
+const usageMetrics = [
+  { label: "Tokens", value: "8,188 / 50,000" },
+  { label: "Files", value: "0 / 10,000" },
+  { label: "Storage", value: "0GB / 2441.4GB" },
+  { label: "Automations", value: "1" },
+  { label: "Chats", value: "4" },
+] satisfies { label: string; value: string }[];
+
+const usageResources = [
+  {
+    limit: "50,000",
+    percent: 16.4,
+    resource: "Tokens",
+    usage: "8,188",
+  },
+  {
+    limit: "10,000",
+    percent: 0,
+    resource: "Files",
+    usage: "0",
+  },
+  {
+    limit: "2,441.4 GB",
+    percent: 0,
+    resource: "Storage",
+    usage: "0 GB",
+  },
+] satisfies {
+  limit: string;
+  percent: number;
+  resource: string;
+  usage: string;
+}[];
+
+const usageChartGroups = [
+  {
+    bars: [
+      { className: "border-sky-400/60 bg-sky-400/20", striped: true, value: 62 },
+      { className: "bg-sky-500", value: 78 },
+    ],
+    label: "Your usage",
+  },
+  {
+    bars: [{ className: "bg-sky-400/70", value: 1 }],
+    label: "Files",
+  },
+  {
+    bars: [
+      { className: "bg-sky-300/70", value: 1 },
+      { className: "bg-sky-500", value: 1 },
+    ],
+    label: "Automations",
+  },
+  {
+    bars: [
+      { className: "bg-sky-300/70", value: 1 },
+      { className: "bg-sky-500", value: 1 },
+    ],
+    label: "Chats",
+  },
+] satisfies {
+  bars: { className: string; striped?: boolean; value: number }[];
+  label: string;
+}[];
+
+function UsagePage() {
+  const [period, setPeriod] = useState<UsagePeriod>("month");
+  const [scope, setScope] = useState<UsageScope>("my");
+  const [tokenCap, setTokenCap] = useState("50000");
+  const [savedTokenCap, setSavedTokenCap] = useState("50000");
+  const [refreshedAt, setRefreshedAt] = useState("10:42");
+  const limitsChanged = tokenCap !== savedTokenCap;
+
+  return (
+    <>
+      <PageHeader
+        description={pageDescriptions.usage}
+        title="Usage and limits"
+      />
+
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold tracking-normal">
+            Usage overview
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            Monitor real workspace usage, personal usage, and member limits.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <UsageSelectMenu
+            label="Usage scope"
+            onValueChange={setScope}
+            options={[
+              ["my", "My usage"],
+              ["workspace", "Workspace usage"],
+            ]}
+            value={scope}
+          />
+          <UsageSelectMenu
+            label="Usage period"
+            onValueChange={setPeriod}
+            options={[
+              ["month", "This month"],
+              ["week", "This week"],
+              ["quarter", "This quarter"],
+            ]}
+            value={period}
+          />
+          <Button
+            className="active:scale-[0.96]"
+            onClick={() => setRefreshedAt("now")}
+            size="sm"
+            variant="outline"
+          >
+            <Icon icon={ChartIcon} />
+            Refresh
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        {usageMetrics.map((metric) => (
+          <UsageMetricCard key={metric.label} {...metric} />
+        ))}
+      </div>
+
+      <UsageSnapshotCard refreshedAt={refreshedAt} />
+      <UsageResourcesTable />
+      <PerUserLimitsCard
+        limitsChanged={limitsChanged}
+        onSave={() => setSavedTokenCap(tokenCap)}
+        onTokenCapChange={setTokenCap}
+        tokenCap={tokenCap}
+      />
+    </>
+  );
+}
+
+function UsageSelectMenu<TValue extends string>({
+  label,
+  onValueChange,
+  options,
+  value,
+}: {
+  label: string;
+  onValueChange: (value: TValue) => void;
+  options: [TValue, string][];
+  value: TValue;
+}) {
+  const currentLabel =
+    options.find(([optionValue]) => optionValue === value)?.[1] ?? label;
+
+  return (
+    <Menu>
+      <MenuTrigger
+        render={
+          <Button
+            aria-label={label}
+            className="min-w-36 justify-between active:scale-[0.96]"
+            size="sm"
+            variant="outline"
+          >
+            {currentLabel}
+            <Icon className="opacity-70" icon={ChevronDownIcon} />
+          </Button>
+        }
+      />
+      <MenuPopup align="end" className="min-w-44" sideOffset={8}>
+        {options.map(([optionValue, optionLabel]) => (
+          <MenuItem
+            key={optionValue}
+            onClick={() => onValueChange(optionValue)}
+          >
+            <Icon
+              className={cn(
+                optionValue === value ? "opacity-100" : "opacity-0",
+              )}
+              icon={CheckIcon}
+            />
+            {optionLabel}
+          </MenuItem>
+        ))}
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+function UsageMetricCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <Card className="rounded-xl shadow-xs/5">
+      <CardHeader className="gap-3 p-3">
+        <CardDescription className="text-xs font-medium">
+          {label}
+        </CardDescription>
+        <p className="whitespace-pre-line text-2xl font-semibold leading-8 tracking-normal text-foreground tabular-nums">
+          {value.replace(" / ", " /\n")}
+        </p>
+      </CardHeader>
+    </Card>
+  );
+}
+
+function UsageSnapshotCard({ refreshedAt }: { refreshedAt: string }) {
+  return (
+    <CardFrame className="mt-4 overflow-hidden">
+      <CardFrameHeader>
+        <CardFrameTitle>
+          <span className="inline-flex items-center gap-2">
+            Usage snapshot
+            <Badge variant="info">My usage</Badge>
+          </span>
+        </CardFrameTitle>
+        <CardFrameDescription>
+          Live counts for this month. Last refreshed {refreshedAt}.
+        </CardFrameDescription>
+      </CardFrameHeader>
+      <Card className="rounded-xl shadow-none before:hidden">
+        <CardPanel className="p-4">
+          <div className="flex h-80 items-end justify-around gap-6">
+            {usageChartGroups.map((group) => (
+              <div
+                className="flex h-full min-w-24 flex-1 flex-col justify-end gap-3"
+                key={group.label}
+              >
+                <div className="flex h-64 items-end justify-center gap-1.5">
+                  {group.bars.map((bar, index) => (
+                    <div
+                      className={cn(
+                        "w-16 min-w-1 rounded-t-md transition-[height,opacity]",
+                        bar.className,
+                      )}
+                      key={`${group.label}-${index}`}
+                      style={{
+                        backgroundImage: bar.striped
+                          ? "repeating-linear-gradient(135deg, rgba(14, 165, 233, 0.34) 0, rgba(14, 165, 233, 0.34) 2px, transparent 2px, transparent 6px)"
+                          : undefined,
+                        height: `${Math.max(bar.value, 1)}%`,
+                      }}
+                    />
+                  ))}
+                </div>
+                <p className="text-center text-xs font-medium text-muted-foreground">
+                  {group.label}
+                </p>
+              </div>
+            ))}
+          </div>
+        </CardPanel>
+      </Card>
+    </CardFrame>
+  );
+}
+
+function UsageResourcesTable() {
+  return (
+    <CardFrame className="mt-3 overflow-hidden">
+      <CardFrameHeader>
+        <CardFrameTitle>Resource limits</CardFrameTitle>
+        <CardFrameDescription>
+          Track workspace consumption against current caps.
+        </CardFrameDescription>
+      </CardFrameHeader>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Resource</TableHead>
+            <TableHead>Usage</TableHead>
+            <TableHead>Limit</TableHead>
+            <TableHead>Status</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {usageResources.map((resource) => (
+            <TableRow key={resource.resource}>
+              <TableCell className="font-medium">{resource.resource}</TableCell>
+              <TableCell>
+                <div className="max-w-80">
+                  <span className="tabular-nums text-muted-foreground">
+                    {resource.usage}
+                  </span>
+                  <UsageProgressBar percent={resource.percent} />
+                </div>
+              </TableCell>
+              <TableCell className="tabular-nums text-muted-foreground">
+                {resource.limit}
+              </TableCell>
+              <TableCell>
+                <Badge variant="success">Within limit</Badge>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </CardFrame>
+  );
+}
+
+function UsageProgressBar({ percent }: { percent: number }) {
+  return (
+    <Progress className="mt-2" max={100} value={percent}>
+      <ProgressTrack>
+        <ProgressIndicator
+          className="h-full rounded-full bg-sky-500"
+          style={{ width: `${Math.max(percent, 1)}%` }}
+        />
+      </ProgressTrack>
+    </Progress>
+  );
+}
+
+function PerUserLimitsCard({
+  limitsChanged,
+  onSave,
+  onTokenCapChange,
+  tokenCap,
+}: {
+  limitsChanged: boolean;
+  onSave: () => void;
+  onTokenCapChange: (value: string) => void;
+  tokenCap: string;
+}) {
+  return (
+    <CardFrame className="mt-3 overflow-hidden">
+      <CardFrameHeader>
+        <CardFrameTitle>Per-user limits</CardFrameTitle>
+        <CardFrameDescription>
+          Empty values inherit the workspace token cap.
+        </CardFrameDescription>
+        <CardFrameAction>
+          <Button
+            className="active:scale-[0.96]"
+            disabled={!limitsChanged}
+            onClick={onSave}
+            size="sm"
+          >
+            <Icon icon={SaveIcon} />
+            Save limits
+          </Button>
+        </CardFrameAction>
+      </CardFrameHeader>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>User</TableHead>
+            <TableHead>Role</TableHead>
+            <TableHead>Tokens used</TableHead>
+            <TableHead className="text-right">Monthly token cap</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow>
+            <TableCell>
+              <div className="flex items-center gap-2">
+                <div className="grid size-9 place-items-center rounded-lg border border-border/70 bg-muted/50 text-xs font-semibold">
+                  AH
+                </div>
+                <div>
+                  <p className="font-medium leading-none">Anooos Hamad</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    anas813813@gmail.com
+                  </p>
+                </div>
+              </div>
+            </TableCell>
+            <TableCell>
+              <Badge variant="info">Owner</Badge>
+            </TableCell>
+            <TableCell className="tabular-nums text-muted-foreground">
+              8,188 / 50,000
+            </TableCell>
+            <TableCell className="text-right">
+              <Input
+                aria-label="Monthly token cap"
+                className="ml-auto w-40"
+                min="0"
+                onChange={(event) => onTokenCapChange(event.target.value)}
+                size="sm"
+                type="number"
+                value={tokenCap}
+              />
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </CardFrame>
+  );
+}
+
 function ConnectorsPage() {
+  const [connectedConnectorNames, setConnectedConnectorNames] = useState<string[]>(
+    [],
+  );
+  const [connectorFilter, setConnectorFilter] =
+    useState<ConnectorFilter>("all");
+  const [connectorSearch, setConnectorSearch] = useState("");
+  const [selectedConnectorName, setSelectedConnectorName] = useState<
+    string | null
+  >(null);
+  const selectedConnector =
+    connectors.find((connector) => connector.name === selectedConnectorName) ??
+    null;
+  const visibleConnectors = connectors.filter((connector) => {
+    const matchesSearch =
+      connector.name.toLowerCase().includes(connectorSearch.toLowerCase()) ||
+      connector.description
+        .toLowerCase()
+        .includes(connectorSearch.toLowerCase()) ||
+      connector.category.toLowerCase().includes(connectorSearch.toLowerCase());
+    const connected = connectedConnectorNames.includes(connector.name);
+    const matchesFilter =
+      connectorFilter === "all" ||
+      (connectorFilter === "connected" && connected) ||
+      (connectorFilter === "available" && !connected);
+
+    return matchesSearch && matchesFilter;
+  });
+
+  function toggleConnector(connectorName: string) {
+    setConnectedConnectorNames((current) =>
+      current.includes(connectorName)
+        ? current.filter((name) => name !== connectorName)
+        : [...current, connectorName],
+    );
+  }
+
+  if (selectedConnector) {
+    return (
+      <ConnectorProfilePage
+        connected={connectedConnectorNames.includes(selectedConnector.name)}
+        connector={selectedConnector}
+        onBack={() => setSelectedConnectorName(null)}
+        onToggleConnect={() => toggleConnector(selectedConnector.name)}
+      />
+    );
+  }
+
   return (
     <>
       <PageHeader
         description={pageDescriptions.connectors}
         title="Connectors"
       />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {connectors.map((connector) => (
-          <Card key={connector.name}>
-            <CardHeader>
-              <div className="flex size-11 items-center justify-center rounded-xl bg-muted text-sm font-semibold text-foreground">
-                {connector.logo}
-              </div>
-              <CardTitle>{connector.name}</CardTitle>
-              <CardDescription>{connector.description}</CardDescription>
-            </CardHeader>
-            <CardPanel className="pt-0">
-              <Button className="w-full" variant="outline">
-                <Icon icon={PlugIcon} />
-                Connect
-              </Button>
-            </CardPanel>
-          </Card>
-        ))}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <Group className="h-9 w-full sm:h-8 sm:w-auto">
+          <Input
+            aria-label="Search connectors"
+            className="h-full w-full sm:w-72 [&_[data-slot=input]]:h-full [&_[data-slot=input]]:leading-none sm:[&_[data-slot=input]]:h-full"
+            onChange={(event) => setConnectorSearch(event.target.value)}
+            placeholder="Search connectors..."
+            value={connectorSearch}
+          />
+          <GroupSeparator />
+          <ConnectorFilterMenu
+            filter={connectorFilter}
+            onFilterChange={setConnectorFilter}
+          />
+        </Group>
+        <span className="text-xs text-muted-foreground">
+          {visibleConnectors.length} of {connectors.length} apps
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {visibleConnectors.map((connector) => {
+          const connected = connectedConnectorNames.includes(connector.name);
+
+          return (
+            <Card className="min-h-64" key={connector.name}>
+              <CardHeader className="flex-1">
+                <div className="flex size-11 items-center justify-center rounded-xl bg-muted text-sm font-semibold text-foreground">
+                  {connector.logo}
+                </div>
+                <CardTitle>{connector.name}</CardTitle>
+                <CardDescription className="line-clamp-3">
+                  {connector.description}
+                </CardDescription>
+              </CardHeader>
+              <CardPanel className="mt-auto flex-none pt-0">
+                <Button
+                  className="w-full active:scale-[0.96]"
+                  onClick={() => setSelectedConnectorName(connector.name)}
+                  variant={connected ? "secondary" : "outline"}
+                >
+                  <Icon icon={PlugIcon} />
+                  {connected ? "Manage" : "Connect"}
+                </Button>
+              </CardPanel>
+            </Card>
+          );
+        })}
       </div>
     </>
+  );
+}
+
+type ConnectorFilter = "all" | "available" | "connected";
+
+function ConnectorFilterMenu({
+  filter,
+  onFilterChange,
+}: {
+  filter: ConnectorFilter;
+  onFilterChange: (filter: ConnectorFilter) => void;
+}) {
+  const labels = {
+    all: "All apps",
+    available: "Available",
+    connected: "Connected",
+  } satisfies Record<ConnectorFilter, string>;
+
+  return (
+    <Menu>
+      <MenuTrigger
+        render={
+          <Button
+            className="h-full min-w-36 justify-between sm:h-full"
+            variant="outline"
+          >
+            {labels[filter]}
+            <Icon className="opacity-70" icon={ChevronDownIcon} />
+          </Button>
+        }
+      />
+      <MenuPopup align="end" className="min-w-40" sideOffset={8}>
+        {(["all", "available", "connected"] satisfies ConnectorFilter[]).map(
+          (value) => (
+            <MenuItem key={value} onClick={() => onFilterChange(value)}>
+              <Icon
+                className={cn(filter === value ? "opacity-100" : "opacity-0")}
+                icon={CheckIcon}
+              />
+              {labels[value]}
+            </MenuItem>
+          ),
+        )}
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+function ConnectorProfilePage({
+  connected,
+  connector,
+  onBack,
+  onToggleConnect,
+}: {
+  connected: boolean;
+  connector: ConnectorItem;
+  onBack: () => void;
+  onToggleConnect: () => void;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div>
+        <Button onClick={onBack} size="sm" variant="ghost">
+          Back
+        </Button>
+      </div>
+      <Card className="overflow-hidden rounded-2xl">
+        <div
+          className={cn(
+            "border-b border-border/70 bg-linear-to-br p-5",
+            connector.gradient,
+          )}
+        >
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-4">
+              <div className="grid size-20 shrink-0 place-items-center rounded-2xl bg-white/90 text-xl font-semibold text-stone-900 shadow-xs/5 ring-1 ring-black/10 dark:bg-stone-950/80 dark:text-stone-100 dark:ring-white/10">
+                {connector.logo}
+              </div>
+              <div className="min-w-0">
+                <Badge variant={connected ? "success" : "outline"}>
+                  {connected ? "Connected" : connector.category}
+                </Badge>
+                <h1 className="mt-2 truncate text-2xl font-semibold tracking-normal">
+                  {connector.name}
+                </h1>
+                <p className="mt-1 max-w-xl text-pretty text-sm leading-6 text-muted-foreground">
+                  {connector.description}
+                </p>
+              </div>
+            </div>
+            <Button
+              className="active:scale-[0.96]"
+              onClick={onToggleConnect}
+              size="sm"
+              variant={connected ? "secondary" : "default"}
+            >
+              <Icon icon={PlugIcon} />
+              {connected ? "Disconnect" : "Connect"}
+            </Button>
+          </div>
+        </div>
+        <CardPanel className="grid gap-4 p-5">
+          <p className="max-w-3xl text-pretty text-sm leading-6 text-muted-foreground">
+            {connector.paragraph}
+          </p>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {[
+              ["Access", "Read workspace context"],
+              ["Use in chats", "Mention with @"],
+              ["Agents", "Available in workflows"],
+            ].map(([label, value]) => (
+              <div
+                className="rounded-xl border border-border/70 bg-muted/25 p-3"
+                key={label}
+              >
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="mt-1 text-sm font-medium">{value}</p>
+              </div>
+            ))}
+          </div>
+        </CardPanel>
+      </Card>
+    </div>
   );
 }
 
