@@ -184,12 +184,15 @@ const settingsNavigation = {
 } satisfies NavigationItem;
 
 type Agent = {
+  id?: string;
   appLogos: string[];
   gradient: string;
   name: string;
   runtime: "paused" | "running";
   status: string;
   tone: "info" | "outline" | "success" | "warning";
+  workflowCards?: PlaygroundCard[];
+  workflowConnections?: PlaygroundConnection[];
 };
 
 type SkillItem = {
@@ -201,63 +204,6 @@ type SkillItem = {
   name: string;
   source: "custom" | "default";
 };
-
-const agents = [
-  {
-    name: "Research Agent",
-    appLogos: ["GD", "NO", "GH"],
-    gradient:
-      "from-rose-100 via-stone-50 to-sky-100 dark:from-rose-950/40 dark:via-stone-950 dark:to-sky-950/40",
-    runtime: "running",
-    status: "Active",
-    tone: "success",
-  },
-  {
-    name: "Support Agent",
-    appLogos: ["SL", "NO", "CA"],
-    gradient:
-      "from-emerald-100 via-stone-50 to-violet-100 dark:from-emerald-950/40 dark:via-stone-950 dark:to-violet-950/40",
-    runtime: "running",
-    status: "Active",
-    tone: "success",
-  },
-  {
-    name: "Ops Analyst",
-    appLogos: ["CA", "GD", "SL"],
-    gradient:
-      "from-amber-100 via-stone-50 to-cyan-100 dark:from-amber-950/40 dark:via-stone-950 dark:to-cyan-950/40",
-    runtime: "paused",
-    status: "Draft",
-    tone: "warning",
-  },
-  {
-    name: "Knowledge Curator",
-    appLogos: ["NO", "GD", "FI"],
-    gradient:
-      "from-fuchsia-100 via-stone-50 to-lime-100 dark:from-fuchsia-950/40 dark:via-stone-950 dark:to-lime-950/40",
-    runtime: "paused",
-    status: "Paused",
-    tone: "outline",
-  },
-  {
-    name: "Billing Helper",
-    appLogos: ["CA", "SL", "GD"],
-    gradient:
-      "from-orange-100 via-stone-50 to-blue-100 dark:from-orange-950/40 dark:via-stone-950 dark:to-blue-950/40",
-    runtime: "running",
-    status: "Beta",
-    tone: "info",
-  },
-  {
-    name: "Admin Guard",
-    appLogos: ["GH", "SL", "NO"],
-    gradient:
-      "from-teal-100 via-stone-50 to-pink-100 dark:from-teal-950/40 dark:via-stone-950 dark:to-pink-950/40",
-    runtime: "running",
-    status: "Active",
-    tone: "success",
-  },
-] satisfies Agent[];
 
 type PlaygroundCard = {
   apps: string[];
@@ -292,41 +238,6 @@ type PlaygroundContextMenu = {
   x: number;
   y: number;
 } | null;
-
-const playgroundCards = [
-  {
-    apps: ["SL", "GD"],
-    id: "intake",
-    runtime: "running",
-    title: "Intake chat",
-    x: 40,
-    y: 64,
-  },
-  {
-    apps: ["NO", "GH"],
-    id: "research",
-    runtime: "running",
-    title: "Research chat",
-    x: 360,
-    y: 48,
-  },
-  {
-    apps: ["CA", "SL"],
-    id: "approval",
-    runtime: "paused",
-    title: "Approval chat",
-    x: 220,
-    y: 250,
-  },
-  {
-    apps: ["GD", "NO", "FI"],
-    id: "summary",
-    runtime: "running",
-    title: "Summary chat",
-    x: 700,
-    y: 238,
-  },
-] satisfies PlaygroundCard[];
 
 const PLAYGROUND_CARD_HEIGHT = 128;
 const PLAYGROUND_CARD_WIDTH = 240;
@@ -364,70 +275,8 @@ const skillGradientOptions = [
   "from-fuchsia-100 via-stone-50 to-yellow-100 dark:from-fuchsia-950/40 dark:via-stone-950 dark:to-yellow-950/40",
 ] satisfies string[];
 
-const skills = [
-  {
-    id: "skill-browser-research",
-    name: "Browser research",
-    description: "Research current information and summarize sources.",
-    icon: Search01Icon,
-    gradient: skillGradientOptions[0],
-    source: "default",
-    content:
-      "# Browser research\n\nUse this skill when a task needs current information, source comparison, or concise research notes.\n\n## Steps\n\n- Identify the user question and expected output.\n- Search authoritative sources first.\n- Compare at least two relevant references when the answer depends on freshness.\n- Return a short summary with links and caveats.",
-  },
-  {
-    id: "skill-document-drafting",
-    name: "Document drafting",
-    description: "Draft structured notes, memos, and documents.",
-    icon: BookOpenIcon,
-    gradient: skillGradientOptions[1],
-    source: "default",
-    content:
-      "# Document drafting\n\nUse this skill to create structured drafts, outlines, memos, or reusable document sections.\n\n## Style\n\n- Start with a clear title.\n- Keep paragraphs short.\n- Use bullets for scannable decisions.\n- End with next steps when useful.",
-  },
-  {
-    id: "skill-workspace-analysis",
-    name: "Workspace analysis",
-    description: "Turn workspace context into clear operational insight.",
-    icon: BuildingIcon,
-    gradient: skillGradientOptions[2],
-    source: "default",
-    content:
-      "# Workspace analysis\n\nUse this skill to inspect workspace context and turn scattered information into operational clarity.\n\n## Output\n\n- Key signals\n- Risks or gaps\n- Suggested actions\n- Owners or follow-up questions",
-  },
-  {
-    id: "skill-data-controls",
-    name: "Data controls",
-    description: "Guide privacy, retention, and data access decisions.",
-    icon: DatabaseIcon,
-    gradient: skillGradientOptions[3],
-    source: "default",
-    content:
-      "# Data controls\n\nUse this skill for privacy, retention, and data-handling tasks.\n\n## Checklist\n\n- Confirm the data source.\n- Identify sensitive fields.\n- Recommend the least-permissive access path.\n- Note any retention or deletion implications.",
-  },
-  {
-    id: "skill-workflow-builder",
-    name: "Workflow builder",
-    description: "Design repeatable multi-step automations.",
-    icon: WorkflowCircleIcon,
-    gradient: skillGradientOptions[4],
-    source: "default",
-    content:
-      "# Workflow builder\n\nUse this skill to design repeatable multi-step automations across chats, agents, and connected apps.\n\n## Pattern\n\n1. Trigger\n2. Required context\n3. App or skill actions\n4. Review or approval step\n5. Final output",
-  },
-  {
-    id: "skill-team-support",
-    name: "Team support",
-    description: "Handle support triage, handoffs, and updates.",
-    icon: LifebuoyIcon,
-    gradient: skillGradientOptions[5],
-    source: "default",
-    content:
-      "# Team support\n\nUse this skill for support triage, customer notes, internal handoffs, and status updates.\n\n## Tone\n\nHelpful, direct, calm, and specific.",
-  },
-] satisfies SkillItem[];
-
 type ConnectorItem = {
+  key?: string;
   category: string;
   description: string;
   gradient: string;
@@ -435,69 +284,6 @@ type ConnectorItem = {
   name: string;
   paragraph: string;
 };
-
-const connectors = [
-  {
-    name: "Google Drive",
-    description: "Search, read, and organize shared workspace files.",
-    category: "Storage",
-    gradient:
-      "from-sky-100 via-stone-50 to-emerald-100 dark:from-sky-950/40 dark:via-stone-950 dark:to-emerald-950/40",
-    logo: "GD",
-    paragraph:
-      "Connect Google Drive to let Atmet find workspace documents, summarize file context, and reference approved knowledge inside chats, skills, and workflow agents.",
-  },
-  {
-    name: "Slack",
-    description: "Summarize channels and turn decisions into tasks.",
-    category: "Communication",
-    gradient:
-      "from-violet-100 via-stone-50 to-amber-100 dark:from-violet-950/40 dark:via-stone-950 dark:to-amber-950/40",
-    logo: "SL",
-    paragraph:
-      "Connect Slack to keep important channel discussions available for summaries, follow-ups, team handoffs, and agent-driven status updates.",
-  },
-  {
-    name: "GitHub",
-    description: "Track pull requests, issues, reviews, and releases.",
-    category: "Development",
-    gradient:
-      "from-stone-200 via-stone-50 to-cyan-100 dark:from-stone-800 dark:via-stone-950 dark:to-cyan-950/40",
-    logo: "GH",
-    paragraph:
-      "Connect GitHub to give Atmet visibility into repositories, pull requests, issues, release notes, and engineering workflow context.",
-  },
-  {
-    name: "Notion",
-    description: "Keep docs, projects, and knowledge bases connected.",
-    category: "Knowledge",
-    gradient:
-      "from-fuchsia-100 via-stone-50 to-lime-100 dark:from-fuchsia-950/40 dark:via-stone-950 dark:to-lime-950/40",
-    logo: "NO",
-    paragraph:
-      "Connect Notion so Atmet can reference product docs, project pages, decisions, and internal knowledge while keeping workspace context organized.",
-  },
-  {
-    name: "Figma",
-    description: "Reference design files and product specs in context.",
-    category: "Design",
-    gradient:
-      "from-orange-100 via-stone-50 to-blue-100 dark:from-orange-950/40 dark:via-stone-950 dark:to-blue-950/40",
-    logo: "FI",
-    paragraph:
-      "Connect Figma to make design files, product specs, comments, and handoff context available while planning or running Atmet workflows.",
-  },
-  {
-    name: "Calendar",
-    description: "Use meetings, availability, and follow-ups in Atmet.",
-    category: "Scheduling",
-    gradient:
-      "from-rose-100 via-stone-50 to-teal-100 dark:from-rose-950/40 dark:via-stone-950 dark:to-teal-950/40",
-    logo: "CA",
-    paragraph:
-      "Connect Calendar to help Atmet reason about meeting context, availability, reminders, and follow-up actions across your workspace.",
-  },
-] satisfies ConnectorItem[];
 
 const settingsTabs = [
   { value: "profile", label: "Profile", icon: UserRound },
@@ -518,52 +304,125 @@ const adminTabs = [
   { value: "usage", label: "Control usage", icon: DatabaseIcon },
 ];
 
-const adminWorkspaces = [
-  ["Atmet Workspace", "Anas Hamad", "Pro", "8", "Active", "74%", "Jul 2026"],
-  ["Product Ops", "Maya Zaid", "Business", "18", "Active", "63%", "Jun 2026"],
-  ["Research Lab", "Omar Nasser", "Starter", "4", "Review", "28%", "Jul 2026"],
-  ["Client Portal", "Lina Saleh", "Pro", "11", "Active", "52%", "May 2026"],
-] satisfies readonly [string, string, string, string, string, string, string][];
-
-const adminWaitlistRequests = [
-  ["Sarah Ali", "sarah@northstar.io", "Northstar", "Team workspace automation", "Today", "Pending"],
-  ["Khaled Mansour", "khaled@relay.dev", "Relay", "Customer support agents", "Yesterday", "Pending"],
-  ["Nora Haddad", "nora@studio.pm", "Studio PM", "Project knowledge base", "Jul 18", "Review"],
-  ["Fares Naim", "fares@orbital.ai", "Orbital", "Internal ops workflows", "Jul 17", "Pending"],
-] satisfies readonly [string, string, string, string, string, string][];
-
-const adminActivityLogs = [
-  ["10:42", "Anas Hamad", "Approved waitlist user", "Sarah Ali"],
-  ["10:18", "System", "Synced connector scopes", "Google Drive"],
-  ["09:56", "Maya Zaid", "Updated role permissions", "Admin"],
-  ["09:21", "Atmet Agent", "Completed workflow run", "Support Agent"],
-] satisfies readonly [string, string, string, string][];
-
-const adminSessionLogs = [
-  ["Anas Hamad", "macOS", "Amman, JO", "Active now"],
-  ["Maya Zaid", "Chrome", "Dubai, AE", "12 min ago"],
-  ["Lina Saleh", "Safari", "Riyadh, SA", "Yesterday"],
-  ["Rami Haddad", "Chrome", "Amman, JO", "Suspended"],
-] satisfies readonly [string, string, string, string][];
-
-const adminUsers = [
-  ["Anas Hamad", "anas@atmet.local", "Atmet Workspace", "Owner", "Active", "Today, 10:42"],
-  ["Maya Zaid", "maya@productops.local", "Product Ops", "Admin", "Active", "Today, 09:18"],
-  ["Omar Nasser", "omar@research.local", "Research Lab", "Member", "Invited", "Never"],
-  ["Lina Saleh", "lina@clientportal.local", "Client Portal", "Admin", "Active", "Yesterday"],
-  ["Rami Haddad", "rami@atmet.local", "Atmet Workspace", "Member", "Suspended", "Jul 15"],
-] satisfies readonly [string, string, string, string, string, string][];
-
-const adminRoles = [
-  ["Owner", "Full workspace, billing, and admin console access.", "All"],
-  ["Admin", "Manage members, workflows, connectors, and requests.", "Most"],
-  ["Member", "Use chats, skills, and approved connectors.", "Limited"],
-  ["Viewer", "Read shared workspace context and outputs.", "Read only"],
-] satisfies readonly [string, string, string][];
+type AdminWorkspaceRow = [
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+];
+type AdminRequestRow = [string, string, string, string, string, string];
+type AdminLogRow = [string, string, string, string];
+type AdminUserRow = [string, string, string, string, string, string];
+type AdminRoleRow = [string, string, string];
 
 type AdminProfileView =
   | { name: string; type: "user" }
   | { name: string; type: "workspace" };
+
+type AdminData = {
+  activityLogs: AdminLogRow[];
+  requests: AdminRequestRow[];
+  roles: AdminRoleRow[];
+  sessionLogs: AdminLogRow[];
+  usageControls: DatabaseRecord[];
+  users: AdminUserRow[];
+  workspaces: AdminWorkspaceRow[];
+};
+
+const emptyAdminData: AdminData = {
+  activityLogs: [],
+  requests: [],
+  roles: [],
+  sessionLogs: [],
+  usageControls: [],
+  users: [],
+  workspaces: [],
+};
+
+function mapAdminWorkspace(row: unknown): AdminWorkspaceRow | null {
+  const record = asRecord(row);
+  const name = asString(record.name);
+  if (!name) {
+    return null;
+  }
+
+  const subscriptions = asRecordArray(record.workspace_subscriptions);
+  const memberCounts = asRecordArray(record.workspace_members);
+  return [
+    name,
+    asString(record.owner_name, "Unassigned"),
+    asString(subscriptions[0]?.plan_key, "No plan"),
+    String(asNumber(memberCounts[0]?.count)),
+    asString(record.status, "Active"),
+    "0%",
+    formatDateLabel(record.created_at) || "",
+    asString(record.id),
+  ];
+}
+
+function mapAdminUser(row: unknown): AdminUserRow | null {
+  const record = asRecord(row);
+  const email = asString(record.email);
+  const name = asString(record.full_name, email);
+  if (!name && !email) {
+    return null;
+  }
+
+  return [
+    name,
+    email,
+    asString(record.default_workspace_name, ""),
+    asString(record.role, "Member"),
+    asString(record.status, "Active"),
+    formatDateTimeLabel(record.last_seen_at) || "Never",
+  ];
+}
+
+function mapAdminRequest(row: unknown): AdminRequestRow | null {
+  const record = asRecord(row);
+  const email = asString(record.email);
+  if (!email) {
+    return null;
+  }
+
+  return [
+    asString(record.full_name, email),
+    email,
+    asString(record.company_name),
+    asString(record.use_case, asString(record.work_type)),
+    formatDateLabel(record.created_at) || "",
+    asString(record.status, "Pending"),
+  ];
+}
+
+function mapAdminLog(row: unknown): AdminLogRow | null {
+  const record = asRecord(row);
+  const profile = getRecordByKey(record, "profiles");
+  return [
+    formatDateTimeLabel(record.created_at) || "",
+    asString(profile.full_name, asString(profile.email, asString(record.actor_type, "System"))),
+    asString(record.action, asString(record.event_type, "Activity")),
+    asString(record.target_type, asString(record.ip_address)),
+  ];
+}
+
+function mapAdminRole(row: unknown): AdminRoleRow | null {
+  const record = asRecord(row);
+  const name = asString(record.name);
+  if (!name) {
+    return null;
+  }
+
+  return [
+    name,
+    asString(record.description),
+    String(asRecordArray(record.workspace_custom_role_permissions).length),
+  ];
+}
 
 const pageDescriptions = {
   admin:
@@ -601,11 +460,7 @@ type ChatDraftRequest = {
   requestId: number;
 };
 
-const initialSidebarChats = [
-  { id: "chat-product-research", pinned: true, title: "Product research" },
-  { id: "chat-support-flow", pinned: false, title: "Support workflow" },
-  { id: "chat-weekly-summary", pinned: false, title: "Weekly summary" },
-] satisfies SidebarChat[];
+const initialSidebarChats: SidebarChat[] = [];
 
 const modelOptions = [
   { name: "Atmet", icon: AiChatIcon },
@@ -646,20 +501,344 @@ type ChatMessage = {
   variant?: AiOutputVariant;
 };
 
-const composerOptions: ComposerOption[] = [
-  ...connectors.map((connector) => ({
-    id: `app-${connector.name}`,
-    kind: "apps" as const,
-    logo: connector.logo,
-    name: connector.name,
-  })),
-  ...skills.map((skill) => ({
-    id: `skill-${skill.name}`,
-    icon: skill.icon,
-    kind: "skills" as const,
-    name: skill.name,
-  })),
-];
+type DatabaseRecord = Record<string, unknown>;
+
+type DashboardData = {
+  agents?: unknown[];
+  apps?: unknown[];
+  brain?: unknown;
+  changelogs?: unknown[];
+  chats?: unknown[];
+  connections?: unknown[];
+  members?: unknown[];
+  preferences?: unknown;
+  profile?: unknown;
+  skills?: unknown[];
+  subscription?: unknown;
+  usage?: unknown;
+  workspace?: unknown;
+  workspaceSettings?: unknown;
+  workspaces?: unknown[];
+};
+
+type WorkspaceSummary = {
+  avatarUrl?: string;
+  id: string;
+  name: string;
+  slug: string;
+};
+
+type WorkspaceUser = {
+  email: string;
+  initials: string;
+  lastActive: string;
+  name: string;
+  role: string;
+  status: "Active" | "Invited" | "Limited";
+};
+
+type UsageData = {
+  automations: number;
+  chats: number;
+  files: number;
+  storage: number;
+  tokenLimit: number;
+  tokens: number;
+  userLimits: DatabaseRecord[];
+};
+
+function asRecord(value: unknown): DatabaseRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as DatabaseRecord)
+    : {};
+}
+
+function asRecordArray(value: unknown): DatabaseRecord[] {
+  return Array.isArray(value) ? value.map(asRecord) : [];
+}
+
+function asString(value: unknown, fallback = ""): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function asNumber(value: unknown, fallback = 0) {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function asBoolean(value: unknown, fallback = false) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function getRecordByKey(record: DatabaseRecord, key: string) {
+  return asRecord(record[key]);
+}
+
+function getInitialsFromText(value: string) {
+  const words = value.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return "AT";
+  }
+
+  return words
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase())
+    .join("");
+}
+
+function formatDateLabel(value: unknown) {
+  const date = new Date(asString(value));
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleDateString("en", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatDateTimeLabel(value: unknown) {
+  const date = new Date(asString(value));
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleString("en", {
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+  });
+}
+
+function mapRuntime(value: unknown): "paused" | "running" {
+  return asString(value).toLowerCase() === "running" ? "running" : "paused";
+}
+
+function mapTone(status: string): Agent["tone"] {
+  const normalized = status.toLowerCase();
+  if (normalized.includes("active") || normalized.includes("approved")) {
+    return "success";
+  }
+  if (normalized.includes("draft") || normalized.includes("review")) {
+    return "warning";
+  }
+  if (normalized.includes("beta")) {
+    return "info";
+  }
+  return "outline";
+}
+
+function mapSkillIcon(value: unknown) {
+  const normalized = asString(value).toLowerCase();
+  if (normalized.includes("search")) return Search01Icon;
+  if (normalized.includes("book") || normalized.includes("document")) return BookOpenIcon;
+  if (normalized.includes("business") || normalized.includes("workspace")) return BuildingIcon;
+  if (normalized.includes("data")) return DatabaseIcon;
+  if (normalized.includes("workflow")) return WorkflowCircleIcon;
+  if (normalized.includes("support")) return LifebuoyIcon;
+  if (normalized.includes("code")) return CodeIcon;
+  if (normalized.includes("brain")) return Brain03Icon;
+  if (normalized.includes("file")) return File01Icon;
+  return SparklesIcon;
+}
+
+function mapWorkspace(value: unknown): WorkspaceSummary | null {
+  const record = asRecord(value);
+  const id = asString(record.id);
+  if (!id) {
+    return null;
+  }
+
+  const name = asString(record.name, "Workspace");
+  return {
+    avatarUrl: asString(record.avatar_url),
+    id,
+    name,
+    slug: asString(record.slug, name.toLowerCase().replace(/\s+/g, "-")),
+  };
+}
+
+function mapChat(row: unknown): SidebarChat | null {
+  const record = asRecord(row);
+  const id = asString(record.id);
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    pinned: asBoolean(record.pinned),
+    title: asString(record.title, "Untitled chat"),
+  };
+}
+
+function mapChatMessage(row: unknown): ChatMessage | null {
+  const record = asRecord(row);
+  const id = asString(record.id);
+  const role = asString(record.role);
+
+  if (!id || (role !== "assistant" && role !== "user")) {
+    return null;
+  }
+
+  return {
+    content: asString(record.content),
+    id,
+    role,
+    state: "complete",
+  };
+}
+
+function mapSkill(row: unknown, index: number): SkillItem | null {
+  const record = asRecord(row);
+  const id = asString(record.id);
+  if (!id) {
+    return null;
+  }
+
+  return {
+    content: asString(record.content, ""),
+    description: asString(record.description, ""),
+    gradient: asString(
+      record.gradient,
+      skillGradientOptions[index % skillGradientOptions.length],
+    ),
+    icon: mapSkillIcon(record.icon),
+    id,
+    name: asString(record.name, "Untitled skill"),
+    source: asString(record.source) === "custom" ? "custom" : "default",
+  };
+}
+
+function mapConnector(app: unknown, connectionsByKey: Set<string>, index: number): ConnectorItem | null {
+  const record = asRecord(app);
+  const key = asString(record.key);
+  const name = asString(record.name);
+  if (!key || !name) {
+    return null;
+  }
+
+  return {
+    category: connectionsByKey.has(key) ? "Connected" : asString(record.category, "App"),
+    description: asString(record.description, ""),
+    gradient: asString(
+      record.gradient,
+      skillGradientOptions[index % skillGradientOptions.length],
+    ),
+    key,
+    logo: asString(record.logo, getInitialsFromText(name)),
+    name,
+    paragraph: asString(
+      record.paragraph,
+      `${name} can be connected to Atmet when integration credentials are configured.`,
+    ),
+  };
+}
+
+function mapAgent(row: unknown, index: number): Agent | null {
+  const record = asRecord(row);
+  const id = asString(record.id);
+  const name = asString(record.name);
+  if (!id || !name) {
+    return null;
+  }
+
+  const status = asString(record.status, "Draft");
+  const nodeRows = asRecordArray(record.workflow_nodes);
+  const edgeRows = asRecordArray(record.workflow_edges);
+  const appLogos = nodeRows
+    .flatMap((node) => asRecordArray(node.connected_apps))
+    .map((app) => asString(app.logo))
+    .filter(Boolean);
+  const workflowCards = nodeRows
+    .map((node, nodeIndex) => {
+      const nodeId = asString(node.id);
+      if (!nodeId) {
+        return null;
+      }
+
+      const appKeys = Array.isArray(node.app_keys)
+        ? node.app_keys.map((item) => String(item))
+        : [];
+
+      return {
+        apps:
+          appKeys.length > 0
+            ? appKeys.map((key) => getInitialsFromText(key))
+            : ["AT"],
+        id: nodeId,
+        runtime: mapRuntime(node.runtime_state),
+        title: asString(node.title, "Empty chat"),
+        x: asNumber(node.position_x, 72 + nodeIndex * 44),
+        y: asNumber(node.position_y, 120 + nodeIndex * 36),
+      } satisfies PlaygroundCard;
+    })
+    .filter((item): item is PlaygroundCard => Boolean(item));
+  const workflowConnections = edgeRows
+    .map((edge) => {
+      const from = asString(edge.source_node_id);
+      const to = asString(edge.target_node_id);
+
+      if (!from || !to) {
+        return null;
+      }
+
+      return { from, to } satisfies PlaygroundConnection;
+    })
+    .filter((item): item is PlaygroundConnection => Boolean(item));
+
+  return {
+    appLogos: appLogos.length > 0 ? appLogos.slice(0, 3) : [getInitialsFromText(name)],
+    gradient: asString(
+      record.gradient,
+      skillGradientOptions[index % skillGradientOptions.length],
+    ),
+    id,
+    name,
+    runtime: mapRuntime(record.runtime_state ?? record.runtime),
+    status,
+    tone: mapTone(status),
+    workflowCards,
+    workflowConnections,
+  };
+}
+
+function mapMember(row: unknown): WorkspaceUser | null {
+  const record = asRecord(row);
+  const profile = getRecordByKey(record, "profiles");
+  const email = asString(profile.email);
+  const name = asString(profile.full_name, email || "Workspace member");
+  if (!email && !name) {
+    return null;
+  }
+
+  const status = asString(record.status).toLowerCase();
+  return {
+    email,
+    initials: getInitialsFromText(name || email),
+    lastActive: formatDateTimeLabel(profile.last_seen_at) || "Never",
+    name,
+    role: asString(record.role, "Member"),
+    status: status === "invited" ? "Invited" : status === "limited" ? "Limited" : "Active",
+  };
+}
+
+function mapUsage(value: unknown, chatsCount: number, agentsCount: number): UsageData {
+  const record = asRecord(value);
+  const totals = asRecord(record.totals);
+  return {
+    automations: asNumber(totals.automation_runs, agentsCount),
+    chats: asNumber(totals.chats, chatsCount),
+    files: asNumber(totals.files),
+    storage: asNumber(totals.storage_gb),
+    tokenLimit: asNumber(totals.token_limit, 50000),
+    tokens: asNumber(totals.tokens),
+    userLimits: asRecordArray(record.userLimits),
+  };
+}
 
 function getInitialTheme() {
   if (typeof window === "undefined") {
@@ -677,12 +856,23 @@ function getInitialTheme() {
 export default function Home() {
   const [activePage, setActivePage] = useState<PageKey>("chat");
   const [agentsPlaygroundOpen, setAgentsPlaygroundOpen] = useState(false);
+  const [workspace, setWorkspace] = useState<WorkspaceSummary | null>(null);
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [profile, setProfile] = useState<DatabaseRecord | null>(null);
+  const [members, setMembers] = useState<WorkspaceUser[]>([]);
+  const [skillList, setSkillList] = useState<SkillItem[]>([]);
+  const [connectorList, setConnectorList] = useState<ConnectorItem[]>([]);
+  const [connectedConnectorKeys, setConnectedConnectorKeys] = useState<string[]>(
+    [],
+  );
+  const [usageData, setUsageData] = useState<UsageData | null>(null);
+  const [brainData, setBrainData] = useState<DatabaseRecord | null>(null);
+  const [subscriptionData, setSubscriptionData] =
+    useState<DatabaseRecord | null>(null);
   const [selectedAgentName, setSelectedAgentName] = useState<string | null>(
     null,
   );
-  const [agentList, setAgentList] = useState<Agent[]>(() =>
-    agents.map((agent) => ({ ...agent, appLogos: [...agent.appLogos] })),
-  );
+  const [agentList, setAgentList] = useState<Agent[]>([]);
   const [activeSidebarChatId, setActiveSidebarChatId] = useState<string | null>(
     initialSidebarChats[0]?.id ?? null,
   );
@@ -702,10 +892,91 @@ export default function Home() {
     activePage === "chat"
       ? sidebarChats.find((chat) => chat.id === activeSidebarChatId) ?? null
       : null;
+  const activeWorkspaceId = workspace?.id ?? null;
+  const dynamicComposerOptions: ComposerOption[] = [
+    ...connectorList.map((connector) => ({
+      id: `app-${connector.key ?? connector.name}`,
+      kind: "apps" as const,
+      logo: connector.logo,
+      name: connector.name,
+    })),
+    ...skillList.map((skill) => ({
+      id: `skill-${skill.id}`,
+      icon: skill.icon,
+      kind: "skills" as const,
+      name: skill.name,
+    })),
+  ];
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", isDark);
   }, [isDark]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDashboard() {
+      try {
+        const response = await fetch("/api/bootstrap", { cache: "no-store" });
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as DashboardData;
+        if (cancelled) {
+          return;
+        }
+
+        const mappedWorkspaces = asRecordArray(payload.workspaces)
+          .map(mapWorkspace)
+          .filter((item): item is WorkspaceSummary => Boolean(item));
+        const mappedWorkspace = mapWorkspace(payload.workspace);
+        const connectionRows = asRecordArray(payload.connections);
+        const connectedKeys = connectionRows
+          .filter((connection) => asString(connection.status) === "connected")
+          .map((connection) => asString(connection.app_key))
+          .filter(Boolean);
+        const connectionKeySet = new Set(connectedKeys);
+        const mappedChats = asRecordArray(payload.chats)
+          .map(mapChat)
+          .filter((item): item is SidebarChat => Boolean(item));
+        const mappedAgents = asRecordArray(payload.agents)
+          .map(mapAgent)
+          .filter((item): item is Agent => Boolean(item));
+        const mappedSkills = asRecordArray(payload.skills)
+          .map(mapSkill)
+          .filter((item): item is SkillItem => Boolean(item));
+        const mappedConnectors = asRecordArray(payload.apps)
+          .map((app, index) => mapConnector(app, connectionKeySet, index))
+          .filter((item): item is ConnectorItem => Boolean(item));
+        const mappedMembers = asRecordArray(payload.members)
+          .map(mapMember)
+          .filter((item): item is WorkspaceUser => Boolean(item));
+
+        setWorkspace(mappedWorkspace);
+        setWorkspaces(mappedWorkspaces);
+        setProfile(asRecord(payload.profile));
+        setMembers(mappedMembers);
+        setSidebarChats(mappedChats);
+        setActiveSidebarChatId((current) => current ?? mappedChats[0]?.id ?? null);
+        setAgentList(mappedAgents);
+        setSkillList(mappedSkills);
+        setConnectorList(mappedConnectors);
+        setConnectedConnectorKeys(connectedKeys);
+        setUsageData(mapUsage(payload.usage, mappedChats.length, mappedAgents.length));
+        setBrainData(asRecord(payload.brain));
+        setSubscriptionData(asRecord(payload.subscription));
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    void loadDashboard();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function selectPage(page: PageKey) {
     setActivePage(page);
@@ -715,11 +986,31 @@ export default function Home() {
     }
   }
 
-  function createAgent(name: string) {
+  async function createAgent(name: string) {
+    if (activeWorkspaceId) {
+      try {
+        const response = await fetch(`/api/workspaces/${activeWorkspaceId}/agents`, {
+          body: JSON.stringify({ name }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+        if (response.ok) {
+          const payload = asRecord(await response.json());
+          const created = mapAgent(payload.agent, agentList.length);
+          if (created) {
+            setAgentList((current) => [...current, created]);
+            return;
+          }
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
     setAgentList((current) => [
       ...current,
       {
-        appLogos: ["AT", "GD", "SL"],
+        appLogos: [getInitialsFromText(name)],
         gradient:
           "from-stone-100 via-stone-50 to-emerald-100 dark:from-stone-900 dark:via-stone-950 dark:to-emerald-950/40",
         name,
@@ -730,14 +1021,33 @@ export default function Home() {
     ]);
   }
 
-  function createSidebarChat() {
+  async function createSidebarChat() {
     const nextIndex = sidebarChatCounterRef.current;
     sidebarChatCounterRef.current += 1;
-    const id = `chat-${nextIndex}`;
     const nextTitle = `New chat ${nextIndex}`;
+    let createdChat: SidebarChat | null = null;
+
+    if (activeWorkspaceId) {
+      try {
+        const response = await fetch(`/api/workspaces/${activeWorkspaceId}/chats`, {
+          body: JSON.stringify({ title: nextTitle }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+        if (response.ok) {
+          const payload = asRecord(await response.json());
+          createdChat = mapChat(payload.chat);
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    const id = createdChat?.id ?? `chat-${nextIndex}`;
+    const chat = createdChat ?? { id, pinned: false, title: nextTitle };
 
     setSidebarChats((current) => [
-      { id, pinned: false, title: nextTitle },
+      chat,
       ...current,
     ]);
     setActiveSidebarChatId(id);
@@ -761,14 +1071,26 @@ export default function Home() {
         chat.id === chatId ? { ...chat, title: nextTitle } : chat,
       ),
     );
+    void fetch(`/api/chats/${chatId}`, {
+      body: JSON.stringify({ title: nextTitle }),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH",
+    }).catch(() => undefined);
   }
 
   function toggleSidebarChatPin(chatId: string) {
+    const nextPinned =
+      !sidebarChats.find((chat) => chat.id === chatId)?.pinned;
     setSidebarChats((current) =>
       current.map((chat) =>
         chat.id === chatId ? { ...chat, pinned: !chat.pinned } : chat,
       ),
     );
+    void fetch(`/api/chats/${chatId}`, {
+      body: JSON.stringify({ pinned: nextPinned }),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH",
+    }).catch(() => undefined);
   }
 
   function deleteSidebarChat(chatId: string) {
@@ -776,6 +1098,9 @@ export default function Home() {
     if (activeSidebarChatId === chatId) {
       setActiveSidebarChatId(null);
     }
+    void fetch(`/api/chats/${chatId}`, { method: "DELETE" }).catch(
+      () => undefined,
+    );
   }
 
   function copyChatValue(value: string) {
@@ -787,7 +1112,7 @@ export default function Home() {
     selectPage("chat");
   }
 
-  function useSkillInChat(skill: SkillItem, chatId: string) {
+  function insertSkillIntoChat(skill: SkillItem, chatId: string) {
     const prompt = `Use /"${skill.name}" to `;
 
     setActiveSidebarChatId(chatId);
@@ -800,9 +1125,9 @@ export default function Home() {
     selectPage("chat");
   }
 
-  function useSkillInNewChat(skill: SkillItem) {
-    const chatId = createSidebarChat();
-    useSkillInChat(skill, chatId);
+  async function insertSkillIntoNewChat(skill: SkillItem) {
+    const chatId = await createSidebarChat();
+    insertSkillIntoChat(skill, chatId);
   }
 
   function addChatToAgentWorkflow(agentName: string, chat: SidebarChat) {
@@ -892,11 +1217,43 @@ export default function Home() {
             <WorkspaceIdentity
               activeChat={activeSidebarChat}
               agents={agentList}
+              onCreateWorkspace={async (workspaceName) => {
+                try {
+                  const response = await fetch("/api/workspaces", {
+                    body: JSON.stringify({ name: workspaceName }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "POST",
+                  });
+                  if (!response.ok) return;
+                  const payload = asRecord(await response.json());
+                  const created = mapWorkspace(payload.workspace);
+                  if (!created) return;
+                  setWorkspaces((current) => [created, ...current]);
+                  setWorkspace(created);
+                } catch (error) {
+                  console.error(error);
+                }
+              }}
+              onInvitePeople={async (email) => {
+                if (!activeWorkspaceId) return;
+                try {
+                  await fetch(`/api/workspaces/${activeWorkspaceId}/members`, {
+                    body: JSON.stringify({ email, role: "member" }),
+                    headers: { "Content-Type": "application/json" },
+                    method: "POST",
+                  });
+                } catch (error) {
+                  console.error(error);
+                }
+              }}
+              onSelectWorkspace={(nextWorkspace) => setWorkspace(nextWorkspace)}
               onAddChatToAgentWorkflow={addChatToAgentWorkflow}
               onCopyChatValue={copyChatValue}
               onDeleteChat={deleteSidebarChat}
               onRenameChat={renameSidebarChat}
               onTogglePin={toggleSidebarChatPin}
+              selectedWorkspace={workspace}
+              workspaces={workspaces}
             />
           </div>
           <CommandPalette
@@ -905,7 +1262,7 @@ export default function Home() {
             triggerLabel="Search or command"
           />
           <div className="flex min-w-0 justify-end">
-            <UserIdentity />
+            <UserIdentity onSelectPage={selectPage} profile={profile} />
           </div>
         </div>
 
@@ -999,6 +1356,7 @@ export default function Home() {
               {activePage === "chat" && (
                 <ChatPage
                   activeChatId={activeSidebarChatId}
+                  composerOptions={dynamicComposerOptions}
                   draftRequest={chatDraftRequest}
                 />
               )}
@@ -1013,24 +1371,52 @@ export default function Home() {
                 />
               )}
               {activePage === "brain" && (
-                <BrainPage />
+                <BrainPage
+                  brain={brainData}
+                  key={activeWorkspaceId ?? "brain"}
+                  workspaceId={activeWorkspaceId}
+                />
               )}
               {activePage === "skills" && (
                 <SkillsPage
                   chats={sidebarChats}
-                  onUseSkillInChat={useSkillInChat}
-                  onUseSkillInNewChat={useSkillInNewChat}
+                  onSkillsChange={setSkillList}
+                  onUseSkillInChat={insertSkillIntoChat}
+                  onUseSkillInNewChat={insertSkillIntoNewChat}
+                  skills={skillList}
+                  workspaceId={activeWorkspaceId}
                 />
               )}
-              {activePage === "connectors" && <ConnectorsPage />}
-              {activePage === "usage" && <UsagePage />}
+              {activePage === "connectors" && (
+                <ConnectorsPage
+                  connectedConnectorKeys={connectedConnectorKeys}
+                  connectors={connectorList}
+                  onConnectedConnectorKeysChange={setConnectedConnectorKeys}
+                  workspaceId={activeWorkspaceId}
+                />
+              )}
+              {activePage === "usage" && (
+                <UsagePage usage={usageData} />
+              )}
               {activePage === "changelogs" && (
                 <EmptyPage
                   description={pageDescriptions.changelogs}
                   title="Changelogs"
                 />
               )}
-              {activePage === "settings" && <SettingsPage />}
+              {activePage === "settings" && (
+                <SettingsPage
+                  agentsCount={agentList.length}
+                  connectorsCount={connectedConnectorKeys.length}
+                  members={members}
+                  profile={profile}
+                  connectedConnectors={connectorList.filter((connector) =>
+                    connectedConnectorKeys.includes(connector.key ?? connector.name),
+                  )}
+                  subscription={subscriptionData}
+                  workspace={workspace}
+                />
+              )}
               {activePage === "admin" && <AdminPage />}
             </div>
           </div>
@@ -1046,26 +1432,31 @@ function WorkspaceIdentity({
   agents,
   onAddChatToAgentWorkflow,
   onCopyChatValue,
+  onCreateWorkspace,
   onDeleteChat,
+  onInvitePeople,
   onRenameChat,
+  onSelectWorkspace,
   onTogglePin,
+  selectedWorkspace,
+  workspaces,
 }: {
   activeChat: SidebarChat | null;
   agents: Agent[];
   onAddChatToAgentWorkflow: (agentName: string, chat: SidebarChat) => void;
   onCopyChatValue: (value: string) => void;
+  onCreateWorkspace: (workspaceName: string) => void | Promise<void>;
   onDeleteChat: (chatId: string) => void;
+  onInvitePeople: (email: string) => void | Promise<void>;
   onRenameChat: (chatId: string) => void;
+  onSelectWorkspace: (workspace: WorkspaceSummary) => void;
   onTogglePin: (chatId: string) => void;
+  selectedWorkspace: WorkspaceSummary | null;
+  workspaces: WorkspaceSummary[];
 }) {
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
   const [invitePeopleOpen, setInvitePeopleOpen] = useState(false);
-  const [selectedWorkspace, setSelectedWorkspace] = useState("Atmet Workspace");
-  const workspaces = [
-    "Atmet Workspace",
-    "Product Ops",
-    "Research Lab",
-  ] satisfies string[];
+  const workspaceName = selectedWorkspace?.name ?? "Workspace";
 
   return (
     <div className="flex min-w-0 items-center gap-2">
@@ -1074,10 +1465,10 @@ function WorkspaceIdentity({
       <Menu>
         <MenuTrigger className="flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1 outline-none transition-[background-color] hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
           <div className="grid size-6 shrink-0 place-items-center rounded-md bg-background text-[0.625rem] font-semibold leading-none text-foreground">
-            {getOptionInitials(selectedWorkspace)}
+            {getOptionInitials(workspaceName)}
           </div>
           <p className="truncate text-xs font-medium leading-none text-sidebar-foreground">
-            {selectedWorkspace}
+            {workspaceName}
           </p>
           <Icon
             className="size-3.5 text-muted-foreground"
@@ -1090,16 +1481,16 @@ function WorkspaceIdentity({
           </div>
           {workspaces.map((workspace) => (
             <MenuItem
-              key={workspace}
-              onClick={() => setSelectedWorkspace(workspace)}
+              key={workspace.id}
+              onClick={() => onSelectWorkspace(workspace)}
             >
               <span className="grid size-6 place-items-center rounded-md bg-muted text-[0.625rem] font-semibold">
-                {getOptionInitials(workspace)}
+                {getOptionInitials(workspace.name)}
               </span>
-              <span className="min-w-0 flex-1 truncate">{workspace}</span>
+              <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
               <Icon
                 className={cn(
-                  selectedWorkspace === workspace
+                  selectedWorkspace?.id === workspace.id
                     ? "opacity-100"
                     : "opacity-0",
                 )}
@@ -1119,14 +1510,15 @@ function WorkspaceIdentity({
         </MenuPopup>
       </Menu>
       <WorkspaceCreateDialog
-        onCreate={(workspaceName) => setSelectedWorkspace(workspaceName)}
+        onCreate={onCreateWorkspace}
         onOpenChange={setCreateWorkspaceOpen}
         open={createWorkspaceOpen}
       />
       <WorkspaceInviteDialog
+        onInvite={onInvitePeople}
         onOpenChange={setInvitePeopleOpen}
         open={invitePeopleOpen}
-        workspaceName={selectedWorkspace}
+        workspaceName={workspaceName}
       />
       {activeChat && (
         <>
@@ -1204,7 +1596,7 @@ function WorkspaceCreateDialog({
               autoFocus
               id="workspace-create-name"
               onChange={(event) => setName(event.target.value)}
-              placeholder="e.g. Product Ops"
+              placeholder="e.g. Acme Operations"
               value={name}
             />
           </DialogPanel>
@@ -1223,10 +1615,12 @@ function WorkspaceCreateDialog({
 }
 
 function WorkspaceInviteDialog({
+  onInvite,
   onOpenChange,
   open,
   workspaceName,
 }: {
+  onInvite: (email: string) => void | Promise<void>;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   workspaceName: string;
@@ -1244,6 +1638,7 @@ function WorkspaceInviteDialog({
       return;
     }
 
+    void onInvite(trimmedEmail);
     resetForm();
     onOpenChange(false);
   }
@@ -1521,16 +1916,30 @@ function ChatActionItem({
   );
 }
 
-function UserIdentity() {
+function UserIdentity({
+  onSelectPage,
+  profile,
+}: {
+  onSelectPage: (page: PageKey) => void;
+  profile: DatabaseRecord | null;
+}) {
+  const displayName = asString(profile?.full_name, asString(profile?.email, "User"));
+  const initials = getInitialsFromText(displayName);
+
+  async function signOut() {
+    await fetch("/api/auth/sign-out", { method: "POST" }).catch(() => undefined);
+    window.location.href = "/login";
+  }
+
   return (
     <Menu>
       <MenuTrigger className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-lg px-1.5 py-1 outline-none transition-[background-color] hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
         <div className="grid size-6 shrink-0 place-items-center rounded-md bg-background text-[0.625rem] font-semibold leading-none text-foreground">
-          AH
+          {initials}
         </div>
         <div className="hidden min-w-0 sm:block">
           <p className="truncate text-xs font-medium leading-none text-sidebar-foreground">
-            Anas Hamad
+            {displayName}
           </p>
         </div>
         <Icon
@@ -1539,16 +1948,16 @@ function UserIdentity() {
         />
       </MenuTrigger>
       <MenuPopup align="end" className="min-w-40" sideOffset={8}>
-        <MenuItem>
+        <MenuItem onClick={() => onSelectPage("settings")}>
           <Icon icon={ProfileIcon} />
           My profile
         </MenuItem>
-        <MenuItem>
+        <MenuItem onClick={() => onSelectPage("settings")}>
           <Icon icon={Settings01Icon} />
           Settings
         </MenuItem>
         <MenuSeparator />
-        <MenuItem variant="destructive">
+        <MenuItem onClick={signOut} variant="destructive">
           <Icon icon={Logout03Icon} />
           Logout
         </MenuItem>
@@ -1704,13 +2113,17 @@ function PageHeader({
 
 function ChatPage({
   activeChatId,
+  composerOptions,
   draftRequest,
 }: {
   activeChatId: string | null;
+  composerOptions: ComposerOption[];
   draftRequest: ChatDraftRequest | null;
 }) {
   return (
     <ChatExperience
+      activeChatId={activeChatId}
+      composerOptions={composerOptions}
       draftRequest={
         draftRequest?.chatId === activeChatId ? draftRequest : null
       }
@@ -1720,10 +2133,14 @@ function ChatPage({
 }
 
 function ChatExperience({
+  activeChatId = null,
   compact = false,
+  composerOptions = [],
   draftRequest = null,
 }: {
+  activeChatId?: string | null;
   compact?: boolean;
+  composerOptions?: ComposerOption[];
   draftRequest?: ChatDraftRequest | null;
 }) {
   const [selectedModel, setSelectedModel] = useState(modelOptions[0]);
@@ -1737,9 +2154,6 @@ function ChatExperience({
   const editorRef = useRef<HTMLDivElement>(null);
   const mentionPopupRef = useRef<HTMLDivElement>(null);
   const mentionRangeRef = useRef<Range | null>(null);
-  const fakeResponseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
   const hasMessages = messages.length > 0;
   const mentionOptions = mention
     ? composerOptions.filter(
@@ -1771,12 +2185,42 @@ function ChatExperience({
   }, [mention]);
 
   useEffect(() => {
-    return () => {
-      if (fakeResponseTimeoutRef.current) {
-        clearTimeout(fakeResponseTimeoutRef.current);
+    let cancelled = false;
+
+    async function loadMessages() {
+      if (!activeChatId) {
+        setMessages([]);
+        return;
       }
+
+      try {
+        const response = await fetch(`/api/chats/${activeChatId}/messages`, {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = asRecord(await response.json());
+        const loadedMessages = asRecordArray(payload.messages)
+          .map(mapChatMessage)
+          .filter((message): message is ChatMessage => Boolean(message));
+
+        if (!cancelled) {
+          setMessages(loadedMessages);
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    void loadMessages();
+
+    return () => {
+      cancelled = true;
     };
-  }, []);
+  }, [activeChatId]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -1884,7 +2328,7 @@ function ChatExperience({
     updateComposerState();
   }
 
-  function sendComposerMessage() {
+  async function sendComposerMessage() {
     const editor = editorRef.current;
     if (!editor) {
       return;
@@ -1896,45 +2340,46 @@ function ChatExperience({
       return;
     }
 
-    const assistantId = `assistant-${Date.now()}`;
-    setMessages((current) => [
-      ...current,
-      {
-        content,
-        id: `user-${Date.now()}`,
-        role: "user",
-      },
-      {
-        content: "",
-        id: assistantId,
-        role: "assistant",
-        state: "thinking",
-      },
-    ]);
+    const optimisticMessage = {
+      content,
+      id: `pending-${Date.now()}`,
+      role: "user" as const,
+    };
+    setMessages((current) => [...current, optimisticMessage]);
 
     editor.innerHTML = "";
     setComposerIsEmpty(true);
     setMention(null);
     mentionRangeRef.current = null;
 
-    if (fakeResponseTimeoutRef.current) {
-      clearTimeout(fakeResponseTimeoutRef.current);
+    if (!activeChatId) {
+      return;
     }
 
-    fakeResponseTimeoutRef.current = setTimeout(() => {
-      setMessages((current) =>
-        current.map((message) =>
-          message.id === assistantId
-            ? {
-                ...message,
-                content:
-                  "Here is a temporary Atmet response. I checked the selected apps and skills, prepared a concise answer, and this area is now ready for a real model stream later.",
-                state: "complete",
-              }
-            : message,
-        ),
-      );
-    }, 900);
+    try {
+      const response = await fetch(`/api/chats/${activeChatId}/messages`, {
+        body: JSON.stringify({ content, role: "user" }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = asRecord(await response.json());
+      const savedMessage = mapChatMessage(payload.message);
+
+      if (savedMessage) {
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === optimisticMessage.id ? savedMessage : message,
+          ),
+        );
+      }
+    } catch (error) {
+      console.error(error);
+    }
   }
 
   function handleComposerKeyDown(
@@ -2441,8 +2886,8 @@ function AiTextResponse({ text }: { text: string }) {
     <div className="max-w-prose text-sm leading-6 text-foreground">
       <p className="whitespace-pre-wrap">{text}</p>
       <p className="mt-3 text-muted-foreground">
-        This is fake for now, but it is shaped like the AI output components:
-        status first, action context next, and the final response as clean text.
+        AI output will appear here once a model response is available for this
+        chat.
       </p>
     </div>
   );
@@ -3157,7 +3602,7 @@ function AgentPlayground({
   const runTimeoutsRef = useRef<number[]>([]);
   const [agentRunning, setAgentRunning] = useState(agent.runtime === "running");
   const [cards, setCards] = useState<PlaygroundCard[]>(() => [
-    ...playgroundCards.map((card) => ({ ...card })),
+    ...(agent.workflowCards ?? []).map((card) => ({ ...card, apps: [...card.apps] })),
     ...workflowChatNodes.map((node, index) => ({
       apps: ["AT"],
       id: getWorkflowChatCardId(node.chatId),
@@ -3167,10 +3612,9 @@ function AgentPlayground({
       y: 400 + index * 36,
     })),
   ]);
-  const [connections, setConnections] = useState<PlaygroundConnection[]>([
-    { from: "intake", to: "research" },
-    { from: "research", to: "summary" },
-  ]);
+  const [connections, setConnections] = useState<PlaygroundConnection[]>(
+    () => agent.workflowConnections ?? [],
+  );
   const [drag, setDrag] = useState<PlaygroundDrag>(null);
   const [nodeDrag, setNodeDrag] = useState<NodeDrag>(null);
   const [contextMenu, setContextMenu] = useState<PlaygroundContextMenu>(null);
@@ -3706,7 +4150,7 @@ function AgentSettingsSheet({
   agentRunning: boolean;
   onAgentRunningChange: (running: boolean) => void;
 }) {
-  const agentUrl = `https://atmet.local/agents/${agent.name
+  const agentUrl = `https://app.atmetai.com/agents/${agent.name
     .toLowerCase()
     .replace(/\s+/g, "-")}`;
 
@@ -4029,16 +4473,19 @@ type SkillFilter = "all" | "custom" | "default";
 
 function SkillsPage({
   chats,
+  onSkillsChange,
   onUseSkillInChat,
   onUseSkillInNewChat,
+  skills: loadedSkills,
+  workspaceId,
 }: {
   chats: SidebarChat[];
+  onSkillsChange: React.Dispatch<React.SetStateAction<SkillItem[]>>;
   onUseSkillInChat: (skill: SkillItem, chatId: string) => void;
-  onUseSkillInNewChat: (skill: SkillItem) => void;
+  onUseSkillInNewChat: (skill: SkillItem) => void | Promise<void>;
+  skills: SkillItem[];
+  workspaceId: string | null;
 }) {
-  const [skillList, setSkillList] = useState<SkillItem[]>(() =>
-    skills.map((skill) => ({ ...skill })),
-  );
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(
     null,
   );
@@ -4046,9 +4493,9 @@ function SkillsPage({
   const [skillSearch, setSkillSearch] = useState("");
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const selectedSkill = selectedSkillId
-    ? skillList.find((skill) => skill.id === selectedSkillId) ?? null
+    ? loadedSkills.find((skill) => skill.id === selectedSkillId) ?? null
     : null;
-  const visibleSkills = skillList.filter((skill) => {
+  const visibleSkills = loadedSkills.filter((skill) => {
     const matchesFilter =
       skillFilter === "all" || skill.source === skillFilter;
     const search = skillSearch.trim().toLowerCase();
@@ -4061,17 +4508,25 @@ function SkillsPage({
   });
 
   function updateSkill(skillId: string, updates: Partial<SkillItem>) {
-    setSkillList((current) =>
+    onSkillsChange((current) =>
       current.map((skill) =>
         skill.id === skillId ? { ...skill, ...updates } : skill,
       ),
     );
+
+    if (workspaceId) {
+      void fetch(`/api/skills/${skillId}`, {
+        body: JSON.stringify(updates),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      }).catch(() => undefined);
+    }
   }
 
-  function createSkill(mode: "ai" | "instructions") {
-    const nextIndex = skillList.length + 1;
+  async function createSkill(mode: "ai" | "instructions") {
+    const nextIndex = loadedSkills.length + 1;
     const visual = getRandomSkillVisual();
-    const skill =
+    let skill: SkillItem =
       mode === "ai"
         ? {
             content:
@@ -4094,11 +4549,27 @@ function SkillsPage({
             source: "custom" as const,
           };
 
-    setSkillList((current) => [...current, skill]);
+    if (workspaceId) {
+      try {
+        const response = await fetch(`/api/workspaces/${workspaceId}/skills`, {
+          body: JSON.stringify(skill),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+        if (response.ok) {
+          const payload = asRecord(await response.json());
+          skill = mapSkill(payload.skill, loadedSkills.length) ?? skill;
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    onSkillsChange((current) => [...current, skill]);
     setSelectedSkillId(skill.id);
   }
 
-  function createUploadedSkill({
+  async function createUploadedSkill({
     content,
     description,
     name,
@@ -4108,7 +4579,7 @@ function SkillsPage({
     name: string;
   }) {
     const visual = getRandomSkillVisual();
-    const skill = {
+    let skill: SkillItem = {
       content,
       description,
       gradient: visual.gradient,
@@ -4118,7 +4589,23 @@ function SkillsPage({
       source: "custom" as const,
     };
 
-    setSkillList((current) => [...current, skill]);
+    if (workspaceId) {
+      try {
+        const response = await fetch(`/api/workspaces/${workspaceId}/skills`, {
+          body: JSON.stringify(skill),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+        if (response.ok) {
+          const payload = asRecord(await response.json());
+          skill = mapSkill(payload.skill, loadedSkills.length) ?? skill;
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    onSkillsChange((current) => [...current, skill]);
     setSelectedSkillId(skill.id);
   }
 
@@ -4158,7 +4645,7 @@ function SkillsPage({
           <SkillFilterMenu filter={skillFilter} onFilterChange={setSkillFilter} />
         </Group>
         <span className="text-xs text-muted-foreground">
-          {visibleSkills.length} of {skillList.length} skills
+          {visibleSkills.length} of {loadedSkills.length} skills
         </span>
       </div>
       <UploadMarkdownSkillDialog
@@ -4934,19 +5421,39 @@ function renderInlineMarkdown(text: string) {
     });
 }
 
-function BrainPage() {
-  const [brainValues, setBrainValues] = useState({
-    businessDetails:
-      "Atmet is a workspace intelligence platform for AI chats, reusable skills, workflow agents, and connected business apps.",
-    outputStyle:
-      "Use concise answers, clear sections, direct recommendations, and practical next steps. Keep the tone calm, premium, and operational.",
-    personalization:
-      "Remember that Anas prefers minimal interfaces, direct answers, and product decisions that keep the platform polished and fast.",
-  });
+function BrainPage({
+  brain,
+  workspaceId,
+}: {
+  brain: DatabaseRecord | null;
+  workspaceId: string | null;
+}) {
+  const initialBrainValues = {
+    businessDetails: asString(brain?.business_details),
+    outputStyle: asString(brain?.output_style),
+    personalization: asString(brain?.personalization),
+  };
+  const [brainValues, setBrainValues] = useState(initialBrainValues);
   const [savedBrainValues, setSavedBrainValues] = useState(brainValues);
   const [knowledgeDialogOpen, setKnowledgeDialogOpen] = useState(false);
   const brainChanged =
     JSON.stringify(brainValues) !== JSON.stringify(savedBrainValues);
+
+  async function saveBrain() {
+    if (workspaceId) {
+      await fetch(`/api/workspaces/${workspaceId}/brain`, {
+        body: JSON.stringify({
+          businessDetails: brainValues.businessDetails,
+          outputStyle: brainValues.outputStyle,
+          personalization: brainValues.personalization,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      }).catch(() => undefined);
+    }
+
+    setSavedBrainValues(brainValues);
+  }
 
   return (
     <>
@@ -4971,7 +5478,7 @@ function BrainPage() {
             <Button
               className="active:scale-[0.96]"
               disabled={!brainChanged}
-              onClick={() => setSavedBrainValues(brainValues)}
+              onClick={saveBrain}
               size="sm"
             >
               <Icon icon={SaveIcon} />
@@ -5156,78 +5663,63 @@ function BuildKnowledgeBaseDialog({
 type UsagePeriod = "month" | "quarter" | "week";
 type UsageScope = "my" | "workspace";
 
-const usageMetrics = [
-  { label: "Tokens", value: "8,188 / 50,000" },
-  { label: "Files", value: "0 / 10,000" },
-  { label: "Storage", value: "0GB / 2441.4GB" },
-  { label: "Automations", value: "1" },
-  { label: "Chats", value: "4" },
-] satisfies { label: string; value: string }[];
-
-const usageResources = [
-  {
-    limit: "50,000",
-    percent: 16.4,
-    resource: "Tokens",
-    usage: "8,188",
-  },
-  {
-    limit: "10,000",
-    percent: 0,
-    resource: "Files",
-    usage: "0",
-  },
-  {
-    limit: "2,441.4 GB",
-    percent: 0,
-    resource: "Storage",
-    usage: "0 GB",
-  },
-] satisfies {
-  limit: string;
-  percent: number;
-  resource: string;
-  usage: string;
-}[];
-
-const usageChartGroups = [
-  {
-    bars: [
-      { className: "border-sky-400/60 bg-sky-400/20", striped: true, value: 62 },
-      { className: "bg-sky-500", value: 78 },
-    ],
-    label: "Your usage",
-  },
-  {
-    bars: [{ className: "bg-sky-400/70", value: 1 }],
-    label: "Files",
-  },
-  {
-    bars: [
-      { className: "bg-sky-300/70", value: 1 },
-      { className: "bg-sky-500", value: 1 },
-    ],
-    label: "Automations",
-  },
-  {
-    bars: [
-      { className: "bg-sky-300/70", value: 1 },
-      { className: "bg-sky-500", value: 1 },
-    ],
-    label: "Chats",
-  },
-] satisfies {
-  bars: { className: string; striped?: boolean; value: number }[];
-  label: string;
-}[];
-
-function UsagePage() {
+function UsagePage({ usage }: { usage: UsageData | null }) {
   const [period, setPeriod] = useState<UsagePeriod>("month");
   const [scope, setScope] = useState<UsageScope>("my");
-  const [tokenCap, setTokenCap] = useState("50000");
-  const [savedTokenCap, setSavedTokenCap] = useState("50000");
+  const tokenLimit = usage?.tokenLimit ?? 0;
+  const [tokenCap, setTokenCap] = useState(String(tokenLimit || ""));
+  const [savedTokenCap, setSavedTokenCap] = useState(String(tokenLimit || ""));
   const [refreshedAt, setRefreshedAt] = useState("10:42");
   const limitsChanged = tokenCap !== savedTokenCap;
+  const tokenPercent = tokenLimit > 0 ? Math.min(100, ((usage?.tokens ?? 0) / tokenLimit) * 100) : 0;
+  const metricRows = [
+    { label: "Tokens", value: `${(usage?.tokens ?? 0).toLocaleString()} / ${tokenLimit.toLocaleString()}` },
+    { label: "Files", value: `${(usage?.files ?? 0).toLocaleString()}` },
+    { label: "Storage", value: `${usage?.storage ?? 0}GB` },
+    { label: "Automations", value: `${usage?.automations ?? 0}` },
+    { label: "Chats", value: `${usage?.chats ?? 0}` },
+  ];
+  const resourceRows = [
+    {
+      limit: tokenLimit.toLocaleString(),
+      percent: tokenPercent,
+      resource: "Tokens",
+      usage: (usage?.tokens ?? 0).toLocaleString(),
+    },
+    {
+      limit: "No file upload limit set",
+      percent: 0,
+      resource: "Files",
+      usage: (usage?.files ?? 0).toLocaleString(),
+    },
+    {
+      limit: "No storage limit set",
+      percent: 0,
+      resource: "Storage",
+      usage: `${usage?.storage ?? 0} GB`,
+    },
+  ];
+  const chartGroups = [
+    {
+      bars: [
+        { className: "border-emerald-400/60 bg-emerald-400/20", striped: true, value: Math.max(1, tokenPercent) },
+        { className: "bg-sky-500", value: Math.max(1, tokenPercent) },
+      ],
+      label: "Tokens",
+    },
+    {
+      bars: [{ className: "bg-violet-500", value: Math.max(1, usage?.files ?? 0) }],
+      label: "Files",
+    },
+    {
+      bars: [{ className: "bg-amber-500", value: Math.max(1, usage?.automations ?? 0) }],
+      label: "Automations",
+    },
+    {
+      bars: [{ className: "bg-rose-500", value: Math.max(1, usage?.chats ?? 0) }],
+      label: "Chats",
+    },
+  ];
 
   return (
     <>
@@ -5278,18 +5770,19 @@ function UsagePage() {
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-        {usageMetrics.map((metric) => (
+        {metricRows.map((metric) => (
           <UsageMetricCard key={metric.label} {...metric} />
         ))}
       </div>
 
-      <UsageSnapshotCard refreshedAt={refreshedAt} />
-      <UsageResourcesTable />
+      <UsageSnapshotCard chartGroups={chartGroups} refreshedAt={refreshedAt} />
+      <UsageResourcesTable resources={resourceRows} />
       <PerUserLimitsCard
         limitsChanged={limitsChanged}
         onSave={() => setSavedTokenCap(tokenCap)}
         onTokenCapChange={setTokenCap}
         tokenCap={tokenCap}
+        userLimits={usage?.userLimits ?? []}
       />
     </>
   );
@@ -5365,7 +5858,16 @@ function UsageMetricCard({
   );
 }
 
-function UsageSnapshotCard({ refreshedAt }: { refreshedAt: string }) {
+function UsageSnapshotCard({
+  chartGroups,
+  refreshedAt,
+}: {
+  chartGroups: {
+    bars: { className: string; striped?: boolean; value: number }[];
+    label: string;
+  }[];
+  refreshedAt: string;
+}) {
   return (
     <CardFrame className="mt-4 overflow-hidden">
       <CardFrameHeader>
@@ -5382,7 +5884,7 @@ function UsageSnapshotCard({ refreshedAt }: { refreshedAt: string }) {
       <Card className="rounded-xl shadow-none before:hidden">
         <CardPanel className="p-4">
           <div className="flex h-80 items-end justify-around gap-6">
-            {usageChartGroups.map((group) => (
+            {chartGroups.map((group) => (
               <div
                 className="flex h-full min-w-24 flex-1 flex-col justify-end gap-3"
                 key={group.label}
@@ -5416,7 +5918,16 @@ function UsageSnapshotCard({ refreshedAt }: { refreshedAt: string }) {
   );
 }
 
-function UsageResourcesTable() {
+function UsageResourcesTable({
+  resources,
+}: {
+  resources: {
+    limit: string;
+    percent: number;
+    resource: string;
+    usage: string;
+  }[];
+}) {
   return (
     <CardFrame className="mt-3 overflow-hidden">
       <CardFrameHeader>
@@ -5435,7 +5946,7 @@ function UsageResourcesTable() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {usageResources.map((resource) => (
+          {resources.map((resource) => (
             <TableRow key={resource.resource}>
               <TableCell className="font-medium">{resource.resource}</TableCell>
               <TableCell>
@@ -5478,11 +5989,13 @@ function PerUserLimitsCard({
   onSave,
   onTokenCapChange,
   tokenCap,
+  userLimits,
 }: {
   limitsChanged: boolean;
   onSave: () => void;
   onTokenCapChange: (value: string) => void;
   tokenCap: string;
+  userLimits: DatabaseRecord[];
 }) {
   return (
     <CardFrame className="mt-3 overflow-hidden">
@@ -5513,48 +6026,64 @@ function PerUserLimitsCard({
           </TableRow>
         </TableHeader>
         <TableBody>
-          <TableRow>
-            <TableCell>
-              <div className="flex items-center gap-2">
-                <div className="grid size-9 place-items-center rounded-lg border border-border/70 bg-muted/50 text-xs font-semibold">
-                  AH
-                </div>
-                <div>
-                  <p className="font-medium leading-none">Anooos Hamad</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    anas813813@gmail.com
-                  </p>
-                </div>
-              </div>
-            </TableCell>
-            <TableCell>
-              <Badge variant="info">Owner</Badge>
-            </TableCell>
-            <TableCell className="tabular-nums text-muted-foreground">
-              8,188 / 50,000
-            </TableCell>
-            <TableCell className="text-right">
-              <Input
-                aria-label="Monthly token cap"
-                className="ml-auto w-40"
-                min="0"
-                onChange={(event) => onTokenCapChange(event.target.value)}
-                size="sm"
-                type="number"
-                value={tokenCap}
-              />
-            </TableCell>
-          </TableRow>
+          {userLimits.map((limit) => {
+            const profile = getRecordByKey(limit, "profiles");
+            const name = asString(profile.full_name, asString(profile.email, "User"));
+            const monthlyCap = asNumber(limit.monthly_token_cap);
+            const tokensUsed = asNumber(limit.tokens_used);
+
+            return (
+              <TableRow key={asString(limit.user_id, name)}>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <div className="grid size-9 place-items-center rounded-lg border border-border/70 bg-muted/50 text-xs font-semibold">
+                      {getInitialsFromText(name)}
+                    </div>
+                    <div>
+                      <p className="font-medium leading-none">{name}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {asString(profile.email)}
+                      </p>
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="info">{asString(limit.role, "Member")}</Badge>
+                </TableCell>
+                <TableCell className="tabular-nums text-muted-foreground">
+                  {tokensUsed.toLocaleString()} / {monthlyCap.toLocaleString()}
+                </TableCell>
+                <TableCell className="text-right">
+                  <Input
+                    aria-label="Monthly token cap"
+                    className="ml-auto w-40"
+                    min="0"
+                    onChange={(event) => onTokenCapChange(event.target.value)}
+                    size="sm"
+                    type="number"
+                    value={tokenCap}
+                  />
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </CardFrame>
   );
 }
 
-function ConnectorsPage() {
-  const [connectedConnectorNames, setConnectedConnectorNames] = useState<string[]>(
-    [],
-  );
+function ConnectorsPage({
+  connectedConnectorKeys,
+  connectors,
+  onConnectedConnectorKeysChange,
+  workspaceId,
+}: {
+  connectedConnectorKeys: string[];
+  connectors: ConnectorItem[];
+  onConnectedConnectorKeysChange: React.Dispatch<React.SetStateAction<string[]>>;
+  workspaceId: string | null;
+}) {
   const [connectorFilter, setConnectorFilter] =
     useState<ConnectorFilter>("all");
   const [connectorSearch, setConnectorSearch] = useState("");
@@ -5571,7 +6100,7 @@ function ConnectorsPage() {
         .toLowerCase()
         .includes(connectorSearch.toLowerCase()) ||
       connector.category.toLowerCase().includes(connectorSearch.toLowerCase());
-    const connected = connectedConnectorNames.includes(connector.name);
+    const connected = connectedConnectorKeys.includes(connector.key ?? connector.name);
     const matchesFilter =
       connectorFilter === "all" ||
       (connectorFilter === "connected" && connected) ||
@@ -5580,21 +6109,51 @@ function ConnectorsPage() {
     return matchesSearch && matchesFilter;
   });
 
-  function toggleConnector(connectorName: string) {
-    setConnectedConnectorNames((current) =>
-      current.includes(connectorName)
-        ? current.filter((name) => name !== connectorName)
-        : [...current, connectorName],
+  async function toggleConnector(connector: ConnectorItem) {
+    const connectorKey = connector.key ?? connector.name;
+    const currentlyConnected = connectedConnectorKeys.includes(connectorKey);
+    onConnectedConnectorKeysChange((current) =>
+      currentlyConnected
+        ? current.filter((key) => key !== connectorKey)
+        : [...current, connectorKey],
     );
+
+    if (!workspaceId) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/connectors`, {
+        body: JSON.stringify({
+          action: currentlyConnected ? "disconnect" : "connect",
+          appKey: connectorKey,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("Connector update failed");
+      }
+    } catch (error) {
+      console.error(error);
+      onConnectedConnectorKeysChange((current) =>
+        currentlyConnected
+          ? [...current, connectorKey]
+          : current.filter((key) => key !== connectorKey),
+      );
+    }
   }
 
   if (selectedConnector) {
     return (
       <ConnectorProfilePage
-        connected={connectedConnectorNames.includes(selectedConnector.name)}
+        connected={connectedConnectorKeys.includes(
+          selectedConnector.key ?? selectedConnector.name,
+        )}
         connector={selectedConnector}
         onBack={() => setSelectedConnectorName(null)}
-        onToggleConnect={() => toggleConnector(selectedConnector.name)}
+        onToggleConnect={() => toggleConnector(selectedConnector)}
       />
     );
   }
@@ -5626,7 +6185,9 @@ function ConnectorsPage() {
       </div>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {visibleConnectors.map((connector) => {
-          const connected = connectedConnectorNames.includes(connector.name);
+          const connected = connectedConnectorKeys.includes(
+            connector.key ?? connector.name,
+          );
 
           return (
             <Card className="min-h-64" key={connector.name}>
@@ -5780,7 +6341,23 @@ function ConnectorProfilePage({
   );
 }
 
-function SettingsPage() {
+function SettingsPage({
+  agentsCount,
+  connectorsCount,
+  connectedConnectors,
+  members,
+  profile,
+  subscription,
+  workspace,
+}: {
+  agentsCount: number;
+  connectorsCount: number;
+  connectedConnectors: ConnectorItem[];
+  members: WorkspaceUser[];
+  profile: DatabaseRecord | null;
+  subscription: DatabaseRecord | null;
+  workspace: WorkspaceSummary | null;
+}) {
   return (
     <>
       <PageHeader description={pageDescriptions.settings} title="Settings" />
@@ -5822,27 +6399,44 @@ function SettingsPage() {
           ))}
         </TabsList>
         <TabsContent value="profile">
-          <SettingsProfileTab />
+          <SettingsProfileTab profile={profile} workspace={workspace} />
         </TabsContent>
         <TabsContent value="workspace">
-          <SettingsWorkspaceTab />
+          <SettingsWorkspaceTab
+            agentsCount={agentsCount}
+            connectorsCount={connectorsCount}
+            members={members}
+            workspace={workspace}
+          />
         </TabsContent>
         <TabsContent value="general">
           <SettingsGeneralTab />
         </TabsContent>
         <TabsContent value="data">
-          <SettingsDataControlsTab />
+          <SettingsDataControlsTab connectors={connectedConnectors} />
         </TabsContent>
         <TabsContent value="billing">
-          <SettingsBillingTab />
+          <SettingsBillingTab subscription={subscription} />
         </TabsContent>
       </Tabs>
     </>
   );
 }
 
-function SettingsProfileTab() {
+function SettingsProfileTab({
+  profile,
+  workspace,
+}: {
+  profile: DatabaseRecord | null;
+  workspace: WorkspaceSummary | null;
+}) {
   const [profileDirty, setProfileDirty] = useState(false);
+  const displayName = asString(profile?.full_name, "User");
+  const email = asString(profile?.email);
+  const initials = getInitialsFromText(displayName || email);
+  const role = asString(profile?.role, "");
+  const timezone = asString(profile?.timezone, "Asia/Amman");
+  const bio = asString(profile?.bio);
 
   return (
     <div className="grid gap-4 pb-6">
@@ -5854,7 +6448,7 @@ function SettingsProfileTab() {
                 <Label>Avatar</Label>
                 <div className="mt-1.5 flex flex-wrap items-center gap-3">
                   <div className="grid size-20 place-items-center rounded-2xl border border-border bg-background text-2xl font-semibold shadow-xs/5">
-                    AH
+                    {initials}
                   </div>
                   <div className="grid gap-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -5874,23 +6468,23 @@ function SettingsProfileTab() {
                 </div>
               </div>
               <SettingsProfileField
-                defaultValue="Anas Hamad"
+                defaultValue={displayName}
                 label="Display name"
                 onChange={() => setProfileDirty(true)}
               />
               <SettingsProfileField
-                defaultValue="anas@atmet.local"
+                defaultValue={email}
                 label="Email"
                 onChange={() => setProfileDirty(true)}
                 readOnly
               />
               <SettingsProfileField
-                defaultValue="Product builder"
+                defaultValue={role}
                 label="Role"
                 onChange={() => setProfileDirty(true)}
               />
               <SettingsProfileField
-                defaultValue="Asia/Amman"
+                defaultValue={timezone}
                 label="Timezone"
                 onChange={() => setProfileDirty(true)}
               />
@@ -5898,7 +6492,7 @@ function SettingsProfileTab() {
                 <Label htmlFor="profile-bio">Bio</Label>
                 <Textarea
                   className="mt-1.5"
-                  defaultValue="Building Atmet workflows for workspace intelligence."
+                  defaultValue={bio}
                   id="profile-bio"
                   onChange={() => setProfileDirty(true)}
                   size="sm"
@@ -5918,13 +6512,16 @@ function SettingsProfileTab() {
             <div className="grid content-start gap-3 p-4">
               <SettingsProfileInsight
                 label="Last active"
-                value="Today, 10:42"
+                value={formatDateTimeLabel(profile?.last_seen_at) || "Not recorded"}
               />
               <SettingsProfileInsight
                 label="Default workspace"
-                value="Atmet Workspace"
+                value={workspace?.name ?? "No workspace"}
               />
-              <SettingsProfileInsight label="Member since" value="Jul 2026" />
+              <SettingsProfileInsight
+                label="Member since"
+                value={formatDateLabel(profile?.created_at) || "Not recorded"}
+              />
               <SettingsProfileInsight label="Session status" value="Protected" />
             </div>
           </div>
@@ -5937,12 +6534,12 @@ function SettingsProfileTab() {
         title="Reset password"
       >
         <SettingsRow
-          description="We will send reset instructions to anas@atmet.local."
+          description={`We will send reset instructions to ${email || "the account email"}.`}
           title="Password reset"
         >
           <SettingsActionDialogButton
             confirmLabel="Send link"
-            description="A password reset link will be sent to anas@atmet.local."
+            description={`A password reset link will be sent to ${email || "the account email"}.`}
             title="Send password reset"
             triggerLabel="Send reset link"
           />
@@ -5994,8 +6591,20 @@ function SettingsProfileInsight({
   );
 }
 
-function SettingsWorkspaceTab() {
+function SettingsWorkspaceTab({
+  agentsCount,
+  connectorsCount,
+  members,
+  workspace,
+}: {
+  agentsCount: number;
+  connectorsCount: number;
+  members: WorkspaceUser[];
+  workspace: WorkspaceSummary | null;
+}) {
   const [workspaceDirty, setWorkspaceDirty] = useState(false);
+  const workspaceName = workspace?.name ?? "Workspace";
+  const workspaceSlug = workspace?.slug ?? "";
 
   return (
     <div className="grid gap-4 pb-6">
@@ -6022,17 +6631,17 @@ function SettingsWorkspaceTab() {
                 <div className="min-w-0 pb-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="truncate text-xl font-semibold leading-7">
-                      Atmet Workspace
+                      {workspaceName}
                     </h2>
                     <Badge variant="success">Active</Badge>
                   </div>
                   <p className="mt-0.5 truncate text-sm text-muted-foreground">
-                    Workspace intelligence dashboard preview.
+                    Workspace intelligence dashboard.
                   </p>
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    <Badge variant="outline">8 members</Badge>
-                    <Badge variant="outline">6 workflow agents</Badge>
-                    <Badge variant="outline">4 connectors</Badge>
+                    <Badge variant="outline">{members.length} members</Badge>
+                    <Badge variant="outline">{agentsCount} workflow agents</Badge>
+                    <Badge variant="outline">{connectorsCount} connectors</Badge>
                   </div>
                 </div>
               </div>
@@ -6058,17 +6667,17 @@ function SettingsWorkspaceTab() {
           <div className="grid divide-y divide-border/70 lg:grid-cols-[minmax(0,1fr)_18rem] lg:divide-x lg:divide-y-0">
             <div className="grid gap-3 p-4 sm:grid-cols-2">
               <SettingsWorkspaceField
-                defaultValue="Atmet Workspace"
+                defaultValue={workspaceName}
                 label="Workspace name"
                 onChange={() => setWorkspaceDirty(true)}
               />
               <SettingsWorkspaceField
-                defaultValue="atmet"
+                defaultValue={workspaceSlug}
                 label="Slug"
                 onChange={() => setWorkspaceDirty(true)}
               />
               <SettingsWorkspaceField
-                defaultValue="Workspace intelligence"
+                defaultValue=""
                 label="Category"
                 onChange={() => setWorkspaceDirty(true)}
               />
@@ -6085,7 +6694,7 @@ function SettingsWorkspaceTab() {
                     id="workspace-url"
                     readOnly
                     size="sm"
-                    value="https://atmetai.com/workspace/atmet"
+                    value={`https://app.atmetai.com/workspace/${workspaceSlug}`}
                   />
                   <GroupSeparator />
                   <Button className="h-full sm:h-full" size="sm" variant="outline">
@@ -6096,71 +6705,21 @@ function SettingsWorkspaceTab() {
             </div>
 
             <div className="grid content-start gap-3 p-4">
-              <SettingsProfileInsight label="Members" value="8 active" />
+              <SettingsProfileInsight label="Members" value={`${members.length} active`} />
               <SettingsProfileInsight label="Default role" value="Member" />
-              <SettingsProfileInsight label="Approval queue" value="3 requests" />
-              <SettingsProfileInsight label="Created" value="Jul 2026" />
+              <SettingsProfileInsight label="Approval queue" value="0 requests" />
+              <SettingsProfileInsight label="Created" value="Not recorded" />
             </div>
           </div>
         </FramePanel>
       </Frame>
 
-      <SettingsWorkspaceUsersTable />
+      <SettingsWorkspaceUsersTable users={members} />
     </div>
   );
 }
 
-const workspaceUsers = [
-  {
-    email: "anas@atmet.local",
-    initials: "AH",
-    lastActive: "Today, 10:42",
-    name: "Anas Hamad",
-    role: "Owner",
-    status: "Active",
-  },
-  {
-    email: "maya@atmet.local",
-    initials: "MA",
-    lastActive: "Today, 09:18",
-    name: "Maya Alami",
-    role: "Admin",
-    status: "Active",
-  },
-  {
-    email: "omar@atmet.local",
-    initials: "OK",
-    lastActive: "Yesterday",
-    name: "Omar Khaled",
-    role: "Member",
-    status: "Active",
-  },
-  {
-    email: "sara@atmet.local",
-    initials: "SN",
-    lastActive: "Jul 18",
-    name: "Sara Nassar",
-    role: "Member",
-    status: "Invited",
-  },
-  {
-    email: "team-ops@atmet.local",
-    initials: "TO",
-    lastActive: "Jul 15",
-    name: "Team Ops",
-    role: "Viewer",
-    status: "Limited",
-  },
-] satisfies {
-  email: string;
-  initials: string;
-  lastActive: string;
-  name: string;
-  role: string;
-  status: "Active" | "Invited" | "Limited";
-}[];
-
-function SettingsWorkspaceUsersTable() {
+function SettingsWorkspaceUsersTable({ users }: { users: WorkspaceUser[] }) {
   return (
     <Frame className="bg-muted/60">
       <FramePanel className="overflow-hidden p-0">
@@ -6178,7 +6737,7 @@ function SettingsWorkspaceUsersTable() {
           </div>
           <SettingsActionDialogButton
             confirmLabel="Send invite"
-            description="Invite a teammate to Atmet Workspace and choose their starting role."
+            description="Invite a teammate to this workspace and choose their starting role."
             icon={PlusSignIcon}
             title="Invite user"
             triggerLabel="Invite user"
@@ -6208,7 +6767,7 @@ function SettingsWorkspaceUsersTable() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {workspaceUsers.map((user) => (
+            {users.map((user) => (
               <TableRow key={user.email}>
                 <TableCell>
                   <div className="flex min-w-0 items-center gap-2">
@@ -6351,7 +6910,7 @@ function SettingsGeneralTab() {
           <Button size="sm" variant="outline">Asia/Amman</Button>
         </SettingsRow>
         <SettingsRow description="Applied to billing, usage, and changelog dates." title="Date format">
-          <Button size="sm" variant="outline">20 Jul 2026</Button>
+          <Button size="sm" variant="outline">System default</Button>
         </SettingsRow>
       </SettingsSection>
     </SettingsTabGrid>
@@ -6591,7 +7150,11 @@ function ThemePreview({ kind }: { kind: "dark" | "light" | "system" }) {
   );
 }
 
-function SettingsDataControlsTab() {
+function SettingsDataControlsTab({
+  connectors,
+}: {
+  connectors: ConnectorItem[];
+}) {
   return (
     <SettingsTabGrid>
       <SettingsSection
@@ -6651,7 +7214,7 @@ function SettingsDataControlsTab() {
         >
           <SettingsDeleteConfirmButton
             confirmLabel="Delete workspace"
-            description="This will delete Atmet Workspace, including workspace settings, users, agents, skills, and connected app configuration. This action cannot be undone."
+            description="This will delete the current workspace, including workspace settings, users, agents, skills, and connected app configuration. This action cannot be undone."
             title="Delete workspace?"
             triggerLabel="Delete workspace"
           />
@@ -6770,18 +7333,28 @@ function SettingsActionDialogButton({
   );
 }
 
-function SettingsBillingTab() {
+function SettingsBillingTab({
+  subscription,
+}: {
+  subscription: DatabaseRecord | null;
+}) {
+  const plan = getRecordByKey(subscription ?? {}, "billing_plans");
+  const planName = asString(plan.name, asString(subscription?.plan_key, "No plan"));
+  const price = asNumber(plan.price_monthly_cents);
+  const billingEmail = asString(subscription?.billing_email);
+  const renewsAt = formatDateLabel(subscription?.current_period_end) || "Not scheduled";
+
   return (
     <SettingsTabGrid>
       <SettingsSection
-        action={<Badge variant="success">Pro</Badge>}
+        action={<Badge variant="success">{planName}</Badge>}
         description="The plan currently assigned to this user."
         icon={CreditCardIcon}
         title="Current plan"
       >
         <SettingsRow
           description="Includes workflow agents, skills, connectors, and advanced workspace controls."
-          title="Atmet Pro"
+          title={planName}
         >
           <div className="flex items-center gap-2">
             <SettingsActionDialogButton
@@ -6792,16 +7365,16 @@ function SettingsBillingTab() {
             >
               <div className="grid gap-2">
                 <Label>Billing email</Label>
-                <Input defaultValue="anas@atmet.local" size="sm" />
+                <Input defaultValue={billingEmail} size="sm" />
               </div>
             </SettingsActionDialogButton>
           </div>
         </SettingsRow>
         <SettingsStatGrid
           stats={[
-            ["Price", "$49/mo"],
-            ["Renews", "Aug 20"],
-            ["Billing email", "anas@atmet.local"],
+            ["Price", price > 0 ? `$${(price / 100).toLocaleString()}/mo` : "Not set"],
+            ["Renews", renewsAt],
+            ["Billing email", billingEmail || "Not set"],
           ]}
         />
       </SettingsSection>
@@ -6909,6 +7482,91 @@ function SettingsStatGrid({ stats }: { stats: readonly [string, string][] }) {
 
 function AdminPage() {
   const [profileView, setProfileView] = useState<AdminProfileView | null>(null);
+  const [adminData, setAdminData] = useState<AdminData>(emptyAdminData);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAdminData() {
+      try {
+        const [
+          overviewResponse,
+          directoryResponse,
+          requestsResponse,
+          usageControlsResponse,
+        ] =
+          await Promise.all([
+            fetch("/api/admin/overview", { cache: "no-store" }),
+            fetch("/api/admin/workspaces-users", { cache: "no-store" }),
+            fetch("/api/admin/requests", { cache: "no-store" }),
+            fetch("/api/admin/usage-controls", { cache: "no-store" }),
+          ]);
+
+        const overview = overviewResponse.ok
+          ? asRecord(await overviewResponse.json())
+          : {};
+        const directory = directoryResponse.ok
+          ? asRecord(await directoryResponse.json())
+          : {};
+        const requests = requestsResponse.ok
+          ? asRecord(await requestsResponse.json())
+          : {};
+        const usageControls = usageControlsResponse.ok
+          ? asRecord(await usageControlsResponse.json())
+          : {};
+        const workspaces = asRecordArray(directory.workspaces)
+          .map(mapAdminWorkspace)
+          .filter((item): item is AdminWorkspaceRow => Boolean(item));
+        const users = asRecordArray(directory.users)
+          .map(mapAdminUser)
+          .filter((item): item is AdminUserRow => Boolean(item));
+        let roles: AdminRoleRow[] = [];
+
+        if (workspaces[0]) {
+          const workspaceRecord = asRecordArray(directory.workspaces)[0];
+          const workspaceId = asString(workspaceRecord?.id);
+          if (workspaceId) {
+            const rolesResponse = await fetch(
+              `/api/admin/roles?workspaceId=${workspaceId}`,
+              { cache: "no-store" },
+            );
+            if (rolesResponse.ok) {
+              const rolesPayload = asRecord(await rolesResponse.json());
+              roles = asRecordArray(rolesPayload.roles)
+                .map(mapAdminRole)
+                .filter((item): item is AdminRoleRow => Boolean(item));
+            }
+          }
+        }
+
+        if (!cancelled) {
+          setAdminData({
+            activityLogs: asRecordArray(overview.auditLogs)
+              .map(mapAdminLog)
+              .filter((item): item is AdminLogRow => Boolean(item)),
+            requests: asRecordArray(requests.requests)
+              .map(mapAdminRequest)
+              .filter((item): item is AdminRequestRow => Boolean(item)),
+            roles,
+            sessionLogs: asRecordArray(overview.sessionLogs)
+              .map(mapAdminLog)
+              .filter((item): item is AdminLogRow => Boolean(item)),
+            usageControls: asRecordArray(usageControls.controls),
+            users,
+            workspaces,
+          });
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    void loadAdminData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <>
@@ -6929,29 +7587,58 @@ function AdminPage() {
           ))}
         </TabsList>
         <TabsContent value="overview">
-          <AdminOverviewTab />
+          <AdminOverviewTab adminData={adminData} />
         </TabsContent>
         <TabsContent value="workspaces">
           <AdminWorkspacesUsersTab
+            adminData={adminData}
             onOpenProfile={setProfileView}
             profileView={profileView}
           />
         </TabsContent>
         <TabsContent value="requests">
-          <AdminRequestsTab />
+          <AdminRequestsTab rows={adminData.requests} />
         </TabsContent>
         <TabsContent value="roles">
-          <AdminRolesTab />
+          <AdminRolesTab rows={adminData.roles} />
         </TabsContent>
         <TabsContent value="usage">
-          <AdminUsageControlsTab />
+          <AdminUsageControlsTab
+            controls={adminData.usageControls}
+            workspaces={adminData.workspaces}
+          />
         </TabsContent>
       </Tabs>
     </>
   );
 }
 
-function AdminOverviewTab() {
+function AdminOverviewTab({ adminData }: { adminData: AdminData }) {
+  const workspacesCount = adminData.workspaces.length;
+  const usersCount = adminData.users.length;
+  const requestsCount = adminData.requests.length;
+  const activeWorkspaces = adminData.workspaces.filter(
+    ([, , , , status]) => status.toLowerCase() === "active",
+  ).length;
+  const workspaceTrend = Array.from({ length: 7 }, (_, index) =>
+    Math.max(0, workspacesCount - 6 + index),
+  );
+  const activityTrend = Array.from({ length: 7 }, (_, index) =>
+    Math.max(0, adminData.activityLogs.length - 6 + index),
+  );
+  const requestTrend = Array.from({ length: 7 }, (_, index) =>
+    Math.max(0, requestsCount - 6 + index),
+  );
+  const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const runBars = weekdayLabels.map((label, index) => [
+    label,
+    adminData.activityLogs.filter((log) => {
+      const date = new Date(log[3]);
+
+      return !Number.isNaN(date.getTime()) && date.getDay() === (index + 1) % 7;
+    }).length,
+  ] satisfies [string, number]);
+
   return (
     <SettingsTabGrid>
       <SettingsSection
@@ -6961,57 +7648,46 @@ function AdminOverviewTab() {
       >
         <SettingsStatGrid
           stats={[
-            ["Workspaces", "4"],
-            ["Active users", "41"],
-            ["Waitlist requests", "4"],
-            ["Monthly runs", "18.4k"],
-            ["Connector health", "98%"],
-            ["MRR", "$4.8k"],
+            ["Workspaces", String(workspacesCount)],
+            ["Active users", String(usersCount)],
+            ["Waitlist requests", String(requestsCount)],
+            ["Active workspaces", String(activeWorkspaces)],
+            ["Activity logs", String(adminData.activityLogs.length)],
+            ["Session logs", String(adminData.sessionLogs.length)],
           ]}
         />
         <div className="grid gap-3 p-4 md:grid-cols-3">
           <AdminSparklineCard
-            data={[24, 31, 28, 42, 56, 61, 74]}
+            data={workspaceTrend}
             label="Workspace growth"
-            value="+18%"
+            value={String(workspacesCount)}
           />
           <AdminSparklineCard
-            data={[42, 38, 49, 64, 58, 72, 81]}
+            data={activityTrend}
             label="Agent runs"
-            value="18.4k"
+            value={String(adminData.activityLogs.length)}
           />
           <AdminSparklineCard
-            data={[8, 11, 13, 10, 16, 19, 22]}
+            data={requestTrend}
             label="Waitlist demand"
-            value="+22"
+            value={String(requestsCount)}
           />
         </div>
         <div className="grid gap-3 border-t border-border/70 p-4 lg:grid-cols-[1.2fr_0.8fr]">
-          <AdminBarChart
-            bars={[
-              ["Mon", 48],
-              ["Tue", 62],
-              ["Wed", 54],
-              ["Thu", 78],
-              ["Fri", 86],
-              ["Sat", 41],
-              ["Sun", 36],
-            ]}
-            title="Run volume"
-          />
+          <AdminBarChart bars={runBars} title="Run volume" />
           <AdminPlanMix />
         </div>
       </SettingsSection>
       <div className="grid gap-4 lg:grid-cols-2">
         <AdminLogsTable
           description="Recent admin and system activity across Atmet."
-          rows={adminActivityLogs}
+          rows={adminData.activityLogs}
           title="Activity logs"
           type="activity"
         />
         <AdminLogsTable
           description="Recent user sessions and access state."
-          rows={adminSessionLogs}
+          rows={adminData.sessionLogs}
           title="Session logs"
           type="sessions"
         />
@@ -7202,15 +7878,18 @@ function AdminLogsTable({
 }
 
 function AdminWorkspacesUsersTab({
+  adminData,
   onOpenProfile,
   profileView,
 }: {
+  adminData: AdminData;
   onOpenProfile: (profile: AdminProfileView | null) => void;
   profileView: AdminProfileView | null;
 }) {
   if (profileView?.type === "workspace") {
     return (
       <AdminWorkspaceProfile
+        adminData={adminData}
         name={profileView.name}
         onBack={() => onOpenProfile(null)}
       />
@@ -7220,6 +7899,7 @@ function AdminWorkspacesUsersTab({
   if (profileView?.type === "user") {
     return (
       <AdminUserProfile
+        adminData={adminData}
         name={profileView.name}
         onBack={() => onOpenProfile(null)}
       />
@@ -7233,7 +7913,10 @@ function AdminWorkspacesUsersTab({
         icon={BuildingIcon}
         title="Workspaces"
       >
-        <AdminWorkspacesTable onOpenProfile={onOpenProfile} />
+        <AdminWorkspacesTable
+          onOpenProfile={onOpenProfile}
+          rows={adminData.workspaces}
+        />
       </SettingsSection>
       <SettingsSection
         action={
@@ -7251,7 +7934,7 @@ function AdminWorkspacesUsersTab({
             <div className="grid gap-2">
               <Label>Workspace</Label>
               <Button className="justify-between" size="sm" variant="outline">
-                Atmet Workspace
+                {adminData.workspaces[0]?.[0] ?? "Choose workspace"}
                 <Icon icon={ChevronDownIcon} />
               </Button>
             </div>
@@ -7268,25 +7951,28 @@ function AdminWorkspacesUsersTab({
         icon={Users}
         title="Users"
       >
-        <AdminUsersTable onOpenProfile={onOpenProfile} />
+        <AdminUsersTable
+          onOpenProfile={onOpenProfile}
+          rows={adminData.users}
+        />
       </SettingsSection>
     </SettingsTabGrid>
   );
 }
 
-function AdminRequestsTab() {
+function AdminRequestsTab({ rows }: { rows: AdminRequestRow[] }) {
   return (
     <SettingsTabGrid>
       <AdminRequestsTable
         description="Confirm waitlist users when they are ready to join Atmet."
-        rows={adminWaitlistRequests}
+        rows={rows}
         title="Waitlist requests"
       />
     </SettingsTabGrid>
   );
 }
 
-function AdminRolesTab() {
+function AdminRolesTab({ rows }: { rows: AdminRoleRow[] }) {
   return (
     <SettingsTabGrid>
       <SettingsSection
@@ -7326,7 +8012,7 @@ function AdminRolesTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {adminRoles.map(([role, description, access]) => (
+              {rows.map(([role, description, access]) => (
                 <TableRow key={role}>
                   <TableCell>{role}</TableCell>
                   <TableCell className="max-w-xl text-muted-foreground">
@@ -7367,9 +8053,48 @@ function AdminRolesTab() {
   );
 }
 
-function AdminUsageControlsTab() {
+function AdminUsageControlsTab({
+  controls,
+  workspaces,
+}: {
+  controls: DatabaseRecord[];
+  workspaces: AdminWorkspaceRow[];
+}) {
+  const firstWorkspace = workspaces[0]?.[0] ?? "No workspace";
   const [selectedWorkspace, setSelectedWorkspace] = useState(
-    adminWorkspaces[0][0],
+    firstWorkspace,
+  );
+  const selectedWorkspaceName = workspaces.some(
+    ([workspace]) => workspace === selectedWorkspace,
+  )
+    ? selectedWorkspace
+    : firstWorkspace;
+  const globalControls =
+    controls.find((control) => !asString(control.workspace_id)) ?? {};
+  const selectedWorkspaceRow = workspaces.find(
+    ([name]) => name === selectedWorkspaceName,
+  );
+  const selectedWorkspaceId = selectedWorkspaceRow?.[7] ?? "";
+  const workspaceControls =
+    controls.find(
+      (control) => asString(control.workspace_id) === selectedWorkspaceId,
+    ) ?? {};
+  const globalRunLimit = asString(globalControls.monthly_run_limit, "Not set");
+  const globalConnectorLimit = asString(
+    globalControls.connector_limit,
+    "Not set",
+  );
+  const globalAlertThreshold = asString(
+    globalControls.usage_alert_threshold,
+    "Not set",
+  );
+  const workspaceRunLimit = asString(
+    workspaceControls.monthly_run_limit,
+    "Not set",
+  );
+  const workspaceConnectorLimit = asString(
+    workspaceControls.connector_limit,
+    "Not set",
   );
 
   return (
@@ -7392,11 +8117,16 @@ function AdminUsageControlsTab() {
             confirmLabel="Save limit"
             description="Set the global monthly workflow run limit."
             title="Monthly run limit"
-            triggerLabel="12,000 runs"
+            triggerLabel={
+              globalRunLimit === "Not set" ? globalRunLimit : `${globalRunLimit} runs`
+            }
           >
             <div className="grid gap-2">
               <Label>Run limit</Label>
-              <Input defaultValue="12000" size="sm" />
+              <Input
+                defaultValue={globalRunLimit === "Not set" ? "" : globalRunLimit}
+                size="sm"
+              />
             </div>
           </SettingsActionDialogButton>
         </SettingsRow>
@@ -7408,11 +8138,20 @@ function AdminUsageControlsTab() {
             confirmLabel="Save limit"
             description="Set the global connector cap for workspaces."
             title="Connector limit"
-            triggerLabel="10 apps"
+            triggerLabel={
+              globalConnectorLimit === "Not set"
+                ? globalConnectorLimit
+                : `${globalConnectorLimit} apps`
+            }
           >
             <div className="grid gap-2">
               <Label>Connector limit</Label>
-              <Input defaultValue="10" size="sm" />
+              <Input
+                defaultValue={
+                  globalConnectorLimit === "Not set" ? "" : globalConnectorLimit
+                }
+                size="sm"
+              />
             </div>
           </SettingsActionDialogButton>
         </SettingsRow>
@@ -7429,11 +8168,20 @@ function AdminUsageControlsTab() {
             confirmLabel="Save threshold"
             description="Set when admins receive a workspace usage alert."
             title="Usage alert threshold"
-            triggerLabel="80%"
+            triggerLabel={
+              globalAlertThreshold === "Not set"
+                ? globalAlertThreshold
+                : `${globalAlertThreshold}%`
+            }
           >
             <div className="grid gap-2">
               <Label>Threshold percentage</Label>
-              <Input defaultValue="80" size="sm" />
+              <Input
+                defaultValue={
+                  globalAlertThreshold === "Not set" ? "" : globalAlertThreshold
+                }
+                size="sm"
+              />
             </div>
           </SettingsActionDialogButton>
         </SettingsRow>
@@ -7445,20 +8193,22 @@ function AdminUsageControlsTab() {
             <MenuTrigger
               render={
                 <Button className="min-w-48 justify-between" size="sm" variant="outline">
-                  {selectedWorkspace}
+                  {selectedWorkspaceName}
                   <Icon className="opacity-70" icon={ChevronDownIcon} />
                 </Button>
               }
             />
             <MenuPopup align="end" className="min-w-56" sideOffset={8}>
-              {adminWorkspaces.map(([workspace]) => (
+              {workspaces.map(([workspace]) => (
                 <MenuItem
                   key={workspace}
                   onClick={() => setSelectedWorkspace(workspace)}
                 >
                   <Icon
                     className={cn(
-                      selectedWorkspace === workspace ? "opacity-100" : "opacity-0",
+                      selectedWorkspaceName === workspace
+                        ? "opacity-100"
+                        : "opacity-0",
                     )}
                     icon={CheckIcon}
                   />
@@ -7478,13 +8228,22 @@ function AdminUsageControlsTab() {
         >
           <SettingsActionDialogButton
             confirmLabel="Save override"
-            description={`Set a custom run limit for ${selectedWorkspace}.`}
+            description={`Set a custom run limit for ${selectedWorkspaceName}.`}
             title="Custom run limit"
-            triggerLabel="8,500 runs"
+            triggerLabel={
+              workspaceRunLimit === "Not set"
+                ? workspaceRunLimit
+                : `${workspaceRunLimit} runs`
+            }
           >
             <div className="grid gap-2">
               <Label>Workspace run limit</Label>
-              <Input defaultValue="8500" size="sm" />
+              <Input
+                defaultValue={
+                  workspaceRunLimit === "Not set" ? "" : workspaceRunLimit
+                }
+                size="sm"
+              />
             </div>
           </SettingsActionDialogButton>
         </SettingsRow>
@@ -7494,13 +8253,24 @@ function AdminUsageControlsTab() {
         >
           <SettingsActionDialogButton
             confirmLabel="Save override"
-            description={`Set a custom connector cap for ${selectedWorkspace}.`}
+            description={`Set a custom connector cap for ${selectedWorkspaceName}.`}
             title="Custom connector limit"
-            triggerLabel="6 apps"
+            triggerLabel={
+              workspaceConnectorLimit === "Not set"
+                ? workspaceConnectorLimit
+                : `${workspaceConnectorLimit} apps`
+            }
           >
             <div className="grid gap-2">
               <Label>Workspace connector limit</Label>
-              <Input defaultValue="6" size="sm" />
+              <Input
+                defaultValue={
+                  workspaceConnectorLimit === "Not set"
+                    ? ""
+                    : workspaceConnectorLimit
+                }
+                size="sm"
+              />
             </div>
           </SettingsActionDialogButton>
         </SettingsRow>
@@ -7514,12 +8284,12 @@ function AdminUsageControlsTab() {
           title="Pause workspace runs"
         />
         <SettingsRow
-          description={`Save these overrides for ${selectedWorkspace}.`}
+          description={`Save these overrides for ${selectedWorkspaceName}.`}
           title="Apply custom controls"
         >
           <SettingsActionDialogButton
             confirmLabel="Apply controls"
-            description={`Apply the custom run, connector, and approval controls to ${selectedWorkspace}.`}
+            description={`Apply the custom run, connector, and approval controls to ${selectedWorkspaceName}.`}
             title="Apply workspace controls"
             triggerLabel="Apply controls"
             variant="default"
@@ -7532,8 +8302,10 @@ function AdminUsageControlsTab() {
 
 function AdminWorkspacesTable({
   onOpenProfile,
+  rows,
 }: {
   onOpenProfile: (profile: AdminProfileView) => void;
+  rows: AdminWorkspaceRow[];
 }) {
   return (
     <div className="overflow-x-auto">
@@ -7549,7 +8321,7 @@ function AdminWorkspacesTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {adminWorkspaces.map(([workspace, owner, plan, members, status]) => (
+          {rows.map(([workspace, owner, plan, members, status]) => (
             <TableRow
               className="cursor-pointer"
               key={workspace}
@@ -7575,8 +8347,10 @@ function AdminWorkspacesTable({
 
 function AdminUsersTable({
   onOpenProfile,
+  rows,
 }: {
   onOpenProfile: (profile: AdminProfileView) => void;
+  rows: AdminUserRow[];
 }) {
   return (
     <div className="overflow-x-auto">
@@ -7593,7 +8367,7 @@ function AdminUsersTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {adminUsers.map(([user, email, workspace, role, status, lastActive]) => (
+          {rows.map(([user, email, workspace, role, status, lastActive]) => (
             <TableRow
               className="cursor-pointer"
               key={`${user}-${workspace}`}
@@ -7619,18 +8393,31 @@ function AdminUsersTable({
 }
 
 function AdminWorkspaceProfile({
+  adminData,
   name,
   onBack,
 }: {
+  adminData: AdminData;
   name: string;
   onBack: () => void;
 }) {
   const workspace =
-    adminWorkspaces.find(([workspaceName]) => workspaceName === name) ??
-    adminWorkspaces[0];
+    adminData.workspaces.find(([workspaceName]) => workspaceName === name) ??
+    adminData.workspaces[0];
+  if (!workspace) {
+    return (
+      <SettingsTabGrid>
+        <Button className="w-fit" onClick={onBack} size="sm" variant="ghost">
+          <Icon icon={ArrowRight01Icon} className="rotate-180" />
+          Back
+        </Button>
+        <EmptyStatePanel />
+      </SettingsTabGrid>
+    );
+  }
   const [workspaceName, owner, plan, members, status, usage, created] =
     workspace;
-  const workspaceUsers = adminUsers.filter(
+  const workspaceUsers = adminData.users.filter(
     ([, , userWorkspace]) => userWorkspace === workspaceName,
   );
 
@@ -7701,13 +8488,28 @@ function AdminWorkspaceProfile({
 }
 
 function AdminUserProfile({
+  adminData,
   name,
   onBack,
 }: {
+  adminData: AdminData;
   name: string;
   onBack: () => void;
 }) {
-  const user = adminUsers.find(([userName]) => userName === name) ?? adminUsers[0];
+  const user =
+    adminData.users.find(([userName]) => userName === name) ??
+    adminData.users[0];
+  if (!user) {
+    return (
+      <SettingsTabGrid>
+        <Button className="w-fit" onClick={onBack} size="sm" variant="ghost">
+          <Icon icon={ArrowRight01Icon} className="rotate-180" />
+          Back
+        </Button>
+        <EmptyStatePanel />
+      </SettingsTabGrid>
+    );
+  }
   const [userName, email, workspace, role, status, lastActive] = user;
 
   return (
