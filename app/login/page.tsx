@@ -65,6 +65,8 @@ const countryOptions = [
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [otp, setOtp] = useState("");
   const [waitlistName, setWaitlistName] = useState("");
   const [waitlistCompany, setWaitlistCompany] = useState("");
   const [waitlistWorkType, setWaitlistWorkType] = useState("");
@@ -77,6 +79,9 @@ export default function LoginPage() {
   const [otpVisible, setOtpVisible] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
   const otpInputRef = useRef<HTMLInputElement>(null);
 
@@ -120,30 +125,148 @@ export default function LoginPage() {
     return () => window.clearTimeout(focusTimer);
   }, [otpVisible]);
 
-  function submitLogin(event: React.FormEvent<HTMLFormElement>) {
+  async function submitLogin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmitting) {
+      return;
+    }
+    setErrorMessage("");
 
     if (mode === "waitlist") {
-      if (email.trim() && waitlistName.trim()) {
+      if (!email.trim() || !waitlistName.trim()) {
+        return;
+      }
+
+      setIsSubmitting(true);
+      try {
+        const response = await fetch("/api/waitlist", {
+          body: JSON.stringify({
+            companyName: waitlistCompany,
+            companySize: waitlistCompanySize,
+            country: waitlistCountry,
+            email,
+            fullName: waitlistName,
+            notes: waitlistNotes,
+            roleTitle: waitlistRole,
+            source: waitlistSource,
+            workType: waitlistWorkType,
+          }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          setErrorMessage(payload.error ?? "Could not join the waitlist.");
+          return;
+        }
+
         setWaitlistSubmitted(true);
+      } finally {
+        setIsSubmitting(false);
       }
       return;
     }
 
     if (mode === "forgot") {
-      if (email.trim()) {
-        setOtpVisible(true);
+      if (!email.trim()) {
+        return;
+      }
+
+      if (!otpVisible) {
+        setIsSubmitting(true);
+        try {
+          const response = await fetch("/api/auth/otp", {
+            body: JSON.stringify({ email }),
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+          });
+
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            setErrorMessage(payload.error ?? "Could not send OTP.");
+            return;
+          }
+
+          setOtp("");
+          setOtpVisible(true);
+        } finally {
+          setIsSubmitting(false);
+        }
+        return;
+      }
+
+      if (otp.trim().length === 6) {
+        setIsSubmitting(true);
+        try {
+          const response = await fetch("/api/auth/verify-otp", {
+            body: JSON.stringify({ email, token: otp, type: "recovery" }),
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+          });
+
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            setErrorMessage(payload.error ?? "Could not verify OTP.");
+            return;
+          }
+
+          window.location.href = "/";
+        } finally {
+          setIsSubmitting(false);
+        }
+      } else {
+        setErrorMessage("Enter the 6-digit OTP.");
       }
       return;
     }
 
     if (email.trim() && !passwordVisible) {
       setPasswordVisible(true);
+      return;
+    }
+
+    if (email.trim() && password.trim()) {
+      setIsSubmitting(true);
+      try {
+        const response = await fetch("/api/auth/sign-in", {
+          body: JSON.stringify({ email, password }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          setErrorMessage(payload.error ?? "Could not sign in.");
+          return;
+        }
+
+        window.location.href = "/";
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    if (passwordVisible) {
+      setErrorMessage("Enter your password.");
+    }
+  }
+
+  function handleFormKeyDown(event: React.KeyboardEvent<HTMLFormElement>) {
+    if (
+      event.key === "Enter" &&
+      event.target instanceof HTMLElement &&
+      event.target.tagName !== "TEXTAREA"
+    ) {
+      event.preventDefault();
+      formRef.current?.requestSubmit();
     }
   }
 
   function startForgotPassword() {
     setMode("forgot");
+    setErrorMessage("");
     setPasswordVisible(false);
     setOtpVisible(false);
     setWaitlistSubmitted(false);
@@ -151,12 +274,14 @@ export default function LoginPage() {
 
   function backToSignIn() {
     setMode("login");
+    setErrorMessage("");
     setOtpVisible(false);
     setWaitlistSubmitted(false);
   }
 
   function startWaitlist() {
     setMode("waitlist");
+    setErrorMessage("");
     setPasswordVisible(false);
     setOtpVisible(false);
     setWaitlistSubmitted(false);
@@ -199,7 +324,12 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <form className="grid" onSubmit={submitLogin}>
+        <form
+          className="grid"
+          onKeyDown={handleFormKeyDown}
+          onSubmit={submitLogin}
+          ref={formRef}
+        >
           {isWaitlistMode ? (
             <>
               <div
@@ -339,6 +469,7 @@ export default function LoginPage() {
 
               <Button
                 className={cn("mt-8 w-full", waitlistSubmitted && "hidden")}
+                loading={isSubmitting}
                 size="lg"
                 type="submit"
               >
@@ -397,10 +528,12 @@ export default function LoginPage() {
                       disabled={!passwordVisible || isForgotMode}
                       id="password"
                       nativeInput
+                      onChange={(event) => setPassword(event.target.value)}
                       placeholder="Enter your password"
                       ref={passwordInputRef}
                       required={passwordVisible && !isForgotMode}
                       type="password"
+                      value={password}
                     />
                   </div>
                 </div>
@@ -427,8 +560,10 @@ export default function LoginPage() {
                       disabled={!otpVisible || !isForgotMode}
                       id="otp-code"
                       length={6}
+                      onValueChange={setOtp}
                       required={otpVisible && isForgotMode}
                       size="lg"
+                      value={otp}
                     >
                       <OTPFieldInput ref={otpInputRef} />
                       <OTPFieldInput />
@@ -442,7 +577,17 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              <Button className="mt-5 w-full" type="submit">
+              {errorMessage && (
+                <p className="mt-4 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-center text-destructive text-sm">
+                  {errorMessage}
+                </p>
+              )}
+
+              <Button
+                className="mt-5 w-full"
+                loading={isSubmitting}
+                type="submit"
+              >
                 {isForgotMode
                   ? otpVisible
                     ? "Verify OTP"
