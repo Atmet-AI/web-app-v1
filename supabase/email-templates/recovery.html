@@ -1,0 +1,10 @@
+<h2>Reset your Atmet password</h2>
+<p>Use this secure link to reset your password.</p>
+<p>
+  <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery&redirect_to={{ .RedirectTo }}">
+    Reset password
+  </a>
+</p>
+<p>Or enter this OTP in Atmet:</p>
+<p style="font-size: 24px; font-weight: 700; letter-spacing: 4px;">{{ .Token }}</p>
+<p>If you did not ask to reset your password, you can ignore this email.</p>

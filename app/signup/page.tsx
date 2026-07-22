@@ -7,7 +7,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,6 +38,18 @@ const phoneCountries = [
 ];
 
 export default function SignupPage() {
+  return (
+    <Suspense fallback={<SignupShell />}>
+      <SignupContent />
+    </Suspense>
+  );
+}
+
+function SignupShell() {
+  return <main className="min-h-svh bg-background" />;
+}
+
+function SignupContent() {
   const searchParams = useSearchParams();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [password, setPassword] = useState("");

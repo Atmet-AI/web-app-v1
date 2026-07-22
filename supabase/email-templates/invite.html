@@ -1,0 +1,9 @@
+<h2>You have been invited to Atmet</h2>
+<p>Open the invite link below to create your password and join the workspace.</p>
+<p>
+  <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=invite&redirect_to={{ .RedirectTo }}">
+    Accept invite
+  </a>
+</p>
+<p>If the button does not work, copy and paste this link into your browser:</p>
+<p>{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=invite&redirect_to={{ .RedirectTo }}</p>
