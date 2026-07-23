@@ -1,5 +1,5 @@
 -- Atmet Supabase schema
--- Run this in the Supabase SQL editor after creating your project.
+-- Run this in the Supabase SQL editor after creating your projjject.
 
 create extension if not exists pgcrypto;
 
