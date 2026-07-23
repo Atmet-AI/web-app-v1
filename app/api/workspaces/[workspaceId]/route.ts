@@ -1,5 +1,6 @@
 import { isRouteResponse, requireWorkspacePermission } from "@/lib/api/auth";
 import { jsonObject, ok, readJson, serverError, stringValue } from "@/lib/api/http";
+import { hasSupabaseServiceRoleKey } from "@/lib/supabase/admin";
 
 type RouteContext = {
   params: Promise<{ workspaceId: string }>;
@@ -16,7 +17,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
     const { data, error } = await auth.supabase
       .from("workspaces")
-      .select("*, workspace_settings(*), workspace_subscriptions(*), workspace_members(*, profiles(*))")
+      .select("*, workspace_settings(*), workspace_subscriptions(*), workspace_members(*, profiles:profiles!workspace_members_user_id_fkey(*))")
       .eq("id", workspaceId)
       .single();
 
@@ -39,10 +40,12 @@ export async function PATCH(request: Request, context: RouteContext) {
       return auth;
     }
 
+    const dataClient = hasSupabaseServiceRoleKey() ? auth.admin : auth.supabase;
+
     const body = await readJson(request);
     const patch = jsonObject(body.workspace);
 
-    const { data, error } = await auth.admin
+    const { data, error } = await dataClient
       .from("workspaces")
       .update({
         name: stringValue(patch.name) || undefined,

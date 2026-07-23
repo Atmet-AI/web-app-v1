@@ -42,5 +42,18 @@ export async function GET(request: Request) {
     return NextResponse.redirect(redirectTo);
   }
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const workspaceInviteId = user?.user_metadata?.workspace_invite_id;
+  const isWorkspaceInvite =
+    typeof workspaceInviteId === "string" && workspaceInviteId.length > 0;
+
+  if (type === "invite" && (isWorkspaceInvite || redirectTo.pathname === "/")) {
+    redirectTo.pathname = "/signup";
+    redirectTo.searchParams.set("invite", "1");
+    redirectTo.searchParams.set("type", "invite");
+  }
+
   return NextResponse.redirect(redirectTo);
 }

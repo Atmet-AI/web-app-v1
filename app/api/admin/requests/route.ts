@@ -9,7 +9,7 @@ export async function GET() {
       return auth;
     }
 
-    const { data, error } = await auth.admin
+    const { data, error } = await auth.supabase
       .from("waitlist_requests")
       .select("*")
       .order("created_at", { ascending: false });

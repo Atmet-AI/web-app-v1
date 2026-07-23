@@ -18,17 +18,17 @@ export async function GET(request: Request, context: RouteContext) {
     let query = auth.supabase
       .from("skills")
       .select("*")
-      .or(`workspace_id.is.null,workspace_id.eq.${workspaceId}`)
+      .or(`source.eq.default,created_by.eq.${auth.user.id}`)
       .is("deleted_at", null)
       .order("source", { ascending: true })
       .order("name", { ascending: true });
 
     if (source === "default") {
-      query = query.is("workspace_id", null);
+      query = query.eq("source", "default");
     }
 
     if (source === "custom") {
-      query = query.eq("workspace_id", workspaceId);
+      query = query.eq("source", "custom").eq("created_by", auth.user.id);
     }
 
     const { data, error } = await query;
@@ -62,7 +62,7 @@ export async function POST(request: Request, context: RouteContext) {
     const { data, error } = await auth.admin
       .from("skills")
       .insert({
-        workspace_id: workspaceId,
+        workspace_id: null,
         name,
         description: stringValue(body.description) || null,
         content: stringValue(body.content),

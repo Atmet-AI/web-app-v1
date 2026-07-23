@@ -1,4 +1,4 @@
-import { isRouteResponse, requireUser, requireWorkspacePermission } from "@/lib/api/auth";
+import { isRouteResponse, requireUser } from "@/lib/api/auth";
 import { badRequest, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
 type RouteContext = {
@@ -14,7 +14,7 @@ async function authorizeSkill(skillId: string, permission = "workspace.read") {
 
   const { data, error } = await context.admin
     .from("skills")
-    .select("workspace_id, source")
+    .select("created_by, source")
     .eq("id", skillId)
     .maybeSingle();
 
@@ -22,11 +22,25 @@ async function authorizeSkill(skillId: string, permission = "workspace.read") {
     throw error;
   }
 
-  if (!data?.workspace_id) {
+  if (!data) {
+    return badRequest("Skill not found");
+  }
+
+  if (data?.source === "default") {
     return permission === "workspace.read" ? context : badRequest("Default skills cannot be edited");
   }
 
-  return requireWorkspacePermission(data.workspace_id, permission);
+  if (data?.created_by !== context.user.id) {
+    const { data: isAdmin } = await context.supabase.rpc("is_super_admin", {
+      target_user_id: context.user.id,
+    });
+
+    if (isAdmin !== true) {
+      return badRequest("You can only access your own custom skills");
+    }
+  }
+
+  return context;
 }
 
 export async function GET(_request: Request, context: RouteContext) {
@@ -38,7 +52,7 @@ export async function GET(_request: Request, context: RouteContext) {
       return auth;
     }
 
-    const { data, error } = await auth.supabase.from("skills").select("*, skill_versions(*)").eq("id", skillId).single();
+    const { data, error } = await auth.admin.from("skills").select("*, skill_versions(*)").eq("id", skillId).single();
 
     if (error) {
       throw error;

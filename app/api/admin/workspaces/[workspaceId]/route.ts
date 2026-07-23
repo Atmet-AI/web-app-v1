@@ -14,9 +14,9 @@ export async function GET(_request: Request, context: RouteContext) {
     }
 
     const { workspaceId } = await context.params;
-    const { data, error } = await auth.admin
+    const { data, error } = await auth.supabase
       .from("workspaces")
-      .select("*, workspace_settings(*), workspace_subscriptions(*), workspace_members(*, profiles(*)), workspace_usage_controls(*)")
+      .select("*, workspace_settings(*), workspace_subscriptions(*), workspace_members(*, profiles:profiles!workspace_members_user_id_fkey(*)), workspace_usage_controls(*)")
       .eq("id", workspaceId)
       .single();
 
@@ -40,7 +40,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     const { workspaceId } = await context.params;
     const body = await readJson(request);
-    const { data, error } = await auth.admin
+    const { data, error } = await auth.supabase
       .from("workspaces")
       .update({
         name: stringValue(body.name) || undefined,

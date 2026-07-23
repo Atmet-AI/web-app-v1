@@ -14,7 +14,7 @@ export async function GET(_request: Request, context: RouteContext) {
     }
 
     const { userId } = await context.params;
-    const { data, error } = await auth.admin
+    const { data, error } = await auth.supabase
       .from("profiles")
       .select("*, user_preferences(*), workspace_members(*, workspaces(name, slug, status))")
       .eq("id", userId)
@@ -40,7 +40,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     const { userId } = await context.params;
     const body = await readJson(request);
-    const { data, error } = await auth.admin
+    const { data, error } = await auth.supabase
       .from("profiles")
       .update({
         full_name: stringValue(body.fullName) || undefined,

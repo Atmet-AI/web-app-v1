@@ -120,6 +120,13 @@ import {
   ProgressTrack,
 } from "@/components/ui/progress";
 import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Sheet,
   SheetDescription,
   SheetHeader,
@@ -313,10 +320,11 @@ type AdminWorkspaceRow = [
   string,
   string,
   string,
+  string,
 ];
 type AdminRequestRow = [string, string, string, string, string, string];
 type AdminLogRow = [string, string, string, string];
-type AdminUserRow = [string, string, string, string, string, string];
+type AdminUserRow = [string, string, string, string, string, string, string];
 type AdminRoleRow = [string, string, string];
 
 type AdminProfileView =
@@ -350,17 +358,17 @@ function mapAdminWorkspace(row: unknown): AdminWorkspaceRow | null {
     return null;
   }
 
-  const subscriptions = asRecordArray(record.workspace_subscriptions);
-  const memberCounts = asRecordArray(record.workspace_members);
+  const status = asString(record.status, "active");
   return [
     name,
     asString(record.owner_name, "Unassigned"),
-    asString(subscriptions[0]?.plan_key, "No plan"),
-    String(asNumber(memberCounts[0]?.count)),
-    asString(record.status, "Active"),
+    asString(record.plan_key, "No plan"),
+    String(asNumber(record.member_count)),
+    status[0]?.toUpperCase() + status.slice(1),
     "0%",
     formatDateLabel(record.created_at) || "",
     asString(record.id),
+    asString(record.avatar_url),
   ];
 }
 
@@ -376,9 +384,16 @@ function mapAdminUser(row: unknown): AdminUserRow | null {
     name,
     email,
     asString(record.default_workspace_name, ""),
-    asString(record.role, "Member"),
-    asString(record.status, "Active"),
+    asString(record.role, "member")
+      .split(/\s+/)
+      .map((word) => word[0]?.toUpperCase() + word.slice(1))
+      .join(" "),
+    asString(record.membership_status, "active")
+      .split(/\s+/)
+      .map((word) => word[0]?.toUpperCase() + word.slice(1))
+      .join(" "),
     formatDateTimeLabel(record.last_seen_at) || "Never",
+    asString(record.avatar_url),
   ];
 }
 
@@ -513,6 +528,7 @@ type DashboardData = {
   members?: unknown[];
   preferences?: unknown;
   profile?: unknown;
+  setupUrl?: unknown;
   skills?: unknown[];
   subscription?: unknown;
   usage?: unknown;
@@ -523,12 +539,16 @@ type DashboardData = {
 
 type WorkspaceSummary = {
   avatarUrl?: string;
+  category?: string;
+  createdAt?: string;
   id: string;
   name: string;
   slug: string;
+  status?: string;
 };
 
 type WorkspaceUser = {
+  avatarUrl?: string;
   email: string;
   initials: string;
   lastActive: string;
@@ -655,9 +675,12 @@ function mapWorkspace(value: unknown): WorkspaceSummary | null {
   const name = asString(record.name, "Workspace");
   return {
     avatarUrl: asString(record.avatar_url),
+    category: asString(record.category),
+    createdAt: asString(record.created_at),
     id,
     name,
     slug: asString(record.slug, name.toLowerCase().replace(/\s+/g, "-")),
+    status: asString(record.status, "active"),
   };
 }
 
@@ -817,6 +840,7 @@ function mapMember(row: unknown): WorkspaceUser | null {
 
   const status = asString(record.status).toLowerCase();
   return {
+    avatarUrl: asString(profile.avatar_url),
     email,
     initials: getInitialsFromText(name || email),
     lastActive: formatDateTimeLabel(profile.last_seen_at) || "Never",
@@ -853,9 +877,62 @@ function getInitialTheme() {
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
+async function getResponseError(response: Response, fallback: string) {
+  const payload = asRecord(await response.json().catch(() => ({})));
+  return asString(payload.error, fallback);
+}
+
+const dashboardCacheKey = "atmet.dashboard.shell.v2";
+const dashboardCacheMaxAgeMs = 1000 * 60 * 10;
+
+function getCacheableDashboardPayload(payload: DashboardData): DashboardData {
+  return {
+    apps: asRecordArray(payload.apps).map((app) => {
+      const record = asRecord(app);
+      return {
+        app_key: record.app_key,
+        description: record.description,
+        enabled: record.enabled,
+        icon: record.icon,
+        name: record.name,
+      };
+    }),
+    chats: asRecordArray(payload.chats).map((chat) => {
+      const record = asRecord(chat);
+      return {
+        id: record.id,
+        pinned: record.pinned,
+        title: record.title,
+      };
+    }),
+    connections: asRecordArray(payload.connections).map((connection) => {
+      const record = asRecord(connection);
+      return {
+        app_key: record.app_key,
+        status: record.status,
+      };
+    }),
+    profile: asRecord(payload.profile),
+    skills: asRecordArray(payload.skills).map((skill) => {
+      const record = asRecord(skill);
+      return {
+        description: record.description,
+        gradient: record.gradient,
+        icon: record.icon,
+        id: record.id,
+        name: record.name,
+        source: record.source,
+      };
+    }),
+    workspace: asRecord(payload.workspace),
+    workspaces: asRecordArray(payload.workspaces),
+  };
+}
+
 export default function Home() {
   const [activePage, setActivePage] = useState<PageKey>("chat");
   const [agentsPlaygroundOpen, setAgentsPlaygroundOpen] = useState(false);
+  const [bootstrapError, setBootstrapError] = useState("");
   const [workspace, setWorkspace] = useState<WorkspaceSummary | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [profile, setProfile] = useState<DatabaseRecord | null>(null);
@@ -869,13 +946,13 @@ export default function Home() {
   const [brainData, setBrainData] = useState<DatabaseRecord | null>(null);
   const [subscriptionData, setSubscriptionData] =
     useState<DatabaseRecord | null>(null);
+  const [workspaceSettings, setWorkspaceSettings] =
+    useState<DatabaseRecord | null>(null);
   const [selectedAgentName, setSelectedAgentName] = useState<string | null>(
     null,
   );
   const [agentList, setAgentList] = useState<Agent[]>([]);
-  const [activeSidebarChatId, setActiveSidebarChatId] = useState<string | null>(
-    initialSidebarChats[0]?.id ?? null,
-  );
+  const [activeSidebarChatId, setActiveSidebarChatId] = useState<string | null>(null);
   const [chatHistoryOpen, setChatHistoryOpen] = useState(true);
   const [sidebarChats, setSidebarChats] =
     useState<SidebarChat[]>(initialSidebarChats);
@@ -912,13 +989,97 @@ export default function Home() {
     document.documentElement.classList.toggle("dark", isDark);
   }, [isDark]);
 
+  function applyDashboardPayload(payload: DashboardData) {
+    const mappedWorkspaces = asRecordArray(payload.workspaces)
+      .map(mapWorkspace)
+      .filter((item): item is WorkspaceSummary => Boolean(item));
+    const mappedWorkspace = mapWorkspace(payload.workspace);
+    const connectionRows = asRecordArray(payload.connections);
+    const connectedKeys = connectionRows
+      .filter((connection) => asString(connection.status) === "connected")
+      .map((connection) => asString(connection.app_key))
+      .filter(Boolean);
+    const connectionKeySet = new Set(connectedKeys);
+    const mappedChats = asRecordArray(payload.chats)
+      .map(mapChat)
+      .filter((item): item is SidebarChat => Boolean(item));
+    const mappedAgents = asRecordArray(payload.agents)
+      .map(mapAgent)
+      .filter((item): item is Agent => Boolean(item));
+    const mappedSkills = asRecordArray(payload.skills)
+      .map(mapSkill)
+      .filter((item): item is SkillItem => Boolean(item));
+    const mappedConnectors = asRecordArray(payload.apps)
+      .map((app, index) => mapConnector(app, connectionKeySet, index))
+      .filter((item): item is ConnectorItem => Boolean(item));
+    const mappedMembers = asRecordArray(payload.members)
+      .map(mapMember)
+      .filter((item): item is WorkspaceUser => Boolean(item));
+
+    setWorkspace(mappedWorkspace);
+    setWorkspaces(mappedWorkspaces);
+    setProfile(asRecord(payload.profile));
+    setMembers(mappedMembers);
+    setSidebarChats(mappedChats);
+    setActiveSidebarChatId((current) =>
+      current && mappedChats.some((chat) => chat.id === current)
+        ? current
+        : mappedChats[0]?.id ?? null,
+    );
+    setAgentList(mappedAgents);
+    setSkillList(mappedSkills);
+    setConnectorList(mappedConnectors);
+    setConnectedConnectorKeys(connectedKeys);
+    setUsageData(mapUsage(payload.usage, mappedChats.length, mappedAgents.length));
+    setBrainData(asRecord(payload.brain));
+    setSubscriptionData(asRecord(payload.subscription));
+    setWorkspaceSettings(asRecord(payload.workspaceSettings));
+  }
+
   useEffect(() => {
     let cancelled = false;
+    let appliedCachedPayload = false;
 
     async function loadDashboard() {
+      setBootstrapError("");
+
       try {
-        const response = await fetch("/api/bootstrap", { cache: "no-store" });
+        const cached = window.localStorage.getItem(dashboardCacheKey);
+        if (cached) {
+          const cacheRecord = asRecord(JSON.parse(cached));
+          const cachedAt = Number(cacheRecord.cachedAt ?? 0);
+          const payload = asRecord(cacheRecord.payload) as DashboardData;
+
+          if (Date.now() - cachedAt < dashboardCacheMaxAgeMs) {
+            applyDashboardPayload(payload);
+            appliedCachedPayload = true;
+          }
+        }
+      } catch {
+        window.localStorage.removeItem(dashboardCacheKey);
+      }
+
+      try {
+        const response = await fetch("/api/bootstrap", {
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+
+        if (cancelled) {
+          return;
+        }
+
         if (!response.ok) {
+          const message = await getResponseError(
+            response,
+            `Could not load workspace data (${response.status})`,
+          );
+          if (response.status === 401) {
+            window.localStorage.removeItem(dashboardCacheKey);
+          }
+          if (!appliedCachedPayload) {
+            setBootstrapError(message);
+          }
           return;
         }
 
@@ -927,47 +1088,36 @@ export default function Home() {
           return;
         }
 
-        const mappedWorkspaces = asRecordArray(payload.workspaces)
-          .map(mapWorkspace)
-          .filter((item): item is WorkspaceSummary => Boolean(item));
-        const mappedWorkspace = mapWorkspace(payload.workspace);
-        const connectionRows = asRecordArray(payload.connections);
-        const connectedKeys = connectionRows
-          .filter((connection) => asString(connection.status) === "connected")
-          .map((connection) => asString(connection.app_key))
-          .filter(Boolean);
-        const connectionKeySet = new Set(connectedKeys);
-        const mappedChats = asRecordArray(payload.chats)
-          .map(mapChat)
-          .filter((item): item is SidebarChat => Boolean(item));
-        const mappedAgents = asRecordArray(payload.agents)
-          .map(mapAgent)
-          .filter((item): item is Agent => Boolean(item));
-        const mappedSkills = asRecordArray(payload.skills)
-          .map(mapSkill)
-          .filter((item): item is SkillItem => Boolean(item));
-        const mappedConnectors = asRecordArray(payload.apps)
-          .map((app, index) => mapConnector(app, connectionKeySet, index))
-          .filter((item): item is ConnectorItem => Boolean(item));
-        const mappedMembers = asRecordArray(payload.members)
-          .map(mapMember)
-          .filter((item): item is WorkspaceUser => Boolean(item));
+        const setupUrl = asString(payload.setupUrl);
+        if (setupUrl) {
+          window.localStorage.removeItem(dashboardCacheKey);
+          window.location.href = setupUrl;
+          return;
+        }
 
-        setWorkspace(mappedWorkspace);
-        setWorkspaces(mappedWorkspaces);
-        setProfile(asRecord(payload.profile));
-        setMembers(mappedMembers);
-        setSidebarChats(mappedChats);
-        setActiveSidebarChatId((current) => current ?? mappedChats[0]?.id ?? null);
-        setAgentList(mappedAgents);
-        setSkillList(mappedSkills);
-        setConnectorList(mappedConnectors);
-        setConnectedConnectorKeys(connectedKeys);
-        setUsageData(mapUsage(payload.usage, mappedChats.length, mappedAgents.length));
-        setBrainData(asRecord(payload.brain));
-        setSubscriptionData(asRecord(payload.subscription));
+        applyDashboardPayload(payload);
+        try {
+          window.localStorage.setItem(
+            dashboardCacheKey,
+            JSON.stringify({
+              cachedAt: Date.now(),
+              payload: getCacheableDashboardPayload(payload),
+            }),
+          );
+        } catch {
+          window.localStorage.removeItem(dashboardCacheKey);
+        }
       } catch (error) {
         console.error(error);
+        if (!cancelled) {
+          if (!appliedCachedPayload) {
+            setBootstrapError(
+              error instanceof Error
+                ? error.message
+                : "Could not load workspace data",
+            );
+          }
+        }
       }
     }
 
@@ -1192,8 +1342,8 @@ export default function Home() {
   ];
 
   return (
-    <main className="min-h-svh bg-sidebar text-foreground">
-      <div className="flex min-h-svh flex-col">
+  <main className="h-svh overflow-hidden bg-sidebar text-foreground">
+    <div className="flex h-svh min-h-0 flex-col">
         <div className="grid h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-3 py-2 md:px-4">
           <div className="flex min-w-0 items-center gap-2">
             {!sidebarOpen && (
@@ -1343,16 +1493,17 @@ export default function Home() {
           </div>
           </aside>
 
-        <section className="flex min-w-0 flex-1 bg-sidebar px-1.5 pb-1.5 md:px-2 md:pb-2">
-          <div className="flex min-h-full flex-1 overflow-hidden rounded-xl border border-black/5 bg-background dark:border-white/6">
+        <section className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-sidebar px-1.5 pb-1.5 md:px-2 md:pb-2">
+          <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-black/5 bg-background dark:border-white/6">
             <div
               className={cn(
-                "mx-auto flex min-h-[calc(100svh-4.5rem)] w-full flex-1 flex-col px-4 py-3 md:px-6 md:py-4 lg:px-8 lg:py-5",
+                "mx-auto flex min-h-0 w-full flex-1 flex-col overflow-y-auto overscroll-contain px-4 py-3 md:px-6 md:py-4 lg:px-8 lg:py-5",
                 activePage === "agents" && agentsPlaygroundOpen
                   ? "max-w-none"
                   : "max-w-5xl",
               )}
             >
+              {bootstrapError && <BootstrapErrorBanner error={bootstrapError} />}
               {activePage === "chat" && (
                 <ChatPage
                   activeChatId={activeSidebarChatId}
@@ -1409,12 +1560,16 @@ export default function Home() {
                   agentsCount={agentList.length}
                   connectorsCount={connectedConnectorKeys.length}
                   members={members}
+                  onProfileChange={setProfile}
+                  onWorkspaceChange={setWorkspace}
+                  onWorkspaceSettingsChange={setWorkspaceSettings}
                   profile={profile}
                   connectedConnectors={connectorList.filter((connector) =>
                     connectedConnectorKeys.includes(connector.key ?? connector.name),
                   )}
                   subscription={subscriptionData}
                   workspace={workspace}
+                  workspaceSettings={workspaceSettings}
                 />
               )}
               {activePage === "admin" && <AdminPage />}
@@ -1457,6 +1612,7 @@ function WorkspaceIdentity({
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
   const [invitePeopleOpen, setInvitePeopleOpen] = useState(false);
   const workspaceName = selectedWorkspace?.name ?? "Workspace";
+  const workspaceAvatarUrl = selectedWorkspace?.avatarUrl;
 
   return (
     <div className="flex min-w-0 items-center gap-2">
@@ -1464,9 +1620,11 @@ function WorkspaceIdentity({
       <div className="h-4 w-px shrink-0 bg-sidebar-border" />
       <Menu>
         <MenuTrigger className="flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1 outline-none transition-[background-color] hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
-          <div className="grid size-6 shrink-0 place-items-center rounded-md bg-background text-[0.625rem] font-semibold leading-none text-foreground">
-            {getOptionInitials(workspaceName)}
-          </div>
+          <AvatarTile
+            className="size-6 rounded-md border-0 bg-background text-[0.625rem] shadow-none"
+            initials={getOptionInitials(workspaceName)}
+            src={workspaceAvatarUrl}
+          />
           <p className="truncate text-xs font-medium leading-none text-sidebar-foreground">
             {workspaceName}
           </p>
@@ -1484,9 +1642,11 @@ function WorkspaceIdentity({
               key={workspace.id}
               onClick={() => onSelectWorkspace(workspace)}
             >
-              <span className="grid size-6 place-items-center rounded-md bg-muted text-[0.625rem] font-semibold">
-                {getOptionInitials(workspace.name)}
-              </span>
+              <AvatarTile
+                className="size-6 rounded-md border-0 bg-muted text-[0.625rem] shadow-none"
+                initials={getOptionInitials(workspace.name)}
+                src={workspace.avatarUrl}
+              />
               <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
               <Icon
                 className={cn(
@@ -1925,18 +2085,22 @@ function UserIdentity({
 }) {
   const displayName = asString(profile?.full_name, asString(profile?.email, "User"));
   const initials = getInitialsFromText(displayName);
+  const avatarUrl = asString(profile?.avatar_url);
 
   async function signOut() {
     await fetch("/api/auth/sign-out", { method: "POST" }).catch(() => undefined);
+    window.localStorage.removeItem(dashboardCacheKey);
     window.location.href = "/login";
   }
 
   return (
     <Menu>
       <MenuTrigger className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-lg px-1.5 py-1 outline-none transition-[background-color] hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
-        <div className="grid size-6 shrink-0 place-items-center rounded-md bg-background text-[0.625rem] font-semibold leading-none text-foreground">
-          {initials}
-        </div>
+        <AvatarTile
+          className="size-6 rounded-md border-0 bg-background text-[0.625rem] shadow-none"
+          initials={initials}
+          src={avatarUrl}
+        />
         <div className="hidden min-w-0 sm:block">
           <p className="truncate text-xs font-medium leading-none text-sidebar-foreground">
             {displayName}
@@ -2691,7 +2855,7 @@ function ComposerOptionIcon({
   return (
     <span
       className={cn(
-        "grid shrink-0 place-items-center rounded-md bg-primary font-semibold text-primary-foreground",
+        "grid shrink-0 place-items-center rounded-md border border-black/8 bg-white font-semibold text-stone-900 shadow-xs/5 dark:border-white/10",
         compact ? "size-4 text-[0.55rem]" : "size-5 text-[0.625rem]",
       )}
     >
@@ -4655,10 +4819,10 @@ function SkillsPage({
       />
       <div className="grid gap-2">
         {visibleSkills.map((skill) => (
-          <Card className="overflow-hidden" key={skill.id}>
+          <Card className="overflow-hidden bg-background dark:bg-background" key={skill.id}>
             <CardPanel className="flex items-center gap-3 p-2.5">
               <button
-                className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1.5 text-left outline-none transition-[background-color] hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1.5 text-left outline-none transition-[background-color] hover:bg-muted/55 focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => setSelectedSkillId(skill.id)}
                 type="button"
               >
@@ -5421,39 +5585,11 @@ function renderInlineMarkdown(text: string) {
     });
 }
 
-function BrainPage({
-  brain,
-  workspaceId,
-}: {
+function BrainPage({}: {
   brain: DatabaseRecord | null;
   workspaceId: string | null;
 }) {
-  const initialBrainValues = {
-    businessDetails: asString(brain?.business_details),
-    outputStyle: asString(brain?.output_style),
-    personalization: asString(brain?.personalization),
-  };
-  const [brainValues, setBrainValues] = useState(initialBrainValues);
-  const [savedBrainValues, setSavedBrainValues] = useState(brainValues);
   const [knowledgeDialogOpen, setKnowledgeDialogOpen] = useState(false);
-  const brainChanged =
-    JSON.stringify(brainValues) !== JSON.stringify(savedBrainValues);
-
-  async function saveBrain() {
-    if (workspaceId) {
-      await fetch(`/api/workspaces/${workspaceId}/brain`, {
-        body: JSON.stringify({
-          businessDetails: brainValues.businessDetails,
-          outputStyle: brainValues.outputStyle,
-          personalization: brainValues.personalization,
-        }),
-        headers: { "Content-Type": "application/json" },
-        method: "PATCH",
-      }).catch(() => undefined);
-    }
-
-    setSavedBrainValues(brainValues);
-  }
 
   return (
     <>
@@ -5467,109 +5603,16 @@ function BrainPage({
         open={knowledgeDialogOpen}
       />
 
-      <CardFrame className="overflow-hidden">
-        <CardFrameHeader>
-          <CardFrameTitle>Workspace brain</CardFrameTitle>
-          <CardFrameDescription>
-            Tell Atmet what to remember about you, your business, and how
-            outputs should sound.
-          </CardFrameDescription>
-          <CardFrameAction>
-            <Button
-              className="active:scale-[0.96]"
-              disabled={!brainChanged}
-              onClick={saveBrain}
-              size="sm"
-            >
-              <Icon icon={SaveIcon} />
-              Save changes
-            </Button>
-          </CardFrameAction>
-        </CardFrameHeader>
-        <CardPanel className="grid gap-3 p-3">
-          <BrainTextField
-            description="Personal preferences, context, and working style Atmet should keep in mind."
-            label="Personalization"
-            onChange={(value) =>
-              setBrainValues((current) => ({
-                ...current,
-                personalization: value,
-              }))
-            }
-            value={brainValues.personalization}
-          />
-          <BrainTextField
-            description="Company details, customers, services, policies, and domain knowledge."
-            label="Business details"
-            onChange={(value) =>
-              setBrainValues((current) => ({
-                ...current,
-                businessDetails: value,
-              }))
-            }
-            value={brainValues.businessDetails}
-          />
-          <BrainTextField
-            description="Tone, structure, format, level of detail, and preferred response style."
-            label="Output style"
-            onChange={(value) =>
-              setBrainValues((current) => ({
-                ...current,
-                outputStyle: value,
-              }))
-            }
-            value={brainValues.outputStyle}
-          />
-        </CardPanel>
-      </CardFrame>
-
-      <CardFrame className="mt-3 overflow-hidden">
-        <CardPanel className="flex flex-col items-center justify-center gap-4 p-6 text-center">
-          <div>
-            <p className="text-sm font-semibold">Or ...</p>
-            <p className="mt-1 max-w-md text-pretty text-sm leading-6 text-muted-foreground">
-              Upload business material and let Atmet build a knowledge base or
-              graph from it.
-            </p>
-          </div>
-          <Button
-            className="active:scale-[0.96]"
-            onClick={() => setKnowledgeDialogOpen(true)}
-          >
-            <Icon icon={Brain03Icon} />
-            Build knowledge base/graph
-          </Button>
-        </CardPanel>
-      </CardFrame>
-    </>
-  );
-}
-
-function BrainTextField({
-  description,
-  label,
-  onChange,
-  value,
-}: {
-  description: string;
-  label: string;
-  onChange: (value: string) => void;
-  value: string;
-}) {
-  return (
-    <div className="grid gap-2 rounded-xl border border-border/70 bg-background p-3">
-      <div>
-        <Label className="text-sm font-semibold">{label}</Label>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          {description}
-        </p>
+      <div className="flex min-h-[45svh] items-center justify-center">
+        <Button
+          className="active:scale-[0.96]"
+          onClick={() => setKnowledgeDialogOpen(true)}
+        >
+          <Icon icon={Brain03Icon} />
+          Build knowledge base/graph
+        </Button>
       </div>
-      <Textarea
-        className="min-h-40 resize-y"
-        onChange={(event) => onChange(event.target.value)}
-        value={value}
-      />
-    </div>
+    </>
   );
 }
 
@@ -6029,6 +6072,7 @@ function PerUserLimitsCard({
           {userLimits.map((limit) => {
             const profile = getRecordByKey(limit, "profiles");
             const name = asString(profile.full_name, asString(profile.email, "User"));
+            const avatarUrl = asString(profile.avatar_url);
             const monthlyCap = asNumber(limit.monthly_token_cap);
             const tokensUsed = asNumber(limit.tokens_used);
 
@@ -6036,9 +6080,11 @@ function PerUserLimitsCard({
               <TableRow key={asString(limit.user_id, name)}>
                 <TableCell>
                   <div className="flex items-center gap-2">
-                    <div className="grid size-9 place-items-center rounded-lg border border-border/70 bg-muted/50 text-xs font-semibold">
-                      {getInitialsFromText(name)}
-                    </div>
+                    <AvatarTile
+                      className="size-9 rounded-lg bg-muted/50 text-xs shadow-none"
+                      initials={getInitialsFromText(name)}
+                      src={avatarUrl}
+                    />
                     <div>
                       <p className="font-medium leading-none">{name}</p>
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -6190,9 +6236,9 @@ function ConnectorsPage({
           );
 
           return (
-            <Card className="min-h-64" key={connector.name}>
-              <CardHeader className="flex-1">
-                <div className="flex size-11 items-center justify-center rounded-xl bg-muted text-sm font-semibold text-foreground">
+            <Card className="min-h-56 bg-background dark:bg-background" key={connector.name}>
+              <CardHeader className="flex-1 p-4">
+                <div className="flex size-11 items-center justify-center rounded-xl border border-black/8 bg-white text-sm font-semibold text-stone-900 shadow-xs/5 dark:border-white/10">
                   {connector.logo}
                 </div>
                 <CardTitle>{connector.name}</CardTitle>
@@ -6200,7 +6246,7 @@ function ConnectorsPage({
                   {connector.description}
                 </CardDescription>
               </CardHeader>
-              <CardPanel className="mt-auto flex-none pt-0">
+              <CardPanel className="mt-auto flex-none p-4 pt-0">
                 <Button
                   className="w-full active:scale-[0.96]"
                   onClick={() => setSelectedConnectorName(connector.name)}
@@ -6290,7 +6336,7 @@ function ConnectorProfilePage({
         >
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div className="flex min-w-0 items-center gap-4">
-              <div className="grid size-20 shrink-0 place-items-center rounded-2xl bg-white/90 text-xl font-semibold text-stone-900 shadow-xs/5 ring-1 ring-black/10 dark:bg-stone-950/80 dark:text-stone-100 dark:ring-white/10">
+              <div className="grid size-20 shrink-0 place-items-center rounded-2xl bg-white text-xl font-semibold text-stone-900 shadow-xs/5 ring-1 ring-black/10 dark:ring-white/10">
                 {connector.logo}
               </div>
               <div className="min-w-0">
@@ -6341,22 +6387,143 @@ function ConnectorProfilePage({
   );
 }
 
+const roleTitleOptions = [
+  "Founder",
+  "Product builder",
+  "Operations",
+  "Engineer",
+  "Designer",
+  "Sales",
+  "Support",
+  "Member",
+];
+
+const workspaceRoleOptions = ["owner", "admin", "member", "viewer"];
+
+const timezoneOptions = [
+  "Asia/Amman",
+  "UTC",
+  "America/New_York",
+  "America/Los_Angeles",
+  "Europe/London",
+  "Europe/Berlin",
+  "Asia/Dubai",
+  "Asia/Riyadh",
+  "Asia/Singapore",
+];
+
+function AvatarTile({
+  className,
+  initials,
+  src,
+}: {
+  className?: string;
+  initials: string;
+  src?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  return (
+    <div
+      className={cn(
+        "relative grid size-20 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-background text-2xl font-semibold shadow-xs/5",
+        className,
+      )}
+    >
+      {src && !failed ? (
+        <Image
+          alt=""
+          className="object-cover"
+          fill
+          onError={() => setFailed(true)}
+          src={src}
+          unoptimized
+        />
+      ) : (
+        initials
+      )}
+    </div>
+  );
+}
+
+async function fileToAvatarDataUrl(file: File) {
+  const maxInlineAvatarBytes = 2 * 1024 * 1024;
+
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Avatar must be an image file.");
+  }
+
+  if (file.size > maxInlineAvatarBytes) {
+    throw new Error("Avatar image must be 2MB or smaller.");
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read avatar image."));
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadAvatarFile({
+  file,
+  target,
+  workspaceId,
+}: {
+  file: File;
+  target: "profile" | "workspace";
+  workspaceId?: string;
+}) {
+  const avatarUrl = await fileToAvatarDataUrl(file);
+  const response =
+    target === "workspace"
+      ? await fetch(`/api/workspaces/${workspaceId}`, {
+          body: JSON.stringify({ workspace: { avatarUrl } }),
+          headers: { "Content-Type": "application/json" },
+          method: "PATCH",
+        })
+      : await fetch("/api/profile", {
+          body: JSON.stringify({ profile: { avatarUrl } }),
+          headers: { "Content-Type": "application/json" },
+          method: "PATCH",
+        });
+
+  if (!response.ok) {
+    const payload = asRecord(await response.json().catch(() => ({})));
+    throw new Error(asString(payload.error, "Avatar upload failed"));
+  }
+
+  return asRecord(await response.json());
+}
+
 function SettingsPage({
   agentsCount,
   connectorsCount,
   connectedConnectors,
   members,
+  onProfileChange,
+  onWorkspaceChange,
+  onWorkspaceSettingsChange,
   profile,
   subscription,
   workspace,
+  workspaceSettings,
 }: {
   agentsCount: number;
   connectorsCount: number;
   connectedConnectors: ConnectorItem[];
   members: WorkspaceUser[];
+  onProfileChange: (profile: DatabaseRecord | null) => void;
+  onWorkspaceChange: (workspace: WorkspaceSummary | null) => void;
+  onWorkspaceSettingsChange: (settings: DatabaseRecord | null) => void;
   profile: DatabaseRecord | null;
   subscription: DatabaseRecord | null;
   workspace: WorkspaceSummary | null;
+  workspaceSettings: DatabaseRecord | null;
 }) {
   return (
     <>
@@ -6399,18 +6566,29 @@ function SettingsPage({
           ))}
         </TabsList>
         <TabsContent value="profile">
-          <SettingsProfileTab profile={profile} workspace={workspace} />
+          <SettingsProfileTab
+            key={asString(profile?.id, "profile")}
+            onProfileChange={onProfileChange}
+            profile={profile}
+            workspace={workspace}
+          />
         </TabsContent>
         <TabsContent value="workspace">
           <SettingsWorkspaceTab
             agentsCount={agentsCount}
             connectorsCount={connectorsCount}
+            key={workspace?.id ?? "workspace"}
             members={members}
+            onWorkspaceChange={onWorkspaceChange}
             workspace={workspace}
           />
         </TabsContent>
         <TabsContent value="general">
-          <SettingsGeneralTab />
+          <SettingsGeneralTab
+            onWorkspaceSettingsChange={onWorkspaceSettingsChange}
+            workspaceId={workspace?.id ?? null}
+            workspaceSettings={workspaceSettings}
+          />
         </TabsContent>
         <TabsContent value="data">
           <SettingsDataControlsTab connectors={connectedConnectors} />
@@ -6424,19 +6602,106 @@ function SettingsPage({
 }
 
 function SettingsProfileTab({
+  onProfileChange,
   profile,
   workspace,
 }: {
+  onProfileChange: (profile: DatabaseRecord | null) => void;
   profile: DatabaseRecord | null;
   workspace: WorkspaceSummary | null;
 }) {
-  const [profileDirty, setProfileDirty] = useState(false);
   const displayName = asString(profile?.full_name, "User");
   const email = asString(profile?.email);
   const initials = getInitialsFromText(displayName || email);
-  const role = asString(profile?.role, "");
-  const timezone = asString(profile?.timezone, "Asia/Amman");
-  const bio = asString(profile?.bio);
+  const initialValues = {
+    bio: asString(profile?.bio),
+    displayName,
+    email,
+    phoneNumber: asString(profile?.phone_number),
+    roleTitle: asString(profile?.role_title, "Product builder"),
+  };
+  const [savedValues, setSavedValues] = useState(initialValues);
+  const [values, setValues] = useState(initialValues);
+  const [avatarUrl, setAvatarUrl] = useState(asString(profile?.avatar_url));
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const profileAvatarInputRef = useRef<HTMLInputElement>(null);
+  const profileDirty =
+    values.bio !== savedValues.bio ||
+    values.displayName !== savedValues.displayName ||
+    values.phoneNumber !== savedValues.phoneNumber ||
+    values.roleTitle !== savedValues.roleTitle;
+
+  useEffect(() => {
+    setSavedValues(initialValues);
+    setValues(initialValues);
+    setAvatarUrl(asString(profile?.avatar_url));
+  }, [
+    profile?.avatar_url,
+    profile?.bio,
+    profile?.email,
+    profile?.full_name,
+    profile?.phone_number,
+    profile?.role_title,
+  ]);
+
+  function updateProfileValue(key: keyof typeof values, value: string) {
+    setValues((current) => ({ ...current, [key]: value }));
+  }
+
+  async function handleProfileAvatarUpload(file: File | undefined) {
+    if (!file) {
+      return;
+    }
+
+    setUploadingAvatar(true);
+    try {
+      const payload = await uploadAvatarFile({ file, target: "profile" });
+      const nextProfile = asRecord(payload.profile);
+      setAvatarUrl(asString(nextProfile.avatar_url, avatarUrl));
+      onProfileChange(nextProfile);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Avatar upload failed");
+    } finally {
+      setUploadingAvatar(false);
+      if (profileAvatarInputRef.current) {
+        profileAvatarInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function saveProfile() {
+    setSavingProfile(true);
+    try {
+      const response = await fetch("/api/profile", {
+        body: JSON.stringify({
+          profile: {
+            bio: values.bio,
+            fullName: values.displayName,
+            phoneNumber: values.phoneNumber,
+            roleTitle: values.roleTitle,
+          },
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      });
+
+      if (!response.ok) {
+        const payload = asRecord(await response.json().catch(() => ({})));
+        throw new Error(asString(payload.error, "Could not save profile"));
+      }
+
+      const payload = asRecord(await response.json());
+      const nextProfile = asRecord(payload.profile);
+      onProfileChange(nextProfile);
+      setSavedValues(values);
+      setAvatarUrl(asString(nextProfile.avatar_url, avatarUrl));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not save profile");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
 
   return (
     <div className="grid gap-4 pb-6">
@@ -6447,17 +6712,25 @@ function SettingsProfileTab({
               <div className="sm:col-span-2">
                 <Label>Avatar</Label>
                 <div className="mt-1.5 flex flex-wrap items-center gap-3">
-                  <div className="grid size-20 place-items-center rounded-2xl border border-border bg-background text-2xl font-semibold shadow-xs/5">
-                    {initials}
-                  </div>
+                  <AvatarTile initials={initials} src={avatarUrl} />
                   <div className="grid gap-2">
                     <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(event) =>
+                          void handleProfileAvatarUpload(event.target.files?.[0])
+                        }
+                        ref={profileAvatarInputRef}
+                        type="file"
+                      />
                       <Button
-                        onClick={() => setProfileDirty(true)}
+                        disabled={uploadingAvatar}
+                        onClick={() => profileAvatarInputRef.current?.click()}
                         size="sm"
                         variant="outline"
                       >
-                        Upload photo
+                        {uploadingAvatar ? "Uploading..." : "Upload photo"}
                       </Button>
                       <Badge variant="success">Verified</Badge>
                     </div>
@@ -6468,43 +6741,62 @@ function SettingsProfileTab({
                 </div>
               </div>
               <SettingsProfileField
-                defaultValue={displayName}
                 label="Display name"
-                onChange={() => setProfileDirty(true)}
+                onChange={(event) =>
+                  updateProfileValue("displayName", event.target.value)
+                }
+                value={values.displayName}
               />
               <SettingsProfileField
-                defaultValue={email}
                 label="Email"
-                onChange={() => setProfileDirty(true)}
                 readOnly
+                value={values.email}
               />
+              <div className="grid gap-1.5">
+                <Label>Role</Label>
+                <Select
+                  onValueChange={(value) =>
+                    updateProfileValue("roleTitle", value ?? "")
+                  }
+                  value={values.roleTitle}
+                >
+                  <SelectTrigger size="sm">
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {roleTitleOptions.map((roleTitle) => (
+                      <SelectItem key={roleTitle} value={roleTitle}>
+                        {roleTitle}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </div>
               <SettingsProfileField
-                defaultValue={role}
-                label="Role"
-                onChange={() => setProfileDirty(true)}
-              />
-              <SettingsProfileField
-                defaultValue={timezone}
-                label="Timezone"
-                onChange={() => setProfileDirty(true)}
+                label="Phone number"
+                onChange={(event) =>
+                  updateProfileValue("phoneNumber", event.target.value)
+                }
+                placeholder="+962 79 000 0000"
+                value={values.phoneNumber}
               />
               <div className="sm:col-span-2">
                 <Label htmlFor="profile-bio">Bio</Label>
                 <Textarea
                   className="mt-1.5"
-                  defaultValue={bio}
                   id="profile-bio"
-                  onChange={() => setProfileDirty(true)}
+                  onChange={(event) => updateProfileValue("bio", event.target.value)}
                   size="sm"
+                  value={values.bio}
                 />
               </div>
               <div className="flex justify-end sm:col-span-2">
                 <Button
-                  disabled={!profileDirty}
-                  onClick={() => setProfileDirty(false)}
+                  disabled={!profileDirty || savingProfile}
+                  onClick={saveProfile}
                   size="sm"
                 >
-                  Save changes
+                  {savingProfile ? "Saving..." : "Save changes"}
                 </Button>
               </div>
             </div>
@@ -6537,28 +6829,88 @@ function SettingsProfileTab({
           description={`We will send reset instructions to ${email || "the account email"}.`}
           title="Password reset"
         >
-          <SettingsActionDialogButton
-            confirmLabel="Send link"
-            description={`A password reset link will be sent to ${email || "the account email"}.`}
-            title="Send password reset"
-            triggerLabel="Send reset link"
-          />
+          <SettingsResetPasswordButton email={email} />
         </SettingsRow>
       </SettingsSection>
     </div>
   );
 }
 
+function SettingsResetPasswordButton({ email }: { email: string }) {
+  const [open, setOpen] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function sendResetLink() {
+    if (!email) {
+      setMessage("This account does not have an email address yet.");
+      return;
+    }
+
+    setSending(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/auth/reset-password", {
+        body: JSON.stringify({ email }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = asRecord(await response.json().catch(() => ({})));
+
+      if (!response.ok) {
+        throw new Error(asString(payload.error, "Could not send reset link"));
+      }
+
+      setMessage("Reset link sent. Check your email inbox.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not send reset link");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <Dialog onOpenChange={setOpen} open={open}>
+      <Button onClick={() => setOpen(true)} size="sm" variant="outline">
+        Send reset link
+      </Button>
+      <DialogPopup className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Send password reset</DialogTitle>
+          <DialogDescription>
+            A password reset link will be sent to {email || "the account email"}.
+          </DialogDescription>
+        </DialogHeader>
+        {message && (
+          <DialogPanel className="text-sm text-muted-foreground" scrollFade={false}>
+            {message}
+          </DialogPanel>
+        )}
+        <DialogFooter>
+          <DialogClose render={<Button type="button" variant="outline" />}>
+            Close
+          </DialogClose>
+          <Button disabled={sending || !email} onClick={sendResetLink} type="button">
+            {sending ? "Sending..." : "Send link"}
+          </Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
 function SettingsProfileField({
-  defaultValue,
   label,
   onChange,
+  placeholder,
   readOnly = false,
+  value,
 }: {
-  defaultValue: string;
   label: string;
-  onChange?: () => void;
+  onChange?: React.ChangeEventHandler<HTMLInputElement>;
+  placeholder?: string;
   readOnly?: boolean;
+  value: string;
 }) {
   const id = `profile-${label.toLowerCase().replace(/\s+/g, "-")}`;
 
@@ -6566,11 +6918,12 @@ function SettingsProfileField({
     <div className="grid gap-1.5">
       <Label htmlFor={id}>{label}</Label>
       <Input
-        defaultValue={defaultValue}
         id={id}
         onChange={onChange}
+        placeholder={placeholder}
         readOnly={readOnly}
         size="sm"
+        value={value}
       />
     </div>
   );
@@ -6595,16 +6948,129 @@ function SettingsWorkspaceTab({
   agentsCount,
   connectorsCount,
   members,
+  onWorkspaceChange,
   workspace,
 }: {
   agentsCount: number;
   connectorsCount: number;
   members: WorkspaceUser[];
+  onWorkspaceChange: (workspace: WorkspaceSummary | null) => void;
   workspace: WorkspaceSummary | null;
 }) {
-  const [workspaceDirty, setWorkspaceDirty] = useState(false);
   const workspaceName = workspace?.name ?? "Workspace";
   const workspaceSlug = workspace?.slug ?? "";
+  const workspaceInitials = getInitialsFromText(workspaceName);
+  const initialValues = {
+    category: workspace?.category ?? "",
+    name: workspaceName,
+    slug: workspaceSlug,
+  };
+  const [savedValues, setSavedValues] = useState(initialValues);
+  const [values, setValues] = useState(initialValues);
+  const [avatarUrl, setAvatarUrl] = useState(workspace?.avatarUrl ?? "");
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [savingWorkspace, setSavingWorkspace] = useState(false);
+  const workspaceAvatarInputRef = useRef<HTMLInputElement>(null);
+  const workspaceDirty =
+    values.category !== savedValues.category ||
+    values.name !== savedValues.name ||
+    values.slug !== savedValues.slug;
+
+  useEffect(() => {
+    setSavedValues(initialValues);
+    setValues(initialValues);
+    setAvatarUrl(workspace?.avatarUrl ?? "");
+  }, [workspace?.avatarUrl, workspace?.category, workspace?.name, workspace?.slug]);
+
+  function updateWorkspaceValue(key: keyof typeof values, value: string) {
+    setValues((current) => ({ ...current, [key]: value }));
+  }
+
+  async function handleWorkspaceAvatarUpload(file: File | undefined) {
+    if (!file || !workspace?.id) {
+      return;
+    }
+
+    setUploadingAvatar(true);
+    try {
+      const payload = await uploadAvatarFile({
+        file,
+        target: "workspace",
+        workspaceId: workspace.id,
+      });
+      const nextWorkspace = mapWorkspace(payload.workspace);
+      if (nextWorkspace) {
+        setAvatarUrl(nextWorkspace.avatarUrl ?? "");
+        onWorkspaceChange(nextWorkspace);
+      }
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Avatar upload failed");
+    } finally {
+      setUploadingAvatar(false);
+      if (workspaceAvatarInputRef.current) {
+        workspaceAvatarInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function saveWorkspace() {
+    if (!workspace?.id) {
+      return;
+    }
+
+    setSavingWorkspace(true);
+    try {
+      const response = await fetch(`/api/workspaces/${workspace.id}`, {
+        body: JSON.stringify({
+          workspace: {
+            category: values.category,
+            name: values.name,
+            slug: values.slug,
+          },
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      });
+
+      if (!response.ok) {
+        const payload = asRecord(await response.json().catch(() => ({})));
+        throw new Error(asString(payload.error, "Could not save workspace"));
+      }
+
+      const payload = asRecord(await response.json());
+      const nextWorkspace = mapWorkspace(payload.workspace);
+      if (nextWorkspace) {
+        onWorkspaceChange(nextWorkspace);
+        setSavedValues({
+          category: nextWorkspace.category ?? "",
+          name: nextWorkspace.name,
+          slug: nextWorkspace.slug,
+        });
+        setAvatarUrl(nextWorkspace.avatarUrl ?? avatarUrl);
+      }
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not save workspace");
+    } finally {
+      setSavingWorkspace(false);
+    }
+  }
+
+  async function inviteWorkspaceUser(email: string) {
+    if (!workspace?.id) {
+      return;
+    }
+
+    const response = await fetch(`/api/workspaces/${workspace.id}/members`, {
+      body: JSON.stringify({ email, role: "member" }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      const payload = asRecord(await response.json().catch(() => ({})));
+      throw new Error(asString(payload.error, "Could not send invite"));
+    }
+  }
 
   return (
     <div className="grid gap-4 pb-6">
@@ -6619,19 +7085,11 @@ function SettingsWorkspaceTab({
             />
             <div className="relative flex flex-wrap items-end justify-between gap-4 px-5 pb-5 pt-14">
               <div className="flex min-w-0 items-end gap-4">
-                <div className="grid size-20 shrink-0 place-items-center rounded-2xl border border-black/10 bg-background shadow-xs/5 dark:border-white/10">
-                  <div className="flex items-center gap-2">
-                    <AtmetLogo className="size-8" plain />
-                    <div className="h-8 w-px bg-border" />
-                    <div className="grid size-9 place-items-center rounded-xl bg-muted text-sm font-semibold">
-                      AW
-                    </div>
-                  </div>
-                </div>
+                <AvatarTile initials={workspaceInitials} src={avatarUrl} />
                 <div className="min-w-0 pb-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="truncate text-xl font-semibold leading-7">
-                      {workspaceName}
+                      {values.name || workspaceName}
                     </h2>
                     <Badge variant="success">Active</Badge>
                   </div>
@@ -6646,19 +7104,33 @@ function SettingsWorkspaceTab({
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                <input
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) =>
+                    void handleWorkspaceAvatarUpload(event.target.files?.[0])
+                  }
+                  ref={workspaceAvatarInputRef}
+                  type="file"
+                />
                 <Button
-                  onClick={() => setWorkspaceDirty(true)}
+                  disabled={!workspace?.id || uploadingAvatar}
+                  onClick={() => workspaceAvatarInputRef.current?.click()}
                   size="sm"
                   variant="outline"
                 >
-                  Upload avatar
+                  {uploadingAvatar
+                    ? "Uploading..."
+                    : workspace?.id
+                      ? "Upload avatar"
+                      : "No workspace"}
                 </Button>
                 <Button
-                  disabled={!workspaceDirty}
-                  onClick={() => setWorkspaceDirty(false)}
+                  disabled={!workspace?.id || !workspaceDirty || savingWorkspace}
+                  onClick={saveWorkspace}
                   size="sm"
                 >
-                  Save workspace
+                  {savingWorkspace ? "Saving..." : "Save workspace"}
                 </Button>
               </div>
             </div>
@@ -6667,37 +7139,39 @@ function SettingsWorkspaceTab({
           <div className="grid divide-y divide-border/70 lg:grid-cols-[minmax(0,1fr)_18rem] lg:divide-x lg:divide-y-0">
             <div className="grid gap-3 p-4 sm:grid-cols-2">
               <SettingsWorkspaceField
-                defaultValue={workspaceName}
                 label="Workspace name"
-                onChange={() => setWorkspaceDirty(true)}
+                onChange={(event) =>
+                  updateWorkspaceValue("name", event.target.value)
+                }
+                value={values.name}
               />
               <SettingsWorkspaceField
-                defaultValue={workspaceSlug}
                 label="Slug"
-                onChange={() => setWorkspaceDirty(true)}
+                onChange={(event) =>
+                  updateWorkspaceValue("slug", event.target.value)
+                }
+                value={values.slug}
               />
               <SettingsWorkspaceField
-                defaultValue=""
                 label="Category"
-                onChange={() => setWorkspaceDirty(true)}
-              />
-              <SettingsWorkspaceField
-                defaultValue="Asia/Amman"
-                label="Default timezone"
-                onChange={() => setWorkspaceDirty(true)}
+                onChange={(event) =>
+                  updateWorkspaceValue("category", event.target.value)
+                }
+                placeholder="Workspace intelligence"
+                value={values.category}
               />
               <div className="sm:col-span-2">
                 <Label htmlFor="workspace-url">Workspace URL</Label>
-                <Group className="mt-1 h-7 sm:h-6.5">
+                <Group className="mt-1 h-7">
                   <Input
                     className="h-full w-full text-sm [&_[data-slot=input]]:h-full [&_[data-slot=input]]:leading-none"
                     id="workspace-url"
                     readOnly
                     size="sm"
-                    value={`https://app.atmetai.com/workspace/${workspaceSlug}`}
+                    value={`https://app.atmetai.com/workspace/${values.slug}`}
                   />
                   <GroupSeparator />
-                  <Button className="h-full sm:h-full" size="sm" variant="outline">
+                  <Button className="h-full" size="sm" variant="outline">
                     Copy
                   </Button>
                 </Group>
@@ -6708,18 +7182,35 @@ function SettingsWorkspaceTab({
               <SettingsProfileInsight label="Members" value={`${members.length} active`} />
               <SettingsProfileInsight label="Default role" value="Member" />
               <SettingsProfileInsight label="Approval queue" value="0 requests" />
-              <SettingsProfileInsight label="Created" value="Not recorded" />
+              <SettingsProfileInsight
+                label="Created"
+                value={formatDateLabel(workspace?.createdAt) || "Not recorded"}
+              />
             </div>
           </div>
         </FramePanel>
       </Frame>
 
-      <SettingsWorkspaceUsersTable users={members} />
+      <SettingsWorkspaceUsersTable
+        onInviteUser={inviteWorkspaceUser}
+        users={members}
+        workspaceName={workspaceName}
+      />
     </div>
   );
 }
 
-function SettingsWorkspaceUsersTable({ users }: { users: WorkspaceUser[] }) {
+function SettingsWorkspaceUsersTable({
+  onInviteUser,
+  users,
+  workspaceName,
+}: {
+  onInviteUser: (email: string) => void | Promise<void>;
+  users: WorkspaceUser[];
+  workspaceName: string;
+}) {
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+
   return (
     <Frame className="bg-muted/60">
       <FramePanel className="overflow-hidden p-0">
@@ -6735,26 +7226,17 @@ function SettingsWorkspaceUsersTable({ users }: { users: WorkspaceUser[] }) {
               </p>
             </div>
           </div>
-          <SettingsActionDialogButton
-            confirmLabel="Send invite"
-            description="Invite a teammate to this workspace and choose their starting role."
-            icon={PlusSignIcon}
-            title="Invite user"
-            triggerLabel="Invite user"
-          >
-            <div className="grid gap-2">
-              <Label>Email</Label>
-              <Input placeholder="teammate@company.com" size="sm" />
-            </div>
-            <div className="grid gap-2">
-              <Label>Role</Label>
-              <Button className="justify-between" size="sm" variant="outline">
-                Member
-                <Icon icon={ChevronDownIcon} />
-              </Button>
-            </div>
-          </SettingsActionDialogButton>
+          <Button onClick={() => setInviteDialogOpen(true)} size="sm" variant="outline">
+            <Icon icon={PlusSignIcon} />
+            Invite user
+          </Button>
         </div>
+        <WorkspaceInviteDialog
+          onInvite={onInviteUser}
+          onOpenChange={setInviteDialogOpen}
+          open={inviteDialogOpen}
+          workspaceName={workspaceName}
+        />
 
         <Table>
           <TableHeader>
@@ -6771,9 +7253,11 @@ function SettingsWorkspaceUsersTable({ users }: { users: WorkspaceUser[] }) {
               <TableRow key={user.email}>
                 <TableCell>
                   <div className="flex min-w-0 items-center gap-2">
-                    <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-xs font-semibold">
-                      {user.initials}
-                    </div>
+                    <AvatarTile
+                      className="size-8 rounded-lg border-0 bg-muted text-xs shadow-none"
+                      initials={user.initials}
+                      src={user.avatarUrl}
+                    />
                     <div className="min-w-0">
                       <p className="truncate font-medium leading-5">
                         {user.name}
@@ -6859,13 +7343,15 @@ function SettingsWorkspaceUsersTable({ users }: { users: WorkspaceUser[] }) {
 }
 
 function SettingsWorkspaceField({
-  defaultValue,
   label,
   onChange,
+  placeholder,
+  value,
 }: {
-  defaultValue: string;
   label: string;
-  onChange?: () => void;
+  onChange?: React.ChangeEventHandler<HTMLInputElement>;
+  placeholder?: string;
+  value: string;
 }) {
   const id = `workspace-${label.toLowerCase().replace(/\s+/g, "-")}`;
 
@@ -6873,17 +7359,71 @@ function SettingsWorkspaceField({
     <div className="grid gap-1">
       <Label htmlFor={id}>{label}</Label>
       <Input
-        className="text-sm [&_[data-slot=input]]:h-7 [&_[data-slot=input]]:leading-7 sm:[&_[data-slot=input]]:h-6.5 sm:[&_[data-slot=input]]:leading-6.5"
-        defaultValue={defaultValue}
+        className="h-8 text-sm [&_[data-slot=input]]:h-8 [&_[data-slot=input]]:leading-8"
         id={id}
         onChange={onChange}
+        placeholder={placeholder}
         size="sm"
+        value={value}
       />
     </div>
   );
 }
 
-function SettingsGeneralTab() {
+function SettingsGeneralTab({
+  onWorkspaceSettingsChange,
+  workspaceId,
+  workspaceSettings,
+}: {
+  onWorkspaceSettingsChange: (settings: DatabaseRecord | null) => void;
+  workspaceId: string | null;
+  workspaceSettings: DatabaseRecord | null;
+}) {
+  const [soundEnabled, setSoundEnabled] = useState(
+    asBoolean(workspaceSettings?.sound_enabled, true),
+  );
+  const [timezone, setTimezone] = useState(
+    asString(workspaceSettings?.default_timezone, "Asia/Amman"),
+  );
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  async function saveGeneralSetting(patch: DatabaseRecord) {
+    if (!workspaceId) {
+      return;
+    }
+
+    setSavingSettings(true);
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/settings`, {
+        body: JSON.stringify(patch),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      });
+
+      if (!response.ok) {
+        const payload = asRecord(await response.json().catch(() => ({})));
+        throw new Error(asString(payload.error, "Could not save settings"));
+      }
+
+      const payload = asRecord(await response.json());
+      onWorkspaceSettingsChange(asRecord(payload.settings));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not save settings");
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
+  function updateSoundEnabled(checked: boolean) {
+    setSoundEnabled(checked);
+    void saveGeneralSetting({ sound_enabled: checked });
+  }
+
+  function updateTimezone(value: string) {
+    setTimezone(value);
+    void saveGeneralSetting({ default_timezone: value });
+  }
+
   return (
     <SettingsTabGrid>
       <SettingsThemeSelector />
@@ -6893,8 +7433,10 @@ function SettingsGeneralTab() {
         title="General preferences"
       >
         <SettingsSwitchRow
-          defaultChecked
+          checked={soundEnabled}
           description="Enable sound effects for notifications and completed actions."
+          disabled={savingSettings || !workspaceId}
+          onCheckedChange={updateSoundEnabled}
           title="Sound"
         />
         <SettingsRow
@@ -6907,7 +7449,22 @@ function SettingsGeneralTab() {
           </Button>
         </SettingsRow>
         <SettingsRow description="Used for schedules and run history." title="Timezone">
-          <Button size="sm" variant="outline">Asia/Amman</Button>
+          <Select
+            disabled={savingSettings || !workspaceId}
+            onValueChange={(value) => updateTimezone(value ?? "Asia/Amman")}
+            value={timezone}
+          >
+            <SelectTrigger className="min-w-44" size="sm">
+              <SelectValue placeholder="Select timezone" />
+            </SelectTrigger>
+            <SelectPopup align="end">
+              {timezoneOptions.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
         </SettingsRow>
         <SettingsRow description="Applied to billing, usage, and changelog dates." title="Date format">
           <Button size="sm" variant="outline">System default</Button>
@@ -7447,19 +8004,37 @@ function SettingsRow({
 }
 
 function SettingsSwitchRow({
+  checked,
   defaultChecked = false,
   description,
+  disabled = false,
+  onCheckedChange,
   title,
 }: {
+  checked?: boolean;
   defaultChecked?: boolean;
   description: string;
+  disabled?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
   title: string;
 }) {
-  const [checked, setChecked] = useState(defaultChecked);
+  const [internalChecked, setInternalChecked] = useState(defaultChecked);
+  const currentChecked = checked ?? internalChecked;
+
+  function updateChecked(nextChecked: boolean) {
+    if (checked === undefined) {
+      setInternalChecked(nextChecked);
+    }
+    onCheckedChange?.(nextChecked);
+  }
 
   return (
     <SettingsRow description={description} title={title}>
-      <Switch checked={checked} onCheckedChange={setChecked} />
+      <Switch
+        checked={currentChecked}
+        disabled={disabled}
+        onCheckedChange={updateChecked}
+      />
     </SettingsRow>
   );
 }
@@ -7675,7 +8250,7 @@ function AdminOverviewTab({ adminData }: { adminData: AdminData }) {
         </div>
         <div className="grid gap-3 border-t border-border/70 p-4 lg:grid-cols-[1.2fr_0.8fr]">
           <AdminBarChart bars={runBars} title="Run volume" />
-          <AdminPlanMix />
+          <AdminPlanMix workspaces={adminData.workspaces} />
         </div>
       </SettingsSection>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -7784,12 +8359,24 @@ function AdminBarChart({
   );
 }
 
-function AdminPlanMix() {
-  const plans = [
-    ["Pro", 52, "bg-emerald-500/60 dark:bg-emerald-400/45"],
-    ["Business", 31, "bg-sky-500/60 dark:bg-sky-400/45"],
-    ["Starter", 17, "bg-violet-500/60 dark:bg-violet-400/45"],
-  ] satisfies readonly [string, number, string][];
+function AdminPlanMix({ workspaces }: { workspaces: AdminWorkspaceRow[] }) {
+  const planCounts = workspaces.reduce<Record<string, number>>((acc, [, , plan]) => {
+    const label = plan === "No plan" ? "No plan" : plan[0]?.toUpperCase() + plan.slice(1);
+    acc[label] = (acc[label] ?? 0) + 1;
+    return acc;
+  }, {});
+  const total = Math.max(1, workspaces.length);
+  const colors = [
+    "bg-emerald-500/60 dark:bg-emerald-400/45",
+    "bg-sky-500/60 dark:bg-sky-400/45",
+    "bg-violet-500/60 dark:bg-violet-400/45",
+    "bg-amber-500/60 dark:bg-amber-400/45",
+  ];
+  const plans = Object.entries(planCounts).map(([label, count], index) => [
+    label,
+    Math.round((count / total) * 100),
+    colors[index % colors.length],
+  ] satisfies [string, number, string]);
 
   return (
     <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
@@ -7798,7 +8385,7 @@ function AdminPlanMix() {
         Active workspace distribution by plan.
       </p>
       <div className="mt-5 grid gap-3">
-        {plans.map(([label, value, color]) => (
+        {(plans.length > 0 ? plans : [["No plan", 0, colors[0]]]).map(([label, value, color]) => (
           <div key={label}>
             <div className="flex items-center justify-between text-xs">
               <span>{label}</span>
@@ -8321,13 +8908,22 @@ function AdminWorkspacesTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map(([workspace, owner, plan, members, status]) => (
+          {rows.map(([workspace, owner, plan, members, status, , , , avatarUrl]) => (
             <TableRow
               className="cursor-pointer"
               key={workspace}
               onClick={() => onOpenProfile({ name: workspace, type: "workspace" })}
             >
-              <TableCell>{workspace}</TableCell>
+              <TableCell>
+                <div className="flex min-w-0 items-center gap-2">
+                  <AvatarTile
+                    className="size-8 rounded-lg border-0 bg-muted text-xs shadow-none"
+                    initials={getOptionInitials(workspace)}
+                    src={avatarUrl}
+                  />
+                  <span className="truncate">{workspace}</span>
+                </div>
+              </TableCell>
               <TableCell>{owner}</TableCell>
               <TableCell>{plan}</TableCell>
               <TableCell className="tabular-nums">{members}</TableCell>
@@ -8367,13 +8963,22 @@ function AdminUsersTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map(([user, email, workspace, role, status, lastActive]) => (
+          {rows.map(([user, email, workspace, role, status, lastActive, avatarUrl]) => (
             <TableRow
               className="cursor-pointer"
               key={`${user}-${workspace}`}
               onClick={() => onOpenProfile({ name: user, type: "user" })}
             >
-              <TableCell>{user}</TableCell>
+              <TableCell>
+                <div className="flex min-w-0 items-center gap-2">
+                  <AvatarTile
+                    className="size-8 rounded-lg border-0 bg-muted text-xs shadow-none"
+                    initials={getInitialsFromText(user || email)}
+                    src={avatarUrl}
+                  />
+                  <span className="truncate">{user}</span>
+                </div>
+              </TableCell>
               <TableCell className="text-muted-foreground">{email}</TableCell>
               <TableCell>{workspace}</TableCell>
               <TableCell>{role}</TableCell>
@@ -8622,6 +9227,26 @@ function AdminStatusBadge({ status }: { status: string }) {
         : "outline";
 
   return <Badge variant={variant}>{status}</Badge>;
+}
+
+function BootstrapErrorBanner({ error }: { error: string }) {
+  return (
+    <div
+      className="mb-3 rounded-lg border border-red-500/25 bg-red-500/8 px-3 py-2 text-sm text-red-600 dark:text-red-300"
+      role="alert"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span>{`Backend data did not load: ${error}`}</span>
+        <Button
+          onClick={() => window.location.reload()}
+          size="xs"
+          variant="outline"
+        >
+          Reload
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function EmptyPage({

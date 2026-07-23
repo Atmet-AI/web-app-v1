@@ -1,5 +1,42 @@
 import { isRouteResponse, requireUser } from "@/lib/api/auth";
 import { ok, serverError } from "@/lib/api/http";
+import { hasSupabaseServiceRoleKey } from "@/lib/supabase/admin";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+const noStoreHeaders = {
+  "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
+};
+
+function metadataString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function nameFromEmail(email: string) {
+  const localPart = email.split("@")[0] ?? "User";
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ") || "User";
+}
+
+function authMetadataProfile(user: { created_at?: string; email?: string | null; id: string; user_metadata?: Record<string, unknown> }) {
+  const email = user.email ?? "";
+  const metadata = user.user_metadata ?? {};
+
+  return {
+    avatar_url: metadataString(metadata.avatar_url),
+    bio: metadataString(metadata.bio),
+    created_at: user.created_at,
+    email,
+    full_name: metadataString(metadata.full_name) || nameFromEmail(email),
+    id: user.id,
+    phone_number: metadataString(metadata.phone_number),
+    role_title: metadataString(metadata.role_title) || "Product builder",
+  };
+}
 
 export async function GET() {
   try {
@@ -9,7 +46,9 @@ export async function GET() {
       return auth;
     }
 
-    const { data: memberships, error: membershipsError } = await auth.supabase
+    const dataClient = hasSupabaseServiceRoleKey() ? auth.admin : auth.supabase;
+
+    let { data: memberships, error: membershipsError } = await auth.supabase
       .from("workspace_members")
       .select("role, status, workspaces(*)")
       .eq("user_id", auth.user.id)
@@ -20,17 +59,18 @@ export async function GET() {
       throw membershipsError;
     }
 
-    const workspaceRecord = memberships?.[0]?.workspaces;
-    const workspace = Array.isArray(workspaceRecord) ? workspaceRecord[0] : workspaceRecord;
-    const workspaceId = workspace?.id as string | undefined;
+    let workspaceRecord = memberships?.[0]?.workspaces;
+    let workspace = Array.isArray(workspaceRecord) ? workspaceRecord[0] : workspaceRecord;
+    let workspaceId = workspace?.id as string | undefined;
+    const authEmail = auth.user.email ?? "";
 
     const [
-      { data: profile, error: profileError },
+      { data: rawProfile, error: profileError },
       { data: preferences, error: preferencesError },
       { data: changelogs, error: changelogsError },
     ] = await Promise.all([
-      auth.supabase.from("profiles").select("*").eq("id", auth.user.id).maybeSingle(),
-      auth.supabase.from("user_preferences").select("*").eq("user_id", auth.user.id).maybeSingle(),
+      dataClient.from("profiles").select("*").eq("id", auth.user.id).maybeSingle(),
+      dataClient.from("user_preferences").select("*").eq("user_id", auth.user.id).maybeSingle(),
       auth.supabase
         .from("changelogs")
         .select("*")
@@ -40,6 +80,206 @@ export async function GET() {
 
     if (profileError || preferencesError || changelogsError) {
       throw profileError ?? preferencesError ?? changelogsError;
+    }
+
+    const authProfile = authMetadataProfile(auth.user);
+    const authFullName = metadataString(auth.user.user_metadata?.full_name);
+    const authAvatarUrl = metadataString(auth.user.user_metadata?.avatar_url);
+    let profile = rawProfile;
+
+    if (!profile) {
+      const { data: insertedProfile, error: insertedProfileError } =
+        await dataClient
+          .from("profiles")
+          .insert({
+            avatar_url: authProfile.avatar_url || null,
+            bio: authProfile.bio || null,
+            email: authEmail,
+            full_name: authProfile.full_name,
+            id: auth.user.id,
+            phone_number: authProfile.phone_number || null,
+            role_title: authProfile.role_title,
+          })
+          .select("*")
+          .single();
+
+      if (insertedProfileError) {
+        profile = authProfile;
+      } else {
+        profile = insertedProfile;
+      }
+    } else if (
+      !profile.email ||
+      (!profile.full_name && authFullName) ||
+      (!profile.avatar_url && authAvatarUrl)
+    ) {
+      const { data: hydratedProfile, error: hydratedProfileError } =
+        await dataClient
+          .from("profiles")
+          .update({
+            avatar_url: profile.avatar_url || authAvatarUrl || null,
+            email: profile.email || authEmail,
+            full_name: profile.full_name || authFullName || nameFromEmail(authEmail),
+          })
+          .eq("id", auth.user.id)
+          .select("*")
+          .single();
+
+      if (!hydratedProfileError) {
+        profile = hydratedProfile ?? profile;
+      }
+    }
+
+    let userPreferences = preferences;
+    if (!userPreferences) {
+      const { data: insertedPreferences, error: insertedPreferencesError } =
+        await dataClient
+          .from("user_preferences")
+          .insert({ user_id: auth.user.id })
+          .select("*")
+          .single();
+
+      if (insertedPreferencesError) {
+        userPreferences = {
+          sound_enabled: true,
+          startup_page: "new-chat",
+          theme: "system",
+          user_id: auth.user.id,
+        };
+      } else {
+        userPreferences = insertedPreferences;
+      }
+    }
+
+    if (!workspaceId && authEmail && !profile?.onboarded_at) {
+      const { data: pendingInvite, error: pendingInviteError } = await dataClient
+        .from("workspace_invites")
+        .select("id")
+        .eq("email", authEmail.toLowerCase())
+        .is("accepted_at", null)
+        .gt("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (pendingInviteError) {
+        throw pendingInviteError;
+      }
+
+      if (pendingInvite) {
+        return ok(
+          {
+            profile,
+            setupUrl: "/signup?invite=1&type=invite",
+          },
+          { headers: noStoreHeaders },
+        );
+      }
+    }
+
+    if (!workspaceId) {
+      const { data: ownedWorkspace, error: ownedWorkspaceError } =
+        await dataClient
+          .from("workspaces")
+          .select("*")
+          .or(`owner_id.eq.${auth.user.id},created_by.eq.${auth.user.id}`)
+          .is("deleted_at", null)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+      if (!ownedWorkspaceError && ownedWorkspace) {
+        workspace = ownedWorkspace;
+        workspaceId = ownedWorkspace.id;
+
+        await dataClient
+          .from("workspace_members")
+          .upsert({
+            joined_at: new Date().toISOString(),
+            role: "owner",
+            status: "active",
+            user_id: auth.user.id,
+            workspace_id: workspaceId,
+          });
+
+        memberships = [
+          {
+            role: "owner",
+            status: "active",
+            workspaces: workspace,
+          },
+        ];
+      }
+    }
+
+    if (!workspaceId && profile?.is_super_admin) {
+      const { data: existingWorkspace, error: existingWorkspaceError } =
+        await auth.supabase
+          .from("workspaces")
+          .select("*")
+          .is("deleted_at", null)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+      if (existingWorkspaceError) {
+        throw existingWorkspaceError;
+      }
+
+      if (existingWorkspace) {
+        workspace = existingWorkspace;
+        workspaceId = existingWorkspace.id;
+      } else {
+        const defaultSlug = `workspace-${auth.user.id.slice(0, 8)}`;
+        const { data: createdWorkspace, error: createdWorkspaceError } =
+          await auth.supabase
+            .from("workspaces")
+            .insert({
+              category: "Workspace intelligence",
+              created_by: auth.user.id,
+              name: "Atmet Workspace",
+              owner_id: auth.user.id,
+              slug: defaultSlug,
+              status: "active",
+            })
+            .select("*")
+            .single();
+
+        if (createdWorkspaceError) {
+          throw createdWorkspaceError;
+        }
+
+        workspace = createdWorkspace;
+        workspaceId = createdWorkspace.id;
+      }
+
+      if (workspaceId) {
+        const { error: membershipRepairError } = await auth.supabase
+          .from("workspace_members")
+          .upsert({
+            joined_at: new Date().toISOString(),
+            role: "owner",
+            status: "active",
+            user_id: auth.user.id,
+            workspace_id: workspaceId,
+          });
+
+        if (membershipRepairError) {
+          throw membershipRepairError;
+        }
+
+        await auth.supabase
+          .from("workspace_settings")
+          .upsert({ workspace_id: workspaceId });
+
+        memberships = [
+          {
+            role: "owner",
+            status: "active",
+            workspaces: workspace,
+          },
+        ];
+      }
     }
 
     if (!workspaceId) {
@@ -52,7 +292,7 @@ export async function GET() {
         connections: [],
         members: [],
         memberships,
-        preferences,
+        preferences: userPreferences,
         profile,
         skills: [],
         subscription: null,
@@ -60,7 +300,7 @@ export async function GET() {
         workspace: null,
         workspaceSettings: null,
         workspaces: [],
-      });
+      }, { headers: noStoreHeaders });
     }
 
     const [
@@ -77,10 +317,13 @@ export async function GET() {
       { data: userLimits, error: userLimitsError },
     ] = await Promise.all([
       auth.supabase.from("workspace_settings").select("*").eq("workspace_id", workspaceId).maybeSingle(),
-      auth.supabase.from("workspace_members").select("*, profiles(*)").eq("workspace_id", workspaceId),
+      auth.supabase
+        .from("workspace_members")
+        .select("*, profiles:profiles!workspace_members_user_id_fkey(*)")
+        .eq("workspace_id", workspaceId),
       auth.supabase
         .from("chats")
-        .select("*, chat_messages(id, role, content, created_at)")
+        .select("*")
         .eq("workspace_id", workspaceId)
         .is("deleted_at", null)
         .order("pinned", { ascending: false })
@@ -88,7 +331,7 @@ export async function GET() {
       auth.supabase
         .from("skills")
         .select("*")
-        .or(`workspace_id.is.null,workspace_id.eq.${workspaceId}`)
+        .or(`source.eq.default,created_by.eq.${auth.user.id}`)
         .is("deleted_at", null)
         .order("source", { ascending: true })
         .order("name", { ascending: true }),
@@ -150,7 +393,7 @@ export async function GET() {
       connections,
       members,
       memberships,
-      preferences,
+      preferences: userPreferences,
       profile,
       skills,
       subscription,
@@ -158,7 +401,7 @@ export async function GET() {
       workspace,
       workspaceSettings,
       workspaces: memberships?.map((membership) => membership.workspaces).filter(Boolean) ?? [],
-    });
+    }, { headers: noStoreHeaders });
   } catch (error) {
     return serverError(error);
   }

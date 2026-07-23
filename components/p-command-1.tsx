@@ -74,7 +74,7 @@ export default function CommandPalette({
         render={
           <Button
             className={cn(
-              "hidden h-7 min-w-48 max-w-[38vw] justify-between rounded-lg bg-background px-2.5 text-muted-foreground text-xs ring-1 ring-sidebar-border/70 transition-[background-color,scale] duration-150 hover:bg-sidebar-accent active:scale-[0.96] sm:flex md:w-72",
+              "hidden h-7 min-w-48 max-w-[38vw] justify-between rounded-lg border-border/35 bg-background px-2.5 text-muted-foreground text-xs ring-1 ring-sidebar-border/25 transition-[background-color,scale] duration-150 hover:bg-sidebar-accent active:scale-[0.96] sm:flex md:w-72 dark:border-white/8 dark:ring-white/5",
               triggerClassName,
             )}
             variant="outline"

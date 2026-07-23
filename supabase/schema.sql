@@ -19,6 +19,7 @@ create table if not exists public.profiles (
   full_name text,
   avatar_url text,
   role_title text,
+  phone_number text,
   timezone text not null default 'Asia/Amman',
   bio text,
   is_super_admin boolean not null default false,
@@ -413,6 +414,7 @@ create table if not exists public.session_logs (
 create index if not exists workspace_members_user_id_idx on public.workspace_members(user_id);
 create index if not exists chats_workspace_id_idx on public.chats(workspace_id);
 create index if not exists skills_workspace_id_idx on public.skills(workspace_id);
+create index if not exists skills_created_by_idx on public.skills(created_by);
 create index if not exists workflow_agents_workspace_id_idx on public.workflow_agents(workspace_id);
 create index if not exists workflow_nodes_agent_id_idx on public.workflow_nodes(agent_id);
 create index if not exists usage_events_workspace_created_idx on public.usage_events(workspace_id, created_at desc);
@@ -771,6 +773,9 @@ alter table public.session_logs enable row level security;
 create policy "profiles own select" on public.profiles
 for select using (id = auth.uid() or public.is_super_admin());
 
+create policy "profiles own insert" on public.profiles
+for insert with check (id = auth.uid() or public.is_super_admin());
+
 create policy "profiles own update" on public.profiles
 for update using (id = auth.uid() or public.is_super_admin())
 with check (id = auth.uid() or public.is_super_admin());
@@ -878,18 +883,18 @@ for all using (public.has_workspace_permission(workspace_id, 'connectors.manage'
 with check (public.has_workspace_permission(workspace_id, 'connectors.manage'));
 
 create policy "skills read" on public.skills
-for select using (workspace_id is null or public.is_workspace_member(workspace_id) or public.is_super_admin());
+for select using (source = 'default' or created_by = auth.uid() or public.is_super_admin());
 
 create policy "skills manage" on public.skills
-for all using (workspace_id is not null and public.has_workspace_permission(workspace_id, 'skills.manage'))
-with check (workspace_id is not null and public.has_workspace_permission(workspace_id, 'skills.manage'));
+for all using (source = 'custom' and created_by = auth.uid())
+with check (source = 'custom' and created_by = auth.uid());
 
 create policy "skill versions read" on public.skill_versions
 for select using (
   exists (
     select 1 from public.skills s
     where s.id = skill_versions.skill_id
-      and (s.workspace_id is null or public.is_workspace_member(s.workspace_id) or public.is_super_admin())
+      and (s.source = 'default' or s.created_by = auth.uid() or public.is_super_admin())
   )
 );
 
@@ -898,8 +903,8 @@ for insert with check (
   exists (
     select 1 from public.skills s
     where s.id = skill_versions.skill_id
-      and s.workspace_id is not null
-      and public.has_workspace_permission(s.workspace_id, 'skills.manage')
+      and s.source = 'custom'
+      and s.created_by = auth.uid()
   )
 );
 

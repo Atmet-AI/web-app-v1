@@ -6,7 +6,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import Image from "next/image";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,6 +50,7 @@ function SignupShell() {
 }
 
 function SignupContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [password, setPassword] = useState("");
@@ -62,6 +63,8 @@ function SignupContent() {
   const [profileRole, setProfileRole] = useState("");
   const [phoneCountry, setPhoneCountry] = useState(phoneCountries[0].name);
   const [phoneNumber, setPhoneNumber] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     const query = window.matchMedia("(prefers-color-scheme: dark)");
@@ -79,14 +82,23 @@ function SignupContent() {
     return () => query.removeEventListener("change", syncSystemTheme);
   }, []);
 
-  const isInvitedUser =
-    searchParams.get("invite") === "1" ||
-    searchParams.get("type") === "invite";
+  const inviteParam = searchParams.get("invite") ?? "";
+  const inviteToken =
+    inviteParam && inviteParam !== "1" && inviteParam !== "true"
+      ? inviteParam
+      : "";
+  const isInvitedUser = Boolean(inviteParam) || searchParams.get("type") === "invite";
 
-  function submitSignup(event: React.FormEvent<HTMLFormElement>) {
+  async function submitSignup(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setErrorMessage("");
 
     if (step === 1) {
+      if (password !== confirmPassword) {
+        setErrorMessage("Passwords do not match.");
+        return;
+      }
+
       if (password && confirmPassword) {
         setStep(2);
       }
@@ -103,6 +115,66 @@ function SignupContent() {
         setStep(3);
       }
       return;
+    }
+
+    if (step === 3) {
+      const fullName = [firstName.trim(), secondName.trim()]
+        .filter(Boolean)
+        .join(" ");
+
+      if (!firstName.trim()) {
+        setErrorMessage("First name is required.");
+        return;
+      }
+
+      setIsSubmitting(true);
+
+      try {
+        const selectedCountry =
+          phoneCountries.find((country) => country.name === phoneCountry) ??
+          phoneCountries[0];
+        const response = await fetch("/api/auth/complete-signup", {
+          body: JSON.stringify({
+            inviteToken,
+            invited: isInvitedUser,
+            password,
+            profile: {
+              fullName,
+              phoneNumber: phoneNumber.trim()
+                ? `${selectedCountry.code} ${phoneNumber.trim()}`
+                : "",
+              roleTitle: profileRole,
+            },
+            workspace: isInvitedUser
+              ? {}
+              : {
+                  name: workspaceName,
+                },
+          }),
+          headers: {
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        });
+
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+
+        if (!response.ok) {
+          setErrorMessage(payload.error ?? "Could not complete setup.");
+          return;
+        }
+
+        router.replace("/");
+        router.refresh();
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error ? error.message : "Could not complete setup.",
+        );
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   }
 
@@ -136,6 +208,12 @@ function SignupContent() {
         </div>
 
         <form className="grid" onSubmit={submitSignup}>
+          {errorMessage && (
+            <div className="mb-5 rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-destructive text-sm">
+              {errorMessage}
+            </div>
+          )}
+
           {step === 1 && (
             <div className="grid gap-5">
               <PasswordField
@@ -156,7 +234,7 @@ function SignupContent() {
                 showPassword={showConfirmPassword}
                 value={confirmPassword}
               />
-              <Button className="mt-3 w-full" type="submit">
+              <Button className="mt-3 w-full" disabled={isSubmitting} type="submit">
                 Create password
                 <span className="grid size-5 place-items-center rounded-md bg-primary-foreground/12 text-sm leading-none">
                   ↵
@@ -185,7 +263,7 @@ function SignupContent() {
                 </div>
               </div>
 
-              <Button className="w-full" type="submit">
+              <Button className="w-full" disabled={isSubmitting} type="submit">
                 Accept invite
                 <span className="grid size-5 place-items-center rounded-md bg-primary-foreground/12 text-sm leading-none">
                   ↵
@@ -234,7 +312,7 @@ function SignupContent() {
                 />
               </div>
 
-              <Button className="w-full" type="submit">
+              <Button className="w-full" disabled={isSubmitting} type="submit">
                 Continue
                 <span className="grid size-5 place-items-center rounded-md bg-primary-foreground/12 text-sm leading-none">
                   ↵
@@ -339,8 +417,8 @@ function SignupContent() {
                 </div>
               </div>
 
-              <Button className="mt-2 w-full" type="submit">
-                Complete setup
+              <Button className="mt-2 w-full" disabled={isSubmitting} type="submit">
+                {isSubmitting ? "Completing..." : "Complete setup"}
                 <span className="grid size-5 place-items-center rounded-md bg-primary-foreground/12 text-sm leading-none">
                   ↵
                 </span>

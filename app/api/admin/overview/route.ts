@@ -1,5 +1,6 @@
 import { isRouteResponse, requireSuperAdmin } from "@/lib/api/auth";
 import { ok, serverError } from "@/lib/api/http";
+import { hasSupabaseServiceRoleKey } from "@/lib/supabase/admin";
 
 export async function GET() {
   try {
@@ -9,6 +10,8 @@ export async function GET() {
       return auth;
     }
 
+    const dataClient = hasSupabaseServiceRoleKey() ? auth.admin : auth.supabase;
+
     const [
       { count: workspaceCount, error: workspaceError },
       { count: userCount, error: userError },
@@ -17,12 +20,12 @@ export async function GET() {
       { data: auditLogs, error: auditError },
       { data: sessionLogs, error: sessionError },
     ] = await Promise.all([
-      auth.admin.from("workspaces").select("*", { count: "exact", head: true }).is("deleted_at", null),
-      auth.admin.from("profiles").select("*", { count: "exact", head: true }),
-      auth.admin.from("waitlist_requests").select("*", { count: "exact", head: true }).eq("status", "pending"),
-      auth.admin.from("usage_events").select("*").order("created_at", { ascending: false }).limit(200),
-      auth.admin.from("admin_audit_logs").select("*, profiles(full_name, email)").order("created_at", { ascending: false }).limit(20),
-      auth.admin.from("session_logs").select("*, profiles(full_name, email)").order("created_at", { ascending: false }).limit(20),
+      dataClient.from("workspaces").select("*", { count: "exact", head: true }).is("deleted_at", null),
+      dataClient.from("profiles").select("*", { count: "exact", head: true }),
+      dataClient.from("waitlist_requests").select("*", { count: "exact", head: true }).eq("status", "pending"),
+      dataClient.from("usage_events").select("*").order("created_at", { ascending: false }).limit(200),
+      dataClient.from("admin_audit_logs").select("*, profiles(full_name, email)").order("created_at", { ascending: false }).limit(20),
+      dataClient.from("session_logs").select("*, profiles(full_name, email)").order("created_at", { ascending: false }).limit(20),
     ]);
 
     if (workspaceError || userError || requestError || usageError || auditError || sessionError) {

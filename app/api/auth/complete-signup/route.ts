@@ -1,5 +1,6 @@
+import crypto from "node:crypto";
 import { isRouteResponse, requireUser } from "@/lib/api/auth";
-import { badRequest, created, jsonObject, ok, readJson, serverError, stringValue } from "@/lib/api/http";
+import { badRequest, booleanValue, created, jsonObject, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
 export async function POST(request: Request) {
   try {
@@ -12,6 +13,7 @@ export async function POST(request: Request) {
     const body = await readJson(request);
     const password = stringValue(body.password);
     const inviteToken = stringValue(body.inviteToken);
+    const invited = booleanValue(body.invited);
     const profile = jsonObject(body.profile);
     const workspace = jsonObject(body.workspace);
 
@@ -42,16 +44,78 @@ export async function POST(request: Request) {
       throw profileError;
     }
 
-    if (inviteToken) {
-      const { data, error } = await context.supabase.rpc("accept_workspace_invite", {
-        invite_token: inviteToken,
-      });
+    if (inviteToken || invited) {
+      const inviteEmail = (context.user.email ?? "").toLowerCase();
+      let inviteQuery = context.admin
+        .from("workspace_invites")
+        .select("id, workspace_id, email, role, invited_by")
+        .is("accepted_at", null)
+        .gt("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1);
 
-      if (error) {
-        return badRequest(error.message);
+      if (inviteToken) {
+        inviteQuery = inviteQuery.eq(
+          "token_hash",
+          crypto.createHash("sha256").update(inviteToken).digest("hex"),
+        );
+      } else {
+        inviteQuery = inviteQuery.eq("email", inviteEmail);
       }
 
-      return ok({ workspaceId: data, invited: true });
+      const { data: invites, error: inviteLookupError } = await inviteQuery;
+
+      if (inviteLookupError) {
+        throw inviteLookupError;
+      }
+
+      const invite = invites?.[0];
+
+      if (!invite) {
+        return badRequest("Invite is invalid or expired");
+      }
+
+      if (invite.email.toLowerCase() !== inviteEmail) {
+        return badRequest("This invite belongs to another email address");
+      }
+
+      const { error: membershipError } = await context.admin
+        .from("workspace_members")
+        .upsert({
+          invited_by: invite.invited_by,
+          joined_at: new Date().toISOString(),
+          role: invite.role,
+          status: "active",
+          updated_at: new Date().toISOString(),
+          user_id: context.user.id,
+          workspace_id: invite.workspace_id,
+        });
+
+      if (membershipError) {
+        throw membershipError;
+      }
+
+      const { error: inviteUpdateError } = await context.admin
+        .from("workspace_invites")
+        .update({
+          accepted_at: new Date().toISOString(),
+          accepted_by: context.user.id,
+        })
+        .eq("id", invite.id);
+
+      if (inviteUpdateError) {
+        throw inviteUpdateError;
+      }
+
+      await context.admin.auth.admin.updateUserById(context.user.id, {
+        user_metadata: {
+          ...context.user.user_metadata,
+          invite_setup_completed: true,
+          workspace_invite_id: null,
+        },
+      });
+
+      return ok({ workspaceId: invite.workspace_id, invited: true });
     }
 
     const workspaceName = stringValue(workspace.name);

@@ -9,7 +9,7 @@ export async function GET() {
       return auth;
     }
 
-    const { data, error } = await auth.admin
+    const { data, error } = await auth.supabase
       .from("workspace_usage_controls")
       .select("*, workspaces(name, slug)")
       .order("created_at", { ascending: false });
@@ -34,7 +34,7 @@ export async function PATCH(request: Request) {
 
     const body = await readJson(request);
     const workspaceId = stringValue(body.workspaceId);
-    const { data, error } = await auth.admin
+    const { data, error } = await auth.supabase
       .from("workspace_usage_controls")
       .upsert({
         workspace_id: workspaceId || null,

@@ -40,7 +40,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     const patch = jsonObject(await readJson(request));
-    const { data, error } = await auth.admin
+    const { data, error } = await auth.supabase
       .from("workspace_settings")
       .upsert({ ...patch, workspace_id: workspaceId })
       .select("*")

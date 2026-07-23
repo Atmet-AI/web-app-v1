@@ -17,7 +17,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
     const { data, error } = await auth.supabase
       .from("workspace_members")
-      .select("*, profiles(*)")
+      .select("*, profiles:profiles!workspace_members_user_id_fkey(*)")
       .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: true });
 
@@ -51,7 +51,7 @@ export async function POST(request: Request, context: RouteContext) {
     const rawToken = crypto.randomBytes(24).toString("hex");
     const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
     const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
-    const signupUrl = `${origin}/signup?invite=${rawToken}`;
+    const signupUrl = `${origin}/signup?invite=${rawToken}&type=invite`;
 
     const { data, error } = await auth.admin
       .from("workspace_invites")

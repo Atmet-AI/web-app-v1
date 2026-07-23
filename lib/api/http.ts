@@ -27,7 +27,17 @@ export function notFound(message = "Not found") {
 }
 
 export function serverError(error: unknown) {
-  const message = error instanceof Error ? error.message : "Unexpected server error";
+  const record =
+    error && typeof error === "object" && !Array.isArray(error)
+      ? (error as Record<string, unknown>)
+      : {};
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof record.message === "string"
+        ? record.message
+        : "Unexpected server error";
+
   return NextResponse.json({ error: message }, { status: 500 });
 }
 
