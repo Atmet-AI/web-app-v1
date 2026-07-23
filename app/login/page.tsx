@@ -102,6 +102,16 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
+    const error = new URLSearchParams(window.location.search).get("error");
+
+    if (error === "missing_supabase_env") {
+      setErrorMessage(
+        "Supabase environment variables are missing in this deployment.",
+      );
+    }
+  }, []);
+
+  useEffect(() => {
     if (!passwordVisible) {
       return;
     }

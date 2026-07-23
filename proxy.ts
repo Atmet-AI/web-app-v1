@@ -1,18 +1,35 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-function getRequiredEnv(name: string) {
-  const value = process.env[name];
+function getSupabaseProxyEnv() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (!value) {
-    throw new Error(`${name} is required`);
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return null;
   }
 
-  return value;
+  return {
+    supabaseAnonKey,
+    supabaseUrl,
+  };
 }
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  const env = getSupabaseProxyEnv();
+
+  if (!env) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("error", "missing_supabase_env");
+
+    if (pathname === "/login") {
+      return NextResponse.next({ request });
+    }
+
+    return NextResponse.redirect(loginUrl);
+  }
+
   let pendingCookies: Array<{
     name: string;
     options?: Parameters<typeof NextResponse.next>["0"] extends never
@@ -25,8 +42,8 @@ export async function proxy(request: NextRequest) {
   });
 
   const supabase = createServerClient(
-    getRequiredEnv("NEXT_PUBLIC_SUPABASE_URL"),
-    getRequiredEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    env.supabaseUrl,
+    env.supabaseAnonKey,
     {
       cookies: {
         getAll() {
