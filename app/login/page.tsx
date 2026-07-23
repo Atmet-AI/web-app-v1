@@ -66,6 +66,8 @@ const countryOptions = [
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [waitlistName, setWaitlistName] = useState("");
   const [waitlistCompany, setWaitlistCompany] = useState("");
@@ -75,7 +77,7 @@ export default function LoginPage() {
   const [waitlistSource, setWaitlistSource] = useState("");
   const [waitlistCountry, setWaitlistCountry] = useState("");
   const [waitlistNotes, setWaitlistNotes] = useState("");
-  const [mode, setMode] = useState<"login" | "forgot" | "waitlist">("login");
+  const [mode, setMode] = useState<"login" | "forgot" | "reset" | "waitlist">("login");
   const [otpVisible, setOtpVisible] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
@@ -83,6 +85,7 @@ export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
+  const newPasswordInputRef = useRef<HTMLInputElement>(null);
   const otpInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -102,13 +105,54 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    const error = new URLSearchParams(window.location.search).get("error");
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get("error");
+    const code = params.get("code");
+    const reset = params.get("reset");
 
     if (error === "missing_supabase_env") {
       setErrorMessage(
         "Supabase environment variables are missing in this deployment.",
       );
     }
+
+    if (reset !== "1") {
+      return;
+    }
+
+    setMode("reset");
+    setPasswordVisible(false);
+    setOtpVisible(false);
+
+    if (!code) {
+      setMode("forgot");
+      return;
+    }
+
+    setIsSubmitting(true);
+    fetch("/api/auth/exchange-code", {
+      body: JSON.stringify({ code }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.error ?? "Reset link is invalid or expired.");
+        }
+
+        window.history.replaceState(null, "", "/login?reset=1");
+        window.setTimeout(() => newPasswordInputRef.current?.focus(), 180);
+      })
+      .catch((exchangeError) => {
+        setMode("forgot");
+        setErrorMessage(
+          exchangeError instanceof Error
+            ? exchangeError.message
+            : "Reset link is invalid or expired.",
+        );
+      })
+      .finally(() => setIsSubmitting(false));
   }, []);
 
   useEffect(() => {
@@ -172,6 +216,38 @@ export default function LoginPage() {
         }
 
         setWaitlistSubmitted(true);
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    if (mode === "reset") {
+      if (!newPassword || !confirmPassword) {
+        setErrorMessage("Enter and confirm your new password.");
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        setErrorMessage("Passwords do not match.");
+        return;
+      }
+
+      setIsSubmitting(true);
+      try {
+        const response = await fetch("/api/auth/update-password", {
+          body: JSON.stringify({ password: newPassword }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          setErrorMessage(payload.error ?? "Could not update password.");
+          return;
+        }
+
+        window.location.href = "/";
       } finally {
         setIsSubmitting(false);
       }
@@ -286,6 +362,8 @@ export default function LoginPage() {
     setMode("login");
     setErrorMessage("");
     setOtpVisible(false);
+    setNewPassword("");
+    setConfirmPassword("");
     setWaitlistSubmitted(false);
   }
 
@@ -298,20 +376,25 @@ export default function LoginPage() {
   }
 
   const isForgotMode = mode === "forgot";
+  const isResetMode = mode === "reset";
   const isWaitlistMode = mode === "waitlist";
   const shouldHideEmail = isForgotMode && otpVisible;
   const title = isWaitlistMode
     ? waitlistSubmitted
       ? "You’re on the list"
       : "Join waitlist"
-    : isForgotMode
+    : isResetMode
+      ? "Create new password"
+      : isForgotMode
       ? "Reset password"
       : "Welcome back";
   const description = isWaitlistMode
     ? waitlistSubmitted
       ? "We will email you when your Atmet workspace is ready."
       : "Tell us a little about yourself and we'll be in touch."
-    : isForgotMode
+    : isResetMode
+      ? "Choose a new password for your Atmet account."
+      : isForgotMode
       ? otpVisible
         ? "Enter the code we sent to your email."
         : "Enter your email and we will send you an OTP."
@@ -494,7 +577,7 @@ export default function LoginPage() {
               <div
                 className={cn(
                   "grid overflow-hidden transition-[grid-template-rows,opacity,translate,margin] duration-300 ease-out",
-                  shouldHideEmail
+                  shouldHideEmail || isResetMode
                     ? "mt-0 grid-rows-[0fr] -translate-y-1 opacity-0"
                     : "grid-rows-[1fr] translate-y-0 opacity-100",
                 )}
@@ -520,7 +603,7 @@ export default function LoginPage() {
               <div
                 className={cn(
                   "grid overflow-hidden transition-[grid-template-rows,opacity,translate,margin] duration-300 ease-out",
-                  passwordVisible && !isForgotMode
+                  passwordVisible && !isForgotMode && !isResetMode
                     ? "mt-5 grid-rows-[1fr] translate-y-0 opacity-100"
                     : "mt-0 grid-rows-[0fr] -translate-y-1 opacity-0",
                 )}
@@ -587,6 +670,57 @@ export default function LoginPage() {
                 </div>
               </div>
 
+              <div
+                className={cn(
+                  "grid overflow-hidden transition-[grid-template-rows,opacity,translate,margin] duration-300 ease-out",
+                  isResetMode
+                    ? "grid-rows-[1fr] translate-y-0 opacity-100"
+                    : "mt-0 grid-rows-[0fr] -translate-y-1 opacity-0",
+                )}
+              >
+                <div className="grid min-h-0 gap-5">
+                  <div className="grid gap-1.5">
+                    <Label
+                      className="text-muted-foreground"
+                      htmlFor="new-password"
+                    >
+                      New password
+                    </Label>
+                    <Input
+                      autoComplete="new-password"
+                      disabled={!isResetMode || isSubmitting}
+                      id="new-password"
+                      nativeInput
+                      onChange={(event) => setNewPassword(event.target.value)}
+                      placeholder="Create a new password"
+                      ref={newPasswordInputRef}
+                      required={isResetMode}
+                      type="password"
+                      value={newPassword}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label
+                      className="text-muted-foreground"
+                      htmlFor="confirm-new-password"
+                    >
+                      Confirm password
+                    </Label>
+                    <Input
+                      autoComplete="new-password"
+                      disabled={!isResetMode || isSubmitting}
+                      id="confirm-new-password"
+                      nativeInput
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      placeholder="Confirm your new password"
+                      required={isResetMode}
+                      type="password"
+                      value={confirmPassword}
+                    />
+                  </div>
+                </div>
+              </div>
+
               {errorMessage && (
                 <p className="mt-4 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-center text-destructive text-sm">
                   {errorMessage}
@@ -602,6 +736,8 @@ export default function LoginPage() {
                   ? otpVisible
                     ? "Verify OTP"
                     : "Send OTP"
+                  : isResetMode
+                    ? "Update password"
                   : passwordVisible
                     ? "Sign in"
                     : "Continue"}
@@ -612,7 +748,7 @@ export default function LoginPage() {
             </>
           )}
 
-          {!isWaitlistMode && (
+          {!isWaitlistMode && !isResetMode && (
             <button
               className="mx-auto mt-4 min-h-8 rounded-md px-2 text-muted-foreground text-sm outline-none transition-[color,scale] duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]"
               onClick={isForgotMode ? backToSignIn : startForgotPassword}

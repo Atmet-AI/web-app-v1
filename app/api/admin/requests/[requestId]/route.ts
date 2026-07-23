@@ -58,6 +58,34 @@ function signupEmailHtml({
   `;
 }
 
+function getSignupPath(signupUrl: string) {
+  try {
+    const parsedSignupUrl = new URL(signupUrl);
+    return `${parsedSignupUrl.pathname}${parsedSignupUrl.search}`;
+  } catch {
+    return signupUrl.startsWith("/") ? signupUrl : "/signup";
+  }
+}
+
+function getAppConfirmLink({
+  signupUrl,
+  tokenHash,
+  type,
+}: {
+  signupUrl: string;
+  tokenHash: string;
+  type: string;
+}) {
+  const origin = new URL(signupUrl).origin;
+  const confirmUrl = new URL("/auth/confirm", origin);
+
+  confirmUrl.searchParams.set("token_hash", tokenHash);
+  confirmUrl.searchParams.set("type", type);
+  confirmUrl.searchParams.set("next", getSignupPath(signupUrl));
+
+  return confirmUrl.toString();
+}
+
 async function generateWaitlistActionLink({
   auth,
   email,
@@ -84,7 +112,14 @@ async function generateWaitlistActionLink({
   });
 
   if (!inviteResult.error) {
-    return inviteResult.data.properties?.action_link ?? "";
+    const properties = inviteResult.data.properties;
+    return properties?.hashed_token
+      ? getAppConfirmLink({
+          signupUrl,
+          tokenHash: properties.hashed_token,
+          type: properties.verification_type ?? "invite",
+        })
+      : properties?.action_link ?? "";
   }
 
   if (!isAlreadyRegisteredError(inviteResult.error)) {
@@ -103,7 +138,14 @@ async function generateWaitlistActionLink({
     throw magicLinkResult.error;
   }
 
-  return magicLinkResult.data.properties?.action_link ?? "";
+  const properties = magicLinkResult.data.properties;
+  return properties?.hashed_token
+    ? getAppConfirmLink({
+        signupUrl,
+        tokenHash: properties.hashed_token,
+        type: properties.verification_type ?? "magiclink",
+      })
+    : properties?.action_link ?? "";
 }
 
 async function sendWaitlistApprovalEmail({

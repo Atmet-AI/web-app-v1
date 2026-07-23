@@ -83,8 +83,18 @@ export async function proxy(request: NextRequest) {
 
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.searchParams.delete("code");
-    redirectUrl.searchParams.set("invite", redirectUrl.searchParams.get("invite") ?? "1");
-    redirectUrl.searchParams.set("type", "invite");
+    const hasSignupIntent =
+      redirectUrl.searchParams.has("approved") ||
+      redirectUrl.searchParams.has("request") ||
+      redirectUrl.searchParams.has("invite");
+
+    if (!hasSignupIntent || redirectUrl.searchParams.get("type") === "invite") {
+      redirectUrl.searchParams.set(
+        "invite",
+        redirectUrl.searchParams.get("invite") ?? "1",
+      );
+      redirectUrl.searchParams.set("type", "invite");
+    }
 
     const redirectResponse = NextResponse.redirect(redirectUrl);
     pendingCookies.forEach(({ name, value, options }) => {
