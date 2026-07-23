@@ -38,6 +38,68 @@ function authMetadataProfile(user: { created_at?: string; email?: string | null;
   };
 }
 
+type BootstrapAuth = Exclude<Awaited<ReturnType<typeof requireUser>>, Response>;
+type WorkspaceMemberRow = Record<string, unknown> & {
+  profiles?: Record<string, unknown> | null;
+  user_id?: string;
+};
+
+function toRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringList(value: unknown[]) {
+  return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+}
+
+async function enrichWorkspaceMembers(
+  auth: BootstrapAuth,
+  members: unknown[] | null,
+) {
+  const rows = (members ?? []).map((member) => toRecord(member) as WorkspaceMemberRow);
+  const memberUserIds = stringList(rows.map((member) => member.user_id));
+
+  if (memberUserIds.length === 0 || !hasSupabaseServiceRoleKey()) {
+    return rows;
+  }
+
+  const { data: profileRows } = await auth.admin
+    .from("profiles")
+    .select("*")
+    .in("id", memberUserIds);
+
+  const profilesById = new Map(
+    (profileRows ?? []).map((profile) => [String(profile.id), toRecord(profile)]),
+  );
+
+  return rows.map((member) => {
+    const userId = typeof member.user_id === "string" ? member.user_id : "";
+    const storedProfile = profilesById.get(userId) ?? toRecord(member.profiles);
+    const authProfile: Record<string, unknown> =
+      userId === auth.user.id ? authMetadataProfile(auth.user) : {};
+    const mergedProfile = {
+      ...authProfile,
+      ...storedProfile,
+      avatar_url:
+        storedProfile.avatar_url ?? authProfile.avatar_url ?? null,
+      email:
+        storedProfile.email ?? authProfile.email ?? "",
+      full_name:
+        storedProfile.full_name ?? authProfile.full_name ?? "",
+      last_seen_at:
+        storedProfile.last_seen_at ??
+        (userId === auth.user.id ? auth.user.last_sign_in_at : null),
+    };
+
+    return {
+      ...member,
+      profiles: mergedProfile,
+    };
+  });
+}
+
 export async function GET() {
   try {
     const auth = await requireUser();
@@ -319,7 +381,7 @@ export async function GET() {
       auth.supabase.from("workspace_settings").select("*").eq("workspace_id", workspaceId).maybeSingle(),
       auth.supabase
         .from("workspace_members")
-        .select("*, profiles:profiles!workspace_members_user_id_fkey(*)")
+        .select("*")
         .eq("workspace_id", workspaceId),
       auth.supabase
         .from("chats")
@@ -378,6 +440,8 @@ export async function GET() {
       throw errors[0];
     }
 
+    const enrichedMembers = await enrichWorkspaceMembers(auth, members);
+
     const totals = (usageEvents ?? []).reduce<Record<string, number>>((acc, event) => {
       const resource = String(event.resource);
       acc[resource] = (acc[resource] ?? 0) + Number(event.quantity ?? 0);
@@ -391,7 +455,7 @@ export async function GET() {
       changelogs,
       chats,
       connections,
-      members,
+      members: enrichedMembers,
       memberships,
       preferences: userPreferences,
       profile,

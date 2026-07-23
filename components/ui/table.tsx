@@ -29,7 +29,7 @@ export function Table({
         {...props}
       />
     ),
-    className: "relative w-full overflow-x-auto",
+    className: "relative w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain",
     "data-slot": "table-container",
     "data-variant": variant,
   };

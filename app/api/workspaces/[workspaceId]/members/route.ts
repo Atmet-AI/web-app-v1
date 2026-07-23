@@ -6,6 +6,12 @@ type RouteContext = {
   params: Promise<{ workspaceId: string }>;
 };
 
+function toRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 export async function GET(_request: Request, context: RouteContext) {
   try {
     const { workspaceId } = await context.params;
@@ -17,7 +23,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
     const { data, error } = await auth.supabase
       .from("workspace_members")
-      .select("*, profiles:profiles!workspace_members_user_id_fkey(*)")
+      .select("*")
       .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: true });
 
@@ -25,7 +31,37 @@ export async function GET(_request: Request, context: RouteContext) {
       throw error;
     }
 
-    return ok({ members: data });
+    const rows = (data ?? []).map((member) => toRecord(member));
+    const userIds = rows
+      .map((member) => member.user_id)
+      .filter((userId): userId is string => typeof userId === "string");
+    const { data: profileRows } = await auth.admin
+      .from("profiles")
+      .select("*")
+      .in("id", userIds);
+    const profilesById = new Map(
+      (profileRows ?? []).map((profile) => [String(profile.id), toRecord(profile)]),
+    );
+    const members = rows.map((member) => {
+      const userId = typeof member.user_id === "string" ? member.user_id : "";
+      const storedProfile = profilesById.get(userId) ?? {};
+
+      return {
+        ...member,
+        profiles: {
+          ...storedProfile,
+          avatar_url: storedProfile.avatar_url ?? null,
+          email: storedProfile.email ?? "",
+          full_name: storedProfile.full_name ?? "",
+          last_seen_at:
+            storedProfile.last_seen_at ??
+            (userId === auth.user.id ? auth.user.last_sign_in_at : null) ??
+            null,
+        },
+      };
+    });
+
+    return ok({ members });
   } catch (error) {
     return serverError(error);
   }

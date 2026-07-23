@@ -24,8 +24,16 @@ export async function GET() {
       dataClient.from("profiles").select("*", { count: "exact", head: true }),
       dataClient.from("waitlist_requests").select("*", { count: "exact", head: true }).eq("status", "pending"),
       dataClient.from("usage_events").select("*").order("created_at", { ascending: false }).limit(200),
-      dataClient.from("admin_audit_logs").select("*, profiles(full_name, email)").order("created_at", { ascending: false }).limit(20),
-      dataClient.from("session_logs").select("*, profiles(full_name, email)").order("created_at", { ascending: false }).limit(20),
+      dataClient
+        .from("admin_audit_logs")
+        .select("*, profiles:profiles!admin_audit_logs_actor_id_fkey(full_name, email)")
+        .order("created_at", { ascending: false })
+        .limit(20),
+      dataClient
+        .from("session_logs")
+        .select("*, profiles:profiles!session_logs_user_id_fkey(full_name, email)")
+        .order("created_at", { ascending: false })
+        .limit(20),
     ]);
 
     if (workspaceError || userError || requestError || usageError || auditError || sessionError) {

@@ -136,6 +136,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
   TableBody,
@@ -163,6 +164,18 @@ type PageKey =
   | "changelogs"
   | "settings"
   | "admin";
+
+const pageKeyValues: PageKey[] = [
+  "chat",
+  "brain",
+  "agents",
+  "skills",
+  "connectors",
+  "usage",
+  "changelogs",
+  "settings",
+  "admin",
+];
 
 type NavigationItem = {
   icon: IconSvgElement;
@@ -311,6 +324,94 @@ const adminTabs = [
   { value: "usage", label: "Control usage", icon: DatabaseIcon },
 ];
 
+const adminTabValues = [
+  "overview",
+  "workspaces",
+  "requests",
+  "roles",
+  "usage",
+] as const;
+
+type AdminTabKey = (typeof adminTabValues)[number];
+
+function isPageKey(value: string | null): value is PageKey {
+  return Boolean(value && pageKeyValues.includes(value as PageKey));
+}
+
+function isAdminTabKey(value: string | null): value is AdminTabKey {
+  return Boolean(
+    value && adminTabValues.includes(value as AdminTabKey),
+  );
+}
+
+function getInitialPage(): PageKey {
+  if (typeof window === "undefined") {
+    return "chat";
+  }
+
+  const page = new URLSearchParams(window.location.search).get("page");
+  return isPageKey(page) ? page : "chat";
+}
+
+function getInitialAdminTab(): AdminTabKey {
+  if (typeof window === "undefined") {
+    return "overview";
+  }
+
+  const tab = new URLSearchParams(window.location.search).get("adminTab");
+  return isAdminTabKey(tab) ? tab : "overview";
+}
+
+function getInitialChatId() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return new URLSearchParams(window.location.search).get("chat");
+}
+
+function updateAppRouteState({
+  adminTab,
+  chatId,
+  page,
+}: {
+  adminTab?: AdminTabKey;
+  chatId?: string | null;
+  page?: PageKey;
+}) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  const currentPage = url.searchParams.get("page");
+  const nextPage = page ?? (isPageKey(currentPage) ? currentPage : "chat");
+
+  url.searchParams.set("page", nextPage);
+
+  if (adminTab) {
+    url.searchParams.set("adminTab", adminTab);
+  } else if (nextPage !== "admin") {
+    url.searchParams.delete("adminTab");
+  }
+
+  if (chatId !== undefined) {
+    if (chatId) {
+      url.searchParams.set("chat", chatId);
+    } else {
+      url.searchParams.delete("chat");
+    }
+  } else if (nextPage !== "chat") {
+    url.searchParams.delete("chat");
+  }
+
+  window.history.replaceState(
+    window.history.state,
+    "",
+    `${url.pathname}${url.search}${url.hash}`,
+  );
+}
+
 type AdminWorkspaceRow = [
   string,
   string,
@@ -322,8 +423,30 @@ type AdminWorkspaceRow = [
   string,
   string,
 ];
-type AdminRequestRow = [string, string, string, string, string, string];
-type AdminLogRow = [string, string, string, string];
+type AdminRequestRow = {
+  companySize: string;
+  company: string;
+  country: string;
+  email: string;
+  id: string;
+  name: string;
+  notes: string;
+  roleTitle: string;
+  source: string;
+  status: string;
+  submitted: string;
+  useCase: string;
+  workType: string;
+};
+type AdminLogRow = {
+  detail: string;
+  event: string;
+  sortTime: string;
+  source: "Activity" | "Session";
+  status: string;
+  time: string;
+  user: string;
+};
 type AdminUserRow = [string, string, string, string, string, string, string];
 type AdminRoleRow = [string, string, string];
 
@@ -404,25 +527,51 @@ function mapAdminRequest(row: unknown): AdminRequestRow | null {
     return null;
   }
 
-  return [
-    asString(record.full_name, email),
+  const workType = asString(record.work_type);
+
+  return {
+    companySize: asString(record.company_size),
+    company: asString(record.company_name),
+    country: asString(record.country),
     email,
-    asString(record.company_name),
-    asString(record.use_case, asString(record.work_type)),
-    formatDateLabel(record.created_at) || "",
-    asString(record.status, "Pending"),
-  ];
+    id: asString(record.id, email),
+    name: asString(record.full_name, email),
+    notes: asString(record.notes),
+    roleTitle: asString(record.role_title),
+    source: asString(record.source),
+    status: formatStatusLabel(asString(record.derived_status, asString(record.status, "pending"))),
+    submitted: formatDateLabel(record.created_at) || "",
+    useCase: asString(record.use_case, workType),
+    workType,
+  };
 }
 
-function mapAdminLog(row: unknown): AdminLogRow | null {
+function mapAdminLog(row: unknown, source: "Activity" | "Session"): AdminLogRow | null {
   const record = asRecord(row);
   const profile = getRecordByKey(record, "profiles");
-  return [
-    formatDateTimeLabel(record.created_at) || "",
-    asString(profile.full_name, asString(profile.email, asString(record.actor_type, "System"))),
-    asString(record.action, asString(record.event_type, "Activity")),
-    asString(record.target_type, asString(record.ip_address)),
-  ];
+  const createdAt = asString(record.created_at);
+
+  if (source === "Session") {
+    return {
+      detail: asString(record.ip_address, "Unknown location"),
+      event: asString(record.event, "Session"),
+      sortTime: createdAt,
+      source,
+      status: formatStatusLabel(asString(record.event, "Active")),
+      time: formatDateTimeLabel(createdAt) || "",
+      user: asString(profile.full_name, asString(profile.email, "Unknown user")),
+    };
+  }
+
+  return {
+    detail: asString(record.target_type, asString(record.target_id)),
+    event: asString(record.action, "Activity"),
+    sortTime: createdAt,
+    source,
+    status: "Recorded",
+    time: formatDateTimeLabel(createdAt) || "",
+    user: asString(profile.full_name, asString(profile.email, "System")),
+  };
 }
 
 function mapAdminRole(row: unknown): AdminRoleRow | null {
@@ -579,6 +728,18 @@ function asRecordArray(value: unknown): DatabaseRecord[] {
 
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function formatStatusLabel(value: unknown, fallback = "Pending") {
+  const status = asString(value, fallback).trim().replace(/[_-]+/g, " ");
+  if (!status) {
+    return fallback;
+  }
+
+  return status
+    .split(/\s+/)
+    .map((word) => word[0]?.toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function asNumber(value: unknown, fallback = 0) {
@@ -912,6 +1073,9 @@ function getCacheableDashboardPayload(payload: DashboardData): DashboardData {
         status: record.status,
       };
     }),
+    agents: asRecordArray(payload.agents),
+    brain: asRecord(payload.brain),
+    members: asRecordArray(payload.members),
     profile: asRecord(payload.profile),
     skills: asRecordArray(payload.skills).map((skill) => {
       const record = asRecord(skill);
@@ -924,7 +1088,10 @@ function getCacheableDashboardPayload(payload: DashboardData): DashboardData {
         source: record.source,
       };
     }),
+    subscription: asRecord(payload.subscription),
+    usage: asRecord(payload.usage),
     workspace: asRecord(payload.workspace),
+    workspaceSettings: asRecord(payload.workspaceSettings),
     workspaces: asRecordArray(payload.workspaces),
   };
 }
@@ -933,6 +1100,8 @@ export default function Home() {
   const [activePage, setActivePage] = useState<PageKey>("chat");
   const [agentsPlaygroundOpen, setAgentsPlaygroundOpen] = useState(false);
   const [bootstrapError, setBootstrapError] = useState("");
+  const [isBootstrapLoading, setIsBootstrapLoading] = useState(true);
+  const [isBootstrapRefreshing, setIsBootstrapRefreshing] = useState(false);
   const [workspace, setWorkspace] = useState<WorkspaceSummary | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [profile, setProfile] = useState<DatabaseRecord | null>(null);
@@ -952,10 +1121,13 @@ export default function Home() {
     null,
   );
   const [agentList, setAgentList] = useState<Agent[]>([]);
-  const [activeSidebarChatId, setActiveSidebarChatId] = useState<string | null>(null);
+  const [activeSidebarChatId, setActiveSidebarChatId] = useState<string | null>(
+    null,
+  );
   const [chatHistoryOpen, setChatHistoryOpen] = useState(true);
   const [sidebarChats, setSidebarChats] =
     useState<SidebarChat[]>(initialSidebarChats);
+  const [creatingChat, setCreatingChat] = useState(false);
   const [workflowChatNodesByAgent, setWorkflowChatNodesByAgent] = useState<
     Record<string, WorkflowChatNode[]>
   >({});
@@ -988,6 +1160,11 @@ export default function Home() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", isDark);
   }, [isDark]);
+
+  useEffect(() => {
+    setActivePage(getInitialPage());
+    setActiveSidebarChatId(getInitialChatId());
+  }, []);
 
   function applyDashboardPayload(payload: DashboardData) {
     const mappedWorkspaces = asRecordArray(payload.workspaces)
@@ -1042,6 +1219,7 @@ export default function Home() {
 
     async function loadDashboard() {
       setBootstrapError("");
+      setIsBootstrapLoading(true);
 
       try {
         const cached = window.localStorage.getItem(dashboardCacheKey);
@@ -1053,6 +1231,8 @@ export default function Home() {
           if (Date.now() - cachedAt < dashboardCacheMaxAgeMs) {
             applyDashboardPayload(payload);
             appliedCachedPayload = true;
+            setIsBootstrapLoading(false);
+            setIsBootstrapRefreshing(true);
           }
         }
       } catch {
@@ -1096,6 +1276,8 @@ export default function Home() {
         }
 
         applyDashboardPayload(payload);
+        setIsBootstrapLoading(false);
+        setIsBootstrapRefreshing(false);
         try {
           window.localStorage.setItem(
             dashboardCacheKey,
@@ -1116,7 +1298,14 @@ export default function Home() {
                 ? error.message
                 : "Could not load workspace data",
             );
+            setIsBootstrapLoading(false);
           }
+          setIsBootstrapRefreshing(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsBootstrapLoading(false);
+          setIsBootstrapRefreshing(false);
         }
       }
     }
@@ -1128,8 +1317,9 @@ export default function Home() {
     };
   }, []);
 
-  function selectPage(page: PageKey) {
+  function selectPage(page: PageKey, options: { chatId?: string | null } = {}) {
     setActivePage(page);
+    updateAppRouteState({ chatId: options.chatId, page });
     if (page !== "agents") {
       setAgentsPlaygroundOpen(false);
       setSelectedAgentName(null);
@@ -1172,6 +1362,11 @@ export default function Home() {
   }
 
   async function createSidebarChat() {
+    if (creatingChat) {
+      return activeSidebarChatId ?? "";
+    }
+
+    setCreatingChat(true);
     const nextIndex = sidebarChatCounterRef.current;
     sidebarChatCounterRef.current += 1;
     const nextTitle = `New chat ${nextIndex}`;
@@ -1202,7 +1397,8 @@ export default function Home() {
     ]);
     setActiveSidebarChatId(id);
     setChatHistoryOpen(true);
-    selectPage("chat");
+    selectPage("chat", { chatId: id });
+    setCreatingChat(false);
 
     return id;
   }
@@ -1247,6 +1443,7 @@ export default function Home() {
     setSidebarChats((current) => current.filter((chat) => chat.id !== chatId));
     if (activeSidebarChatId === chatId) {
       setActiveSidebarChatId(null);
+      updateAppRouteState({ chatId: null, page: "chat" });
     }
     void fetch(`/api/chats/${chatId}`, { method: "DELETE" }).catch(
       () => undefined,
@@ -1259,7 +1456,7 @@ export default function Home() {
 
   function openSidebarChat(chatId: string) {
     setActiveSidebarChatId(chatId);
-    selectPage("chat");
+    selectPage("chat", { chatId });
   }
 
   function insertSkillIntoChat(skill: SkillItem, chatId: string) {
@@ -1272,7 +1469,7 @@ export default function Home() {
       requestId: chatDraftCounterRef.current,
     });
     chatDraftCounterRef.current += 1;
-    selectPage("chat");
+    selectPage("chat", { chatId });
   }
 
   async function insertSkillIntoNewChat(skill: SkillItem) {
@@ -1296,7 +1493,7 @@ export default function Home() {
     });
     setSelectedAgentName(agentName);
     setAgentsPlaygroundOpen(true);
-    setActivePage("agents");
+    selectPage("agents");
   }
 
   const commandPaletteGroups: CommandPaletteGroup[] = [
@@ -1445,6 +1642,7 @@ export default function Home() {
                   key={item.key}
                   active={activePage === item.key}
                   item={item}
+                  loading={item.key === "chat" && creatingChat}
                   onClick={() =>
                     item.key === "chat" ? createSidebarChat() : selectPage(item.key)
                   }
@@ -1504,13 +1702,22 @@ export default function Home() {
           <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-black/5 bg-background dark:border-white/6">
             <div
               className={cn(
-                "mx-auto flex min-h-0 w-full flex-1 flex-col overflow-y-auto overscroll-contain px-4 py-3 md:px-6 md:py-4 lg:px-8 lg:py-5",
+                "mx-auto flex min-h-0 w-full flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-3 md:px-6 md:py-4 lg:px-8 lg:py-5",
                 activePage === "agents" && agentsPlaygroundOpen
                   ? "max-w-none"
                   : "max-w-5xl",
               )}
             >
               {bootstrapError && <BootstrapErrorBanner error={bootstrapError} />}
+              {(isBootstrapLoading || isBootstrapRefreshing) && (
+                <LoadingPill
+                  label={
+                    isBootstrapLoading
+                      ? "Loading workspace data"
+                      : "Refreshing workspace data"
+                  }
+                />
+              )}
               {activePage === "chat" && (
                 <ChatPage
                   activeChatId={activeSidebarChatId}
@@ -1553,9 +1760,7 @@ export default function Home() {
                   workspaceId={activeWorkspaceId}
                 />
               )}
-              {activePage === "usage" && (
-                <UsagePage usage={usageData} />
-              )}
+              {activePage === "usage" && <UsagePage usage={usageData} />}
               {activePage === "changelogs" && (
                 <EmptyPage
                   description={pageDescriptions.changelogs}
@@ -1866,8 +2071,8 @@ function WorkspaceInviteDialog({
             <DialogClose render={<Button type="button" variant="outline" />}>
               Cancel
             </DialogClose>
-            <Button disabled={!trimmedEmail || isSending} type="submit">
-              {isSending ? "Sending..." : "Send invite"}
+            <Button loading={isSending} disabled={!trimmedEmail} type="submit">
+              Send invite
             </Button>
           </DialogFooter>
         </form>
@@ -1894,6 +2099,7 @@ function ChatActionsMenu({
   onTogglePin: (chatId: string) => void;
 }) {
   const [workflowDialogOpen, setWorkflowDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const shortcuts = {
     copy: "⇧⌘C",
     deeplink: "⌥⌘L",
@@ -1925,7 +2131,7 @@ function ChatActionsMenu({
             destructive
             icon={Delete02Icon}
             label="Delete chat"
-            onClick={() => onDeleteChat(chat.id)}
+            onClick={() => setDeleteDialogOpen(true)}
           />
           <MenuSeparator />
           <ChatActionItem
@@ -1972,6 +2178,32 @@ function ChatActionsMenu({
         }}
         open={workflowDialogOpen}
       />
+      <Dialog onOpenChange={setDeleteDialogOpen} open={deleteDialogOpen}>
+        <DialogPopup className="max-w-md rounded-xl">
+          <DialogHeader>
+            <DialogTitle>Delete chat</DialogTitle>
+            <DialogDescription>
+              Delete &quot;{chat.title}&quot; from this workspace. This action cannot
+              be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button
+              onClick={() => {
+                onDeleteChat(chat.id);
+                setDeleteDialogOpen(false);
+              }}
+              type="button"
+              variant="destructive"
+            >
+              Delete chat
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
     </>
   );
 }
@@ -2161,10 +2393,12 @@ function UserIdentity({
 function NavButton({
   active,
   item,
+  loading = false,
   onClick,
 }: {
   active: boolean;
   item: NavigationItem;
+  loading?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -2180,7 +2414,11 @@ function NavButton({
       onClick={onClick}
       type="button"
     >
-      <Icon className="size-4" icon={item.icon} />
+      {loading ? (
+        <Spinner className="size-4" />
+      ) : (
+        <Icon className="size-4" icon={item.icon} />
+      )}
       <span className="min-w-0 flex-1 truncate">{item.label}</span>
       {active && <Icon className="size-4 opacity-60" icon={ArrowRight01Icon} />}
     </button>
@@ -6465,7 +6703,7 @@ function AvatarTile({
       {src && !failed ? (
         <Image
           alt=""
-          className="object-cover"
+          className="object-cover object-center"
           fill
           onError={() => setFailed(true)}
           src={src}
@@ -6753,12 +6991,12 @@ function SettingsProfileTab({
                         type="file"
                       />
                       <Button
-                        disabled={uploadingAvatar}
+                        loading={uploadingAvatar}
                         onClick={() => profileAvatarInputRef.current?.click()}
                         size="sm"
                         variant="outline"
                       >
-                        {uploadingAvatar ? "Uploading..." : "Upload photo"}
+                        Upload photo
                       </Button>
                       <Badge variant="success">Verified</Badge>
                     </div>
@@ -6820,11 +7058,12 @@ function SettingsProfileTab({
               </div>
               <div className="flex justify-end sm:col-span-2">
                 <Button
-                  disabled={!profileDirty || savingProfile}
+                  loading={savingProfile}
+                  disabled={!profileDirty}
                   onClick={saveProfile}
                   size="sm"
                 >
-                  {savingProfile ? "Saving..." : "Save changes"}
+                  Save changes
                 </Button>
               </div>
             </div>
@@ -6918,8 +7157,8 @@ function SettingsResetPasswordButton({ email }: { email: string }) {
           <DialogClose render={<Button type="button" variant="outline" />}>
             Close
           </DialogClose>
-          <Button disabled={sending || !email} onClick={sendResetLink} type="button">
-            {sending ? "Sending..." : "Send link"}
+          <Button loading={sending} disabled={!email} onClick={sendResetLink} type="button">
+            Send link
           </Button>
         </DialogFooter>
       </DialogPopup>
@@ -7142,23 +7381,21 @@ function SettingsWorkspaceTab({
                   type="file"
                 />
                 <Button
-                  disabled={!workspace?.id || uploadingAvatar}
+                  loading={uploadingAvatar}
+                  disabled={!workspace?.id}
                   onClick={() => workspaceAvatarInputRef.current?.click()}
                   size="sm"
                   variant="outline"
                 >
-                  {uploadingAvatar
-                    ? "Uploading..."
-                    : workspace?.id
-                      ? "Upload avatar"
-                      : "No workspace"}
+                  {workspace?.id ? "Upload avatar" : "No workspace"}
                 </Button>
                 <Button
-                  disabled={!workspace?.id || !workspaceDirty || savingWorkspace}
+                  loading={savingWorkspace}
+                  disabled={!workspace?.id || !workspaceDirty}
                   onClick={saveWorkspace}
                   size="sm"
                 >
-                  {savingWorkspace ? "Saving..." : "Save workspace"}
+                  Save workspace
                 </Button>
               </div>
             </div>
@@ -7238,10 +7475,35 @@ function SettingsWorkspaceUsersTable({
   workspaceName: string;
 }) {
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [memberFilter, setMemberFilter] = useState("all");
+  const [memberRoleFilter, setMemberRoleFilter] = useState("all");
+  const [memberSearch, setMemberSearch] = useState("");
+  const memberFilterOptions = getTableFilterOptions(
+    users.map((user) => user.status),
+    "All statuses",
+  );
+  const memberRoleFilterOptions = getTableFilterOptions(
+    users.map((user) => user.role),
+    "All roles",
+  );
+  const visibleUsers = users.filter((user) => {
+    const matchesSearch = matchesTableSearch(
+      [user.name, user.email, user.role, user.status, user.lastActive],
+      memberSearch,
+    );
+    const matchesFilter =
+      memberFilter === "all" ||
+      normalizeFilterValue(user.status) === memberFilter;
+    const matchesRole =
+      memberRoleFilter === "all" ||
+      normalizeFilterValue(user.role) === memberRoleFilter;
+
+    return matchesSearch && matchesFilter && matchesRole;
+  });
 
   return (
-    <Frame className="bg-muted/60">
-      <FramePanel className="overflow-hidden p-0">
+    <Frame className="min-w-0 max-w-full bg-muted/60">
+      <FramePanel className="min-w-0 max-w-full overflow-hidden p-0">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/70 px-4 py-3">
           <div className="flex min-w-0 items-start gap-3">
             <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
@@ -7266,105 +7528,137 @@ function SettingsWorkspaceUsersTable({
           workspaceName={workspaceName}
         />
 
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>User</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Last active</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {users.map((user) => (
-              <TableRow key={user.email}>
-                <TableCell>
-                  <div className="flex min-w-0 items-center gap-2">
-                    <AvatarTile
-                      className="size-8 rounded-lg border-0 bg-muted text-xs shadow-none"
-                      initials={user.initials}
-                      src={user.avatarUrl}
-                    />
-                    <div className="min-w-0">
-                      <p className="truncate font-medium leading-5">
-                        {user.name}
-                      </p>
-                      <p className="truncate text-xs leading-4 text-muted-foreground">
-                        {user.email}
-                      </p>
-                    </div>
-                  </div>
-                </TableCell>
-                <TableCell>{user.role}</TableCell>
-                <TableCell>
-                  <Badge
-                    variant={
-                      user.status === "Active"
-                        ? "success"
-                        : user.status === "Invited"
-                          ? "warning"
-                          : "outline"
-                    }
-                  >
-                    {user.status}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {user.lastActive}
-                </TableCell>
-                <TableCell>
-                  <div className="flex justify-end">
-                    <Menu>
-                      <MenuTrigger
-                        render={
-                          <Button
-                            aria-label={`Manage ${user.name}`}
-                            size="icon-sm"
-                            variant="ghost"
-                          />
-                        }
-                      >
-                        <Icon icon={MoreHorizontalIcon} />
-                      </MenuTrigger>
-                      <MenuPopup align="end" className="min-w-36" sideOffset={6}>
-                        <MenuItem
-                          onClick={() =>
-                            window.alert(`Role editor opened for ${user.name}.`)
-                          }
-                        >
-                          <Icon icon={Edit02Icon} />
-                          Change role
-                        </MenuItem>
-                        <MenuItem
-                          onClick={() => {
-                            navigator.clipboard
-                              ?.writeText(`https://atmetai.com/invite/${user.email}`)
-                              .catch(() => undefined);
-                            window.alert(`Invite link copied for ${user.name}.`);
-                          }}
-                        >
-                          <Icon icon={CopyLinkIcon} />
-                          Copy invite
-                        </MenuItem>
-                        <MenuSeparator />
-                        <MenuItem
-                          onClick={() =>
-                            window.alert(`${user.name} would be removed after confirmation.`)
-                          }
-                          variant="destructive"
-                        >
-                          <Icon icon={Delete02Icon} />
-                          Remove user
-                        </MenuItem>
-                      </MenuPopup>
-                    </Menu>
-                  </div>
-                </TableCell>
+        <div className="border-b border-border/70 px-4 py-3">
+          <TableFilterControls
+            filterLabel="Filter members"
+            filterOptions={memberFilterOptions}
+            filterValue={memberFilter}
+            filters={[
+              {
+                label: "Filter roles",
+                onChange: setMemberRoleFilter,
+                options: memberRoleFilterOptions,
+                value: memberRoleFilter,
+              },
+            ]}
+            onFilterChange={setMemberFilter}
+            onSearchChange={setMemberSearch}
+            searchPlaceholder="Search workspace users..."
+            searchValue={memberSearch}
+          />
+        </div>
+
+        <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+          <Table className="min-w-[760px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>User</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Last active</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {visibleUsers.map((user) => (
+                <TableRow key={user.email}>
+                  <TableCell>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <AvatarTile
+                        className="size-8 rounded-lg border-0 bg-muted text-xs shadow-none"
+                        initials={user.initials}
+                        src={user.avatarUrl}
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate font-medium leading-5">
+                          {user.name}
+                        </p>
+                        <p className="truncate text-xs leading-4 text-muted-foreground">
+                          {user.email}
+                        </p>
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell>{user.role}</TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        user.status === "Active"
+                          ? "success"
+                          : user.status === "Invited"
+                            ? "warning"
+                            : "outline"
+                      }
+                    >
+                      {user.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {user.lastActive}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end">
+                      <Menu>
+                        <MenuTrigger
+                          render={
+                            <Button
+                              aria-label={`Manage ${user.name}`}
+                              size="icon-sm"
+                              variant="ghost"
+                            />
+                          }
+                        >
+                          <Icon icon={MoreHorizontalIcon} />
+                        </MenuTrigger>
+                        <MenuPopup align="end" className="min-w-36" sideOffset={6}>
+                          <MenuItem
+                            onClick={() =>
+                              window.alert(`Role editor opened for ${user.name}.`)
+                            }
+                          >
+                            <Icon icon={Edit02Icon} />
+                            Change role
+                          </MenuItem>
+                          <MenuItem
+                            onClick={() => {
+                              navigator.clipboard
+                                ?.writeText(`https://atmetai.com/invite/${user.email}`)
+                                .catch(() => undefined);
+                              window.alert(`Invite link copied for ${user.name}.`);
+                            }}
+                          >
+                            <Icon icon={CopyLinkIcon} />
+                            Copy invite
+                          </MenuItem>
+                          <MenuSeparator />
+                          <MenuItem
+                            onClick={() =>
+                              window.alert(`${user.name} would be removed after confirmation.`)
+                            }
+                            variant="destructive"
+                          >
+                            <Icon icon={Delete02Icon} />
+                            Remove user
+                          </MenuItem>
+                        </MenuPopup>
+                      </Menu>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {visibleUsers.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    className="py-8 text-center text-muted-foreground"
+                    colSpan={5}
+                  >
+                    No users match these filters.
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
+          </Table>
+        </div>
       </FramePanel>
     </Frame>
   );
@@ -8001,7 +8295,7 @@ function SettingsSection({
           </div>
           {action}
         </div>
-        <div className="divide-y divide-border/70">{children}</div>
+        <div className="min-w-0 divide-y divide-border/70">{children}</div>
       </FramePanel>
     </Frame>
   );
@@ -8085,12 +8379,20 @@ function SettingsStatGrid({ stats }: { stats: readonly [string, string][] }) {
 
 function AdminPage() {
   const [profileView, setProfileView] = useState<AdminProfileView | null>(null);
+  const [activeAdminTab, setActiveAdminTab] =
+    useState<AdminTabKey>("overview");
   const [adminData, setAdminData] = useState<AdminData>(emptyAdminData);
+  const [isAdminLoading, setIsAdminLoading] = useState(true);
+
+  useEffect(() => {
+    setActiveAdminTab(getInitialAdminTab());
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadAdminData() {
+      setIsAdminLoading(true);
       try {
         const [
           overviewResponse,
@@ -8145,14 +8447,14 @@ function AdminPage() {
         if (!cancelled) {
           setAdminData({
             activityLogs: asRecordArray(overview.auditLogs)
-              .map(mapAdminLog)
+              .map((log) => mapAdminLog(log, "Activity"))
               .filter((item): item is AdminLogRow => Boolean(item)),
             requests: asRecordArray(requests.requests)
               .map(mapAdminRequest)
               .filter((item): item is AdminRequestRow => Boolean(item)),
             roles,
             sessionLogs: asRecordArray(overview.sessionLogs)
-              .map(mapAdminLog)
+              .map((log) => mapAdminLog(log, "Session"))
               .filter((item): item is AdminLogRow => Boolean(item)),
             usageControls: asRecordArray(usageControls.controls),
             users,
@@ -8161,6 +8463,10 @@ function AdminPage() {
         }
       } catch (error) {
         console.error(error);
+      } finally {
+        if (!cancelled) {
+          setIsAdminLoading(false);
+        }
       }
     }
 
@@ -8171,13 +8477,17 @@ function AdminPage() {
     };
   }, []);
 
+  function selectAdminTab(value: string) {
+    const tab = isAdminTabKey(value) ? value : "overview";
+    setActiveAdminTab(tab);
+    setProfileView(null);
+    updateAppRouteState({ adminTab: tab, page: "admin" });
+  }
+
   return (
     <>
       <PageHeader description={pageDescriptions.admin} title="Admin Console" />
-      <Tabs
-        defaultValue="overview"
-        onValueChange={() => setProfileView(null)}
-      >
+      <Tabs value={activeAdminTab} onValueChange={selectAdminTab}>
         <TabsList
           className="w-full max-w-full flex-nowrap justify-start gap-x-1 overflow-x-auto"
           variant="underline"
@@ -8189,6 +8499,7 @@ function AdminPage() {
             </TabsTrigger>
           ))}
         </TabsList>
+        {isAdminLoading && <LoadingPill label="Loading admin data" />}
         <TabsContent value="overview">
           <AdminOverviewTab adminData={adminData} />
         </TabsContent>
@@ -8217,6 +8528,9 @@ function AdminPage() {
 }
 
 function AdminOverviewTab({ adminData }: { adminData: AdminData }) {
+  const logs = [...adminData.activityLogs, ...adminData.sessionLogs].sort(
+    (a, b) => new Date(b.sortTime).getTime() - new Date(a.sortTime).getTime(),
+  );
   const workspacesCount = adminData.workspaces.length;
   const usersCount = adminData.users.length;
   const requestsCount = adminData.requests.length;
@@ -8236,7 +8550,7 @@ function AdminOverviewTab({ adminData }: { adminData: AdminData }) {
   const runBars = weekdayLabels.map((label, index) => [
     label,
     adminData.activityLogs.filter((log) => {
-      const date = new Date(log[3]);
+      const date = new Date(log.sortTime);
 
       return !Number.isNaN(date.getTime()) && date.getDay() === (index + 1) % 7;
     }).length,
@@ -8281,20 +8595,11 @@ function AdminOverviewTab({ adminData }: { adminData: AdminData }) {
           <AdminPlanMix workspaces={adminData.workspaces} />
         </div>
       </SettingsSection>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <AdminLogsTable
-          description="Recent admin and system activity across Atmet."
-          rows={adminData.activityLogs}
-          title="Activity logs"
-          type="activity"
-        />
-        <AdminLogsTable
-          description="Recent user sessions and access state."
-          rows={adminData.sessionLogs}
-          title="Session logs"
-          type="sessions"
-        />
-      </div>
+      <AdminLogsTable
+        description="Recent admin activity and user sessions across Atmet."
+        rows={logs}
+        title="System logs"
+      />
     </SettingsTabGrid>
   );
 }
@@ -8436,55 +8741,101 @@ function AdminLogsTable({
   description,
   rows,
   title,
-  type,
 }: {
   description: string;
-  rows: readonly [string, string, string, string][];
+  rows: readonly AdminLogRow[];
   title: string;
-  type: "activity" | "sessions";
 }) {
+  const [logFilter, setLogFilter] = useState("all");
+  const [logSourceFilter, setLogSourceFilter] = useState("all");
+  const [logSearch, setLogSearch] = useState("");
+  const logFilterOptions = getTableFilterOptions(
+    rows.map((row) => row.status),
+    "All statuses",
+  );
+  const logSourceFilterOptions = getTableFilterOptions(
+    rows.map((row) => row.source),
+    "All types",
+  );
+  const visibleRows = rows.filter((row) => {
+    const matchesSearch = matchesTableSearch(
+      [row.time, row.source, row.user, row.event, row.detail, row.status],
+      logSearch,
+    );
+    const matchesFilter =
+      logFilter === "all" || normalizeFilterValue(row.status) === logFilter;
+    const matchesSource =
+      logSourceFilter === "all" ||
+      normalizeFilterValue(row.source) === logSourceFilter;
+
+    return matchesSearch && matchesFilter && matchesSource;
+  });
+
   return (
     <SettingsSection
       description={description}
-      icon={type === "activity" ? File01Icon : ShieldCheck}
+      icon={File01Icon}
       title={title}
     >
-      <div className="overflow-x-auto">
-        <Table>
+      <div className="border-b border-border/70 px-4 py-3">
+        <TableFilterControls
+          filterLabel="Filter logs"
+          filterOptions={logFilterOptions}
+          filterValue={logFilter}
+          filters={[
+            {
+              label: "Filter log type",
+              onChange: setLogSourceFilter,
+              options: logSourceFilterOptions,
+              value: logSourceFilter,
+            },
+          ]}
+          onFilterChange={setLogFilter}
+          onSearchChange={setLogSearch}
+          searchPlaceholder="Search logs..."
+          searchValue={logSearch}
+        />
+      </div>
+      <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+        <Table className="min-w-[920px]">
           <TableHeader>
             <TableRow>
-              {type === "activity" ? (
-                <>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Actor</TableHead>
-                  <TableHead>Event</TableHead>
-                  <TableHead>Target</TableHead>
-                </>
-              ) : (
-                <>
-                  <TableHead>User</TableHead>
-                  <TableHead>Device</TableHead>
-                  <TableHead>Location</TableHead>
-                  <TableHead>Status</TableHead>
-                </>
-              )}
+              <TableHead>Time</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>User</TableHead>
+              <TableHead>Event</TableHead>
+              <TableHead>Details</TableHead>
+              <TableHead>Status</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map(([first, second, third, fourth]) => (
-              <TableRow key={`${first}-${second}-${third}`}>
-                <TableCell>{first}</TableCell>
-                <TableCell>{second}</TableCell>
-                <TableCell className="text-muted-foreground">{third}</TableCell>
-                <TableCell>
-                  {type === "sessions" ? (
-                    <AdminStatusBadge status={fourth} />
-                  ) : (
-                    fourth
-                  )}
+            {visibleRows.length > 0 ? (
+              visibleRows.map((row) => (
+                <TableRow key={`${row.source}-${row.sortTime}-${row.user}-${row.event}`}>
+                  <TableCell className="text-muted-foreground">{row.time}</TableCell>
+                  <TableCell>
+                    <Badge variant={row.source === "Session" ? "info" : "outline"}>
+                      {row.source}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{row.user}</TableCell>
+                  <TableCell>{row.event}</TableCell>
+                  <TableCell className="text-muted-foreground">{row.detail}</TableCell>
+                  <TableCell>
+                    <AdminStatusBadge status={row.status} />
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell
+                  className="py-6 text-center text-muted-foreground"
+                  colSpan={6}
+                >
+                  No logs match these filters.
                 </TableCell>
               </TableRow>
-            ))}
+            )}
           </TableBody>
         </Table>
       </div>
@@ -8693,10 +9044,11 @@ function AdminInviteUserDialog({
               Cancel
             </DialogClose>
             <Button
-              disabled={!trimmedEmail || !selectedWorkspaceId || isSending}
+              loading={isSending}
+              disabled={!trimmedEmail || !selectedWorkspaceId}
               type="submit"
             >
-              {isSending ? "Sending..." : "Send invite"}
+              Send invite
             </Button>
           </DialogFooter>
         </form>
@@ -8706,18 +9058,105 @@ function AdminInviteUserDialog({
 }
 
 function AdminRequestsTab({ rows }: { rows: AdminRequestRow[] }) {
+  const [requests, setRequests] = useState(rows);
+  const [updatingRequestId, setUpdatingRequestId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    setRequests(rows);
+  }, [rows]);
+
+  async function updateRequestStatus(requestId: string, status: "approved" | "rejected") {
+    setError("");
+    setNotice("");
+    setUpdatingRequestId(requestId);
+
+    try {
+      const response = await fetch(`/api/admin/requests/${requestId}`, {
+        body: JSON.stringify({ status }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      });
+      const payload = asRecord(await response.json().catch(() => ({})));
+
+      if (!response.ok) {
+        throw new Error(asString(payload.error, "Could not update this request."));
+      }
+
+      const updatedRequest = mapAdminRequest(payload.request);
+      if (updatedRequest) {
+        setRequests((currentRequests) =>
+          currentRequests.map((request) =>
+            request.id === requestId ? updatedRequest : request,
+          ),
+        );
+      }
+
+      if (status === "approved") {
+        const delivery = asRecord(payload.delivery);
+        const provider = asString(delivery.provider);
+        const email = updatedRequest?.email ?? "this user";
+        setNotice(
+          provider === "resend"
+            ? `Approval email sent to ${email} with Resend.`
+            : provider === "custom_smtp"
+              ? `Approval email sent to ${email} with custom SMTP.`
+              : `Approval email sent to ${email} with Supabase Auth.`,
+        );
+      }
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not update this request.",
+      );
+    } finally {
+      setUpdatingRequestId(null);
+    }
+  }
+
   return (
     <SettingsTabGrid>
+      {error ? (
+        <div className="rounded-lg border border-red-500/20 bg-red-500/8 px-3 py-2 text-red-600 text-sm dark:text-red-300">
+          {error}
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-emerald-700 text-sm dark:text-emerald-300">
+          {notice}
+        </div>
+      ) : null}
       <AdminRequestsTable
         description="Confirm waitlist users when they are ready to join Atmet."
-        rows={rows}
+        onUpdateStatus={updateRequestStatus}
+        rows={requests}
         title="Waitlist requests"
+        updatingRequestId={updatingRequestId}
       />
     </SettingsTabGrid>
   );
 }
 
 function AdminRolesTab({ rows }: { rows: AdminRoleRow[] }) {
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [roleSearch, setRoleSearch] = useState("");
+  const roleFilterOptions = getTableFilterOptions(
+    rows.map(([, , access]) => access),
+    "All access",
+  );
+  const visibleRows = rows.filter(([role, description, access]) => {
+    const matchesSearch = matchesTableSearch(
+      [role, description, access],
+      roleSearch,
+    );
+    const matchesFilter =
+      roleFilter === "all" || normalizeFilterValue(access) === roleFilter;
+
+    return matchesSearch && matchesFilter;
+  });
+
   return (
     <SettingsTabGrid>
       <SettingsSection
@@ -8746,8 +9185,19 @@ function AdminRolesTab({ rows }: { rows: AdminRoleRow[] }) {
         icon={ShieldCheck}
         title="Roles and permissions"
       >
-        <div className="overflow-x-auto">
-          <Table>
+        <div className="border-b border-border/70 px-4 py-3">
+          <TableFilterControls
+            filterLabel="Filter roles"
+            filterOptions={roleFilterOptions}
+            filterValue={roleFilter}
+            onFilterChange={setRoleFilter}
+            onSearchChange={setRoleSearch}
+            searchPlaceholder="Search roles..."
+            searchValue={roleSearch}
+          />
+        </div>
+        <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+          <Table className="min-w-[720px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Role</TableHead>
@@ -8757,7 +9207,7 @@ function AdminRolesTab({ rows }: { rows: AdminRoleRow[] }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map(([role, description, access]) => (
+              {visibleRows.map(([role, description, access]) => (
                 <TableRow key={role}>
                   <TableCell>{role}</TableCell>
                   <TableCell className="max-w-xl text-muted-foreground">
@@ -8790,6 +9240,16 @@ function AdminRolesTab({ rows }: { rows: AdminRoleRow[] }) {
                   </TableCell>
                 </TableRow>
               ))}
+              {visibleRows.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    className="py-8 text-center text-muted-foreground"
+                    colSpan={4}
+                  >
+                    No roles match these filters.
+                  </TableCell>
+                </TableRow>
+              ) : null}
             </TableBody>
           </Table>
         </div>
@@ -9045,6 +9505,115 @@ function AdminUsageControlsTab({
   );
 }
 
+type TableFilterOption = {
+  label: string;
+  value: string;
+};
+
+type TableSelectFilter = {
+  label: string;
+  onChange: (value: string) => void;
+  options: TableFilterOption[];
+  value: string;
+};
+
+function normalizeFilterValue(value: string) {
+  return value.trim().toLowerCase() || "unknown";
+}
+
+function getTableFilterOptions(values: string[], allLabel = "All") {
+  const uniqueValues = Array.from(
+    new Set(values.map(normalizeFilterValue).filter(Boolean)),
+  );
+
+  return [
+    { label: allLabel, value: "all" },
+    ...uniqueValues.map((value) => ({
+      label: formatStatusLabel(value),
+      value,
+    })),
+  ];
+}
+
+function matchesTableSearch(values: unknown[], search: string) {
+  const query = search.trim().toLowerCase();
+
+  if (!query) {
+    return true;
+  }
+
+  return values.some((value) =>
+    String(value ?? "").toLowerCase().includes(query),
+  );
+}
+
+function TableFilterControls({
+  filters = [],
+  filterLabel,
+  filterOptions,
+  filterValue,
+  onFilterChange,
+  onSearchChange,
+  searchPlaceholder,
+  searchValue,
+}: {
+  filters?: TableSelectFilter[];
+  filterLabel: string;
+  filterOptions: TableFilterOption[];
+  filterValue: string;
+  onFilterChange: (value: string) => void;
+  onSearchChange: (value: string) => void;
+  searchPlaceholder: string;
+  searchValue: string;
+}) {
+  const selectFilters = [
+    {
+      label: filterLabel,
+      onChange: onFilterChange,
+      options: filterOptions,
+      value: filterValue,
+    },
+    ...filters,
+  ];
+
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <Input
+        aria-label={searchPlaceholder}
+        className="sm:max-w-xs"
+        onChange={(event) => onSearchChange(event.target.value)}
+        placeholder={searchPlaceholder}
+        size="sm"
+        value={searchValue}
+      />
+      <div className="flex flex-wrap gap-2">
+        {selectFilters.map((selectFilter) => (
+          <Select
+            key={selectFilter.label}
+            onValueChange={(value) => selectFilter.onChange(value ?? "all")}
+            value={selectFilter.value}
+          >
+            <SelectTrigger
+              aria-label={selectFilter.label}
+              className="sm:w-40"
+              size="sm"
+            >
+              <SelectValue placeholder={selectFilter.label} />
+            </SelectTrigger>
+            <SelectPopup>
+              {selectFilter.options.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AdminWorkspacesTable({
   onOpenProfile,
   rows,
@@ -9052,50 +9621,109 @@ function AdminWorkspacesTable({
   onOpenProfile: (profile: AdminProfileView) => void;
   rows: AdminWorkspaceRow[];
 }) {
+  const [workspaceFilter, setWorkspaceFilter] = useState("all");
+  const [workspacePlanFilter, setWorkspacePlanFilter] = useState("all");
+  const [workspaceSearch, setWorkspaceSearch] = useState("");
+  const workspaceFilterOptions = getTableFilterOptions(
+    rows.map(([, , , , status]) => status),
+    "All statuses",
+  );
+  const workspacePlanFilterOptions = getTableFilterOptions(
+    rows.map(([, , plan]) => plan),
+    "All plans",
+  );
+  const visibleRows = rows.filter(
+    ([workspace, owner, plan, members, status, usage, created]) => {
+      const matchesSearch = matchesTableSearch(
+        [workspace, owner, plan, members, status, usage, created],
+        workspaceSearch,
+      );
+      const matchesFilter =
+        workspaceFilter === "all" ||
+        normalizeFilterValue(status) === workspaceFilter;
+      const matchesPlan =
+        workspacePlanFilter === "all" ||
+        normalizeFilterValue(plan) === workspacePlanFilter;
+
+      return matchesSearch && matchesFilter && matchesPlan;
+    },
+  );
+
   return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Workspace</TableHead>
-            <TableHead>Owner</TableHead>
-            <TableHead>Plan</TableHead>
-            <TableHead>Members</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map(([workspace, owner, plan, members, status, , , , avatarUrl]) => (
-            <TableRow
-              className="cursor-pointer"
-              key={workspace}
-              onClick={() => onOpenProfile({ name: workspace, type: "workspace" })}
-            >
-              <TableCell>
-                <div className="flex min-w-0 items-center gap-2">
-                  <AvatarTile
-                    className="size-8 rounded-lg border-0 bg-muted text-xs shadow-none"
-                    initials={getOptionInitials(workspace)}
-                    src={avatarUrl}
-                  />
-                  <span className="truncate">{workspace}</span>
-                </div>
-              </TableCell>
-              <TableCell>{owner}</TableCell>
-              <TableCell>{plan}</TableCell>
-              <TableCell className="tabular-nums">{members}</TableCell>
-              <TableCell>
-                <AdminStatusBadge status={status} />
-              </TableCell>
-              <TableCell className="text-right">
-                <Button size="xs" variant="outline">Open</Button>
-              </TableCell>
+    <>
+      <div className="border-b border-border/70 px-4 py-3">
+        <TableFilterControls
+          filterLabel="Filter workspaces"
+          filterOptions={workspaceFilterOptions}
+          filterValue={workspaceFilter}
+          filters={[
+            {
+              label: "Filter plans",
+              onChange: setWorkspacePlanFilter,
+              options: workspacePlanFilterOptions,
+              value: workspacePlanFilter,
+            },
+          ]}
+          onFilterChange={setWorkspaceFilter}
+          onSearchChange={setWorkspaceSearch}
+          searchPlaceholder="Search workspaces..."
+          searchValue={workspaceSearch}
+        />
+      </div>
+      <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+        <Table className="min-w-[900px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Workspace</TableHead>
+              <TableHead>Owner</TableHead>
+              <TableHead>Plan</TableHead>
+              <TableHead>Members</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+          </TableHeader>
+          <TableBody>
+            {visibleRows.map(([workspace, owner, plan, members, status, , , , avatarUrl]) => (
+              <TableRow
+                className="cursor-pointer"
+                key={workspace}
+                onClick={() => onOpenProfile({ name: workspace, type: "workspace" })}
+              >
+                <TableCell>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <AvatarTile
+                      className="size-8 rounded-lg border-0 bg-muted text-xs shadow-none"
+                      initials={getOptionInitials(workspace)}
+                      src={avatarUrl}
+                    />
+                    <span className="truncate">{workspace}</span>
+                  </div>
+                </TableCell>
+                <TableCell>{owner}</TableCell>
+                <TableCell>{plan}</TableCell>
+                <TableCell className="tabular-nums">{members}</TableCell>
+                <TableCell>
+                  <AdminStatusBadge status={status} />
+                </TableCell>
+                <TableCell className="text-right">
+                  <Button size="xs" variant="outline">Open</Button>
+                </TableCell>
+              </TableRow>
+            ))}
+            {visibleRows.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  className="py-8 text-center text-muted-foreground"
+                  colSpan={6}
+                >
+                  No workspaces match these filters.
+                </TableCell>
+              </TableRow>
+            ) : null}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   );
 }
 
@@ -9106,52 +9734,110 @@ function AdminUsersTable({
   onOpenProfile: (profile: AdminProfileView) => void;
   rows: AdminUserRow[];
 }) {
+  const [userFilter, setUserFilter] = useState("all");
+  const [userStatusFilter, setUserStatusFilter] = useState("all");
+  const [userSearch, setUserSearch] = useState("");
+  const userFilterOptions = getTableFilterOptions(
+    rows.map(([, , , role]) => role),
+    "All roles",
+  );
+  const userStatusFilterOptions = getTableFilterOptions(
+    rows.map(([, , , , status]) => status),
+    "All statuses",
+  );
+  const visibleRows = rows.filter(
+    ([user, email, workspace, role, status, lastActive]) => {
+      const matchesSearch = matchesTableSearch(
+        [user, email, workspace, role, status, lastActive],
+        userSearch,
+      );
+      const matchesFilter =
+        userFilter === "all" || normalizeFilterValue(role) === userFilter;
+      const matchesStatus =
+        userStatusFilter === "all" ||
+        normalizeFilterValue(status) === userStatusFilter;
+
+      return matchesSearch && matchesFilter && matchesStatus;
+    },
+  );
+
   return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>User</TableHead>
-            <TableHead>Email</TableHead>
-            <TableHead>Workspace</TableHead>
-            <TableHead>Role</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Last active</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map(([user, email, workspace, role, status, lastActive, avatarUrl]) => (
-            <TableRow
-              className="cursor-pointer"
-              key={`${user}-${workspace}`}
-              onClick={() => onOpenProfile({ name: user, type: "user" })}
-            >
-              <TableCell>
-                <div className="flex min-w-0 items-center gap-2">
-                  <AvatarTile
-                    className="size-8 rounded-lg border-0 bg-muted text-xs shadow-none"
-                    initials={getInitialsFromText(user || email)}
-                    src={avatarUrl}
-                  />
-                  <span className="truncate">{user}</span>
-                </div>
-              </TableCell>
-              <TableCell className="text-muted-foreground">{email}</TableCell>
-              <TableCell>{workspace}</TableCell>
-              <TableCell>{role}</TableCell>
-              <TableCell>
-                <AdminStatusBadge status={status} />
-              </TableCell>
-              <TableCell className="text-muted-foreground">{lastActive}</TableCell>
-              <TableCell className="text-right">
-                <Button size="xs" variant="outline">Open</Button>
-              </TableCell>
+    <>
+      <div className="border-b border-border/70 px-4 py-3">
+        <TableFilterControls
+          filterLabel="Filter users"
+          filterOptions={userFilterOptions}
+          filterValue={userFilter}
+          filters={[
+            {
+              label: "Filter statuses",
+              onChange: setUserStatusFilter,
+              options: userStatusFilterOptions,
+              value: userStatusFilter,
+            },
+          ]}
+          onFilterChange={setUserFilter}
+          onSearchChange={setUserSearch}
+          searchPlaceholder="Search users..."
+          searchValue={userSearch}
+        />
+      </div>
+      <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+        <Table className="min-w-[1040px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead>User</TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead>Workspace</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Last active</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+          </TableHeader>
+          <TableBody>
+            {visibleRows.map(([user, email, workspace, role, status, lastActive, avatarUrl]) => (
+              <TableRow
+                className="cursor-pointer"
+                key={`${user}-${workspace}`}
+                onClick={() => onOpenProfile({ name: user, type: "user" })}
+              >
+                <TableCell>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <AvatarTile
+                      className="size-8 rounded-lg border-0 bg-muted text-xs shadow-none"
+                      initials={getInitialsFromText(user || email)}
+                      src={avatarUrl}
+                    />
+                    <span className="truncate">{user}</span>
+                  </div>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{email}</TableCell>
+                <TableCell>{workspace}</TableCell>
+                <TableCell>{role}</TableCell>
+                <TableCell>
+                  <AdminStatusBadge status={status} />
+                </TableCell>
+                <TableCell className="text-muted-foreground">{lastActive}</TableCell>
+                <TableCell className="text-right">
+                  <Button size="xs" variant="outline">Open</Button>
+                </TableCell>
+              </TableRow>
+            ))}
+            {visibleRows.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  className="py-8 text-center text-muted-foreground"
+                  colSpan={7}
+                >
+                  No users match these filters.
+                </TableCell>
+              </TableRow>
+            ) : null}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   );
 }
 
@@ -9164,6 +9850,10 @@ function AdminWorkspaceProfile({
   name: string;
   onBack: () => void;
 }) {
+  const [workspaceUserFilter, setWorkspaceUserFilter] = useState("all");
+  const [workspaceUserStatusFilter, setWorkspaceUserStatusFilter] =
+    useState("all");
+  const [workspaceUserSearch, setWorkspaceUserSearch] = useState("");
   const workspace =
     adminData.workspaces.find(([workspaceName]) => workspaceName === name) ??
     adminData.workspaces[0];
@@ -9182,6 +9872,30 @@ function AdminWorkspaceProfile({
     workspace;
   const workspaceUsers = adminData.users.filter(
     ([, , userWorkspace]) => userWorkspace === workspaceName,
+  );
+  const workspaceUserFilterOptions = getTableFilterOptions(
+    workspaceUsers.map(([, , , role]) => role),
+    "All roles",
+  );
+  const workspaceUserStatusFilterOptions = getTableFilterOptions(
+    workspaceUsers.map(([, , , , userStatus]) => userStatus),
+    "All statuses",
+  );
+  const visibleWorkspaceUsers = workspaceUsers.filter(
+    ([user, email, , role, userStatus]) => {
+      const matchesSearch = matchesTableSearch(
+        [user, email, role, userStatus],
+        workspaceUserSearch,
+      );
+      const matchesFilter =
+        workspaceUserFilter === "all" ||
+        normalizeFilterValue(role) === workspaceUserFilter;
+      const matchesStatus =
+        workspaceUserStatusFilter === "all" ||
+        normalizeFilterValue(userStatus) === workspaceUserStatusFilter;
+
+      return matchesSearch && matchesFilter && matchesStatus;
+    },
   );
 
   return (
@@ -9221,8 +9935,27 @@ function AdminWorkspaceProfile({
         icon={Users}
         title="Workspace users"
       >
-        <div className="overflow-x-auto">
-          <Table>
+        <div className="border-b border-border/70 px-4 py-3">
+          <TableFilterControls
+            filterLabel="Filter workspace users"
+            filterOptions={workspaceUserFilterOptions}
+            filterValue={workspaceUserFilter}
+            filters={[
+              {
+                label: "Filter statuses",
+                onChange: setWorkspaceUserStatusFilter,
+                options: workspaceUserStatusFilterOptions,
+                value: workspaceUserStatusFilter,
+              },
+            ]}
+            onFilterChange={setWorkspaceUserFilter}
+            onSearchChange={setWorkspaceUserSearch}
+            searchPlaceholder="Search workspace users..."
+            searchValue={workspaceUserSearch}
+          />
+        </div>
+        <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+          <Table className="min-w-[760px]">
             <TableHeader>
               <TableRow>
                 <TableHead>User</TableHead>
@@ -9232,7 +9965,7 @@ function AdminWorkspaceProfile({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {workspaceUsers.map(([user, email, , role, userStatus]) => (
+              {visibleWorkspaceUsers.map(([user, email, , role, userStatus]) => (
                 <TableRow key={user}>
                   <TableCell>{user}</TableCell>
                   <TableCell className="text-muted-foreground">{email}</TableCell>
@@ -9242,6 +9975,16 @@ function AdminWorkspaceProfile({
                   </TableCell>
                 </TableRow>
               ))}
+              {visibleWorkspaceUsers.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    className="py-8 text-center text-muted-foreground"
+                    colSpan={4}
+                  >
+                    No workspace users match these filters.
+                  </TableCell>
+                </TableRow>
+              ) : null}
             </TableBody>
           </Table>
         </div>
@@ -9315,60 +10058,181 @@ function AdminUserProfile({
 
 function AdminRequestsTable({
   description,
+  onUpdateStatus,
   rows,
   title,
+  updatingRequestId,
 }: {
   description: string;
-  rows: readonly [string, string, string, string, string, string][];
+  onUpdateStatus: (requestId: string, status: "approved" | "rejected") => void;
+  rows: readonly AdminRequestRow[];
   title: string;
+  updatingRequestId: string | null;
 }) {
+  const [requestFilter, setRequestFilter] = useState("all");
+  const [requestWorkTypeFilter, setRequestWorkTypeFilter] = useState("all");
+  const [requestCountryFilter, setRequestCountryFilter] = useState("all");
+  const [requestSearch, setRequestSearch] = useState("");
+  const requestFilterOptions = getTableFilterOptions(
+    rows.map((row) => row.status),
+    "All statuses",
+  );
+  const requestWorkTypeOptions = getTableFilterOptions(
+    rows.map((row) => row.workType || row.useCase),
+    "All work types",
+  );
+  const requestCountryOptions = getTableFilterOptions(
+    rows.map((row) => row.country),
+    "All countries",
+  );
+  const visibleRows = rows.filter((row) => {
+    const matchesSearch = matchesTableSearch(
+      [
+        row.name,
+        row.email,
+        row.company,
+        row.companySize,
+        row.workType,
+        row.roleTitle,
+        row.country,
+        row.source,
+        row.notes,
+        row.status,
+        row.submitted,
+      ],
+      requestSearch,
+    );
+    const matchesFilter =
+      requestFilter === "all" ||
+      normalizeFilterValue(row.status) === requestFilter;
+    const matchesWorkType =
+      requestWorkTypeFilter === "all" ||
+      normalizeFilterValue(row.workType || row.useCase) ===
+        requestWorkTypeFilter;
+    const matchesCountry =
+      requestCountryFilter === "all" ||
+      normalizeFilterValue(row.country) === requestCountryFilter;
+
+    return matchesSearch && matchesFilter && matchesWorkType && matchesCountry;
+  });
+
   return (
     <SettingsSection description={description} icon={File01Icon} title={title}>
-      <div className="overflow-x-auto">
-        <Table>
+      <div className="border-b border-border/70 px-4 py-3">
+        <TableFilterControls
+          filterLabel="Filter requests"
+          filterOptions={requestFilterOptions}
+          filterValue={requestFilter}
+          filters={[
+            {
+              label: "Filter work type",
+              onChange: setRequestWorkTypeFilter,
+              options: requestWorkTypeOptions,
+              value: requestWorkTypeFilter,
+            },
+            {
+              label: "Filter countries",
+              onChange: setRequestCountryFilter,
+              options: requestCountryOptions,
+              value: requestCountryFilter,
+            },
+          ]}
+          onFilterChange={setRequestFilter}
+          onSearchChange={setRequestSearch}
+          searchPlaceholder="Search requests..."
+          searchValue={requestSearch}
+        />
+      </div>
+      <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+        <Table className="min-w-[1360px]">
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Company</TableHead>
-              <TableHead>Use case</TableHead>
+              <TableHead>Company size</TableHead>
+              <TableHead>Work type</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Source</TableHead>
+              <TableHead>Country</TableHead>
+              <TableHead>Description</TableHead>
               <TableHead>Submitted</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map(([name, email, company, useCase, submitted, status]) => (
-              <TableRow key={`${name}-${email}`}>
-                <TableCell>{name}</TableCell>
-                <TableCell className="text-muted-foreground">{email}</TableCell>
-                <TableCell>{company}</TableCell>
-                <TableCell>{useCase}</TableCell>
-                <TableCell className="text-muted-foreground">{submitted}</TableCell>
-                <TableCell>
-                  <AdminStatusBadge status={status} />
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-2">
-                    <SettingsActionDialogButton
-                      confirmLabel="Confirm user"
-                      description={`${name} will receive an invitation to join Atmet.`}
-                      size="xs"
-                      title="Confirm waitlist user"
-                      triggerLabel="Confirm"
-                    />
-                    <SettingsActionDialogButton
-                      confirmLabel="Reject request"
-                      description={`${name} will stay out of the active workspace invite queue.`}
-                      size="xs"
-                      title="Reject waitlist request"
-                      triggerLabel="Reject"
-                      variant="ghost"
-                    />
-                  </div>
+            {visibleRows.map((row) => {
+              const normalizedStatus = row.status.toLowerCase();
+              const isPending = normalizedStatus === "pending";
+              const canResendInvite =
+                normalizedStatus === "invited" ||
+                normalizedStatus === "pending setup";
+              const isUpdating = updatingRequestId === row.id;
+
+              return (
+                <TableRow key={row.id}>
+                  <TableCell>{row.name}</TableCell>
+                  <TableCell className="text-muted-foreground">{row.email}</TableCell>
+                  <TableCell>{row.company || "-"}</TableCell>
+                  <TableCell>{row.companySize || "-"}</TableCell>
+                  <TableCell>{row.workType || row.useCase || "-"}</TableCell>
+                  <TableCell>{row.roleTitle || "-"}</TableCell>
+                  <TableCell>{row.source || "-"}</TableCell>
+                  <TableCell>{row.country || "-"}</TableCell>
+                  <TableCell className="max-w-xs whitespace-normal text-muted-foreground">
+                    {row.notes || "-"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{row.submitted}</TableCell>
+                  <TableCell>
+                    <AdminStatusBadge status={row.status} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {isPending ? (
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          loading={isUpdating}
+                          onClick={() => onUpdateStatus(row.id, "approved")}
+                          size="xs"
+                          variant="outline"
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          loading={isUpdating}
+                          onClick={() => onUpdateStatus(row.id, "rejected")}
+                          size="xs"
+                          variant="ghost"
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    ) : canResendInvite ? (
+                      <Button
+                        loading={isUpdating}
+                        onClick={() => onUpdateStatus(row.id, "approved")}
+                        size="xs"
+                        variant="outline"
+                      >
+                        Resend email
+                      </Button>
+                    ) : (
+                      <span className="text-muted-foreground text-sm">No actions</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            {visibleRows.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  className="py-8 text-center text-muted-foreground"
+                  colSpan={12}
+                >
+                  No requests match these filters.
                 </TableCell>
               </TableRow>
-            ))}
+            ) : null}
           </TableBody>
         </Table>
       </div>
@@ -9377,12 +10241,20 @@ function AdminRequestsTable({
 }
 
 function AdminStatusBadge({ status }: { status: string }) {
+  const normalizedStatus = status.toLowerCase();
   const variant =
-    status === "Active" || status === "Approved"
+    normalizedStatus === "active" ||
+    normalizedStatus === "approved" ||
+    normalizedStatus === "joined"
       ? "success"
-      : status === "Pending" || status === "Review" || status === "Invited"
+      : normalizedStatus === "pending" ||
+          normalizedStatus === "review" ||
+          normalizedStatus === "invited" ||
+          normalizedStatus === "pending setup"
         ? "warning"
-        : "outline";
+        : normalizedStatus === "rejected" || normalizedStatus === "suspended"
+          ? "error"
+          : "outline";
 
   return <Badge variant={variant}>{status}</Badge>;
 }
@@ -9404,6 +10276,28 @@ function BootstrapErrorBanner({ error }: { error: string }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+function LoadingPill({ label }: { label: string }) {
+  return (
+    <div className="mb-3 flex w-fit items-center gap-2 rounded-lg border border-border/50 bg-muted/45 px-2.5 py-1.5 text-xs text-muted-foreground">
+      <Spinner className="size-3.5" />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function LoadingFrame({ label }: { label: string }) {
+  return (
+    <Frame>
+      <FramePanel className="grid min-h-[24rem] place-items-center">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner className="size-4" />
+          <span>{label}</span>
+        </div>
+      </FramePanel>
+    </Frame>
   );
 }
 

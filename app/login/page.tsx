@@ -612,22 +612,6 @@ export default function LoginPage() {
             </>
           )}
 
-          <div
-            className={cn(
-              "grid overflow-hidden transition-[grid-template-rows,opacity,translate,margin] duration-300 ease-out",
-              waitlistSubmitted
-                ? "mt-5 grid-rows-[1fr] translate-y-0 opacity-100"
-                : "mt-0 grid-rows-[0fr] -translate-y-1 opacity-0",
-            )}
-          >
-            <div className="min-h-0">
-              <div className="rounded-xl bg-muted/60 px-4 py-3 text-center text-muted-foreground text-sm">
-                Request received for{" "}
-                <span className="font-medium text-foreground">{email}</span>.
-              </div>
-            </div>
-          </div>
-
           {!isWaitlistMode && (
             <button
               className="mx-auto mt-4 min-h-8 rounded-md px-2 text-muted-foreground text-sm outline-none transition-[color,scale] duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]"

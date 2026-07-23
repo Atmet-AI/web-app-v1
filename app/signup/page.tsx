@@ -10,6 +10,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Select,
   SelectItem,
@@ -35,6 +36,9 @@ const phoneCountries = [
   { code: "+966", flag: "🇸🇦", name: "Saudi Arabia" },
   { code: "+971", flag: "🇦🇪", name: "United Arab Emirates" },
 ];
+
+const MAX_CLIENT_AVATAR_SIZE = 512;
+const CLIENT_AVATAR_QUALITY = 0.82;
 
 type InviteContext = {
   admin?: {
@@ -146,9 +150,10 @@ function SignupContent() {
     setIsUploadingProfileImage(true);
 
     try {
+      const uploadFile = await resizeAvatarFile(file);
       const formData = new FormData();
       formData.set("target", "profile");
-      formData.set("file", file);
+      formData.set("file", uploadFile);
 
       const response = await fetch("/api/uploads/avatar", {
         body: formData,
@@ -418,6 +423,7 @@ function SignupContent() {
                 <SignupAvatarPreview
                   className="size-16 rounded-xl text-xl"
                   fallback={getInitials(firstName || "A")}
+                  loading={isUploadingProfileImage}
                   name="Profile image"
                   src={profileAvatarUrl}
                 />
@@ -439,12 +445,21 @@ function SignupContent() {
                   type="file"
                 />
                 <button
-                  className="grid size-11 place-items-center rounded-lg text-foreground outline-none transition-[background-color,scale] duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]"
+                  className="grid size-11 place-items-center rounded-lg text-foreground outline-none transition-[background-color,opacity,scale] duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-70"
                   disabled={isUploadingProfileImage}
                   onClick={() => profileImageInputRef.current?.click()}
                   type="button"
+                  aria-label={
+                    isUploadingProfileImage
+                      ? "Uploading profile image"
+                      : "Upload profile image"
+                  }
                 >
-                  <HugeiconsIcon className="size-5" icon={FileUploadIcon} />
+                  {isUploadingProfileImage ? (
+                    <Spinner className="size-5" />
+                  ) : (
+                    <HugeiconsIcon className="size-5" icon={FileUploadIcon} />
+                  )}
                 </button>
               </div>
 
@@ -522,7 +537,11 @@ function SignupContent() {
                 </div>
               </div>
 
-              <Button className="mt-2 w-full" disabled={isSubmitting} type="submit">
+              <Button
+                className="mt-2 w-full"
+                disabled={isSubmitting || isUploadingProfileImage}
+                type="submit"
+              >
                 {isSubmitting ? "Completing..." : "Complete setup"}
                 <span className="grid size-5 place-items-center rounded-md bg-primary-foreground/12 text-sm leading-none">
                   ↵
@@ -546,14 +565,68 @@ function getInitials(value: string) {
   return initials.toUpperCase();
 }
 
+async function resizeAvatarFile(file: File) {
+  if (file.type === "image/svg+xml" || file.size < 640 * 1024) {
+    return file;
+  }
+
+  const imageUrl = URL.createObjectURL(file);
+
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("Could not read profile image."));
+      element.src = imageUrl;
+    });
+
+    const scale = Math.min(
+      1,
+      MAX_CLIENT_AVATAR_SIZE / Math.max(image.naturalWidth, image.naturalHeight),
+    );
+
+    if (scale >= 1) {
+      return file;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return file;
+    }
+
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", CLIENT_AVATAR_QUALITY);
+    });
+
+    if (!blob) {
+      return file;
+    }
+
+    return new File([blob], "avatar.jpg", {
+      lastModified: Date.now(),
+      type: "image/jpeg",
+    });
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
+
 function SignupAvatarPreview({
   className,
   fallback,
+  loading = false,
   name,
   src,
 }: {
   className?: string;
   fallback: string;
+  loading?: boolean;
   name: string;
   src?: string;
 }) {
@@ -568,11 +641,16 @@ function SignupAvatarPreview({
         // eslint-disable-next-line @next/next/no-img-element
         <img
           alt={name}
-          className="size-full object-cover"
+          className="size-full object-cover object-center"
           src={src}
         />
       ) : (
         fallback
+      )}
+      {loading && (
+        <div className="absolute inset-0 grid place-items-center bg-background/58 backdrop-blur-[1px]">
+          <Spinner className="size-5 text-foreground" />
+        </div>
       )}
     </div>
   );
