@@ -82,6 +82,7 @@ export default function LoginPage() {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
@@ -109,11 +110,22 @@ export default function LoginPage() {
     const error = params.get("error");
     const code = params.get("code");
     const reset = params.get("reset");
+    const passwordUpdated = params.get("passwordUpdated");
 
     if (error === "missing_supabase_env") {
       setErrorMessage(
         "Supabase environment variables are missing in this deployment.",
       );
+    }
+
+    if (error === "session_expired") {
+      setErrorMessage("Your session expired. Sign in again to continue.");
+      window.history.replaceState(null, "", "/login");
+    }
+
+    if (passwordUpdated === "1") {
+      setSuccessMessage("Password updated. Sign in with your new password.");
+      window.history.replaceState(null, "", "/login");
     }
 
     if (reset !== "1") {
@@ -130,11 +142,15 @@ export default function LoginPage() {
     }
 
     setIsSubmitting(true);
-    fetch("/api/auth/exchange-code", {
-      body: JSON.stringify({ code }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
-    })
+    fetch("/api/auth/sign-out", { method: "POST" })
+      .catch(() => undefined)
+      .then(() =>
+        fetch("/api/auth/exchange-code", {
+          body: JSON.stringify({ code }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        }),
+      )
       .then(async (response) => {
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}));
@@ -185,6 +201,7 @@ export default function LoginPage() {
       return;
     }
     setErrorMessage("");
+    setSuccessMessage("");
 
     if (mode === "waitlist") {
       if (!email.trim() || !waitlistName.trim()) {
@@ -235,11 +252,11 @@ export default function LoginPage() {
 
       setIsSubmitting(true);
       try {
-        const response = await fetch("/api/auth/update-password", {
-          body: JSON.stringify({ password: newPassword }),
-          headers: { "Content-Type": "application/json" },
-          method: "POST",
-        });
+          const response = await fetch("/api/auth/update-password", {
+            body: JSON.stringify({ password: newPassword }),
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+          });
 
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}));
@@ -247,7 +264,7 @@ export default function LoginPage() {
           return;
         }
 
-        window.location.href = "/";
+        window.location.href = "/login?passwordUpdated=1";
       } finally {
         setIsSubmitting(false);
       }
@@ -286,7 +303,7 @@ export default function LoginPage() {
         setIsSubmitting(true);
         try {
           const response = await fetch("/api/auth/verify-otp", {
-            body: JSON.stringify({ email, token: otp, type: "recovery" }),
+            body: JSON.stringify({ email, token: otp, type: "email" }),
             headers: { "Content-Type": "application/json" },
             method: "POST",
           });
@@ -297,7 +314,10 @@ export default function LoginPage() {
             return;
           }
 
-          window.location.href = "/";
+          setMode("reset");
+          setOtpVisible(false);
+          setOtp("");
+          window.setTimeout(() => newPasswordInputRef.current?.focus(), 180);
         } finally {
           setIsSubmitting(false);
         }
@@ -353,6 +373,7 @@ export default function LoginPage() {
   function startForgotPassword() {
     setMode("forgot");
     setErrorMessage("");
+    setSuccessMessage("");
     setPasswordVisible(false);
     setOtpVisible(false);
     setWaitlistSubmitted(false);
@@ -361,6 +382,7 @@ export default function LoginPage() {
   function backToSignIn() {
     setMode("login");
     setErrorMessage("");
+    setSuccessMessage("");
     setOtpVisible(false);
     setNewPassword("");
     setConfirmPassword("");
@@ -370,6 +392,7 @@ export default function LoginPage() {
   function startWaitlist() {
     setMode("waitlist");
     setErrorMessage("");
+    setSuccessMessage("");
     setPasswordVisible(false);
     setOtpVisible(false);
     setWaitlistSubmitted(false);
@@ -724,6 +747,12 @@ export default function LoginPage() {
               {errorMessage && (
                 <p className="mt-4 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-center text-destructive text-sm">
                   {errorMessage}
+                </p>
+              )}
+
+              {successMessage && (
+                <p className="mt-4 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-center text-emerald-700 text-sm dark:text-emerald-300">
+                  {successMessage}
                 </p>
               )}
 

@@ -370,14 +370,34 @@ function getInitialChatId() {
   return new URLSearchParams(window.location.search).get("chat");
 }
 
+function getInitialAdminProfileView(): AdminProfileView | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const type = params.get("adminProfileType");
+  const name = params.get("adminProfileName");
+
+  if ((type === "user" || type === "workspace") && name) {
+    return { name, type };
+  }
+
+  return null;
+}
+
 function updateAppRouteState({
   adminTab,
+  adminProfile,
   chatId,
   page,
+  replace = false,
 }: {
   adminTab?: AdminTabKey;
+  adminProfile?: AdminProfileView | null;
   chatId?: string | null;
   page?: PageKey;
+  replace?: boolean;
 }) {
   if (typeof window === "undefined") {
     return;
@@ -395,6 +415,19 @@ function updateAppRouteState({
     url.searchParams.delete("adminTab");
   }
 
+  if (adminProfile !== undefined) {
+    if (adminProfile) {
+      url.searchParams.set("adminProfileType", adminProfile.type);
+      url.searchParams.set("adminProfileName", adminProfile.name);
+    } else {
+      url.searchParams.delete("adminProfileType");
+      url.searchParams.delete("adminProfileName");
+    }
+  } else if (nextPage !== "admin") {
+    url.searchParams.delete("adminProfileType");
+    url.searchParams.delete("adminProfileName");
+  }
+
   if (chatId !== undefined) {
     if (chatId) {
       url.searchParams.set("chat", chatId);
@@ -405,11 +438,16 @@ function updateAppRouteState({
     url.searchParams.delete("chat");
   }
 
-  window.history.replaceState(
-    window.history.state,
-    "",
-    `${url.pathname}${url.search}${url.hash}`,
-  );
+  const nextPath = `${url.pathname}${url.search}${url.hash}`;
+  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+
+  if (nextPath === currentPath) {
+    return;
+  }
+
+  const nextState = { ...(window.history.state ?? {}), atmet: true };
+  const historyMethod = replace ? "replaceState" : "pushState";
+  window.history[historyMethod](nextState, "", nextPath);
 }
 
 type AdminWorkspaceRow = [
@@ -1097,7 +1135,7 @@ function getCacheableDashboardPayload(payload: DashboardData): DashboardData {
 }
 
 export default function Home() {
-  const [activePage, setActivePage] = useState<PageKey>("chat");
+  const [activePage, setActivePage] = useState<PageKey>(getInitialPage);
   const [agentsPlaygroundOpen, setAgentsPlaygroundOpen] = useState(false);
   const [bootstrapError, setBootstrapError] = useState("");
   const [isBootstrapLoading, setIsBootstrapLoading] = useState(true);
@@ -1122,7 +1160,7 @@ export default function Home() {
   );
   const [agentList, setAgentList] = useState<Agent[]>([]);
   const [activeSidebarChatId, setActiveSidebarChatId] = useState<string | null>(
-    null,
+    getInitialChatId,
   );
   const [chatHistoryOpen, setChatHistoryOpen] = useState(true);
   const [sidebarChats, setSidebarChats] =
@@ -1162,8 +1200,21 @@ export default function Home() {
   }, [isDark]);
 
   useEffect(() => {
-    setActivePage(getInitialPage());
-    setActiveSidebarChatId(getInitialChatId());
+    function syncRouteFromHistory() {
+      const nextPage = getInitialPage();
+      setActivePage(nextPage);
+      setActiveSidebarChatId(nextPage === "chat" ? getInitialChatId() : null);
+      if (nextPage !== "agents") {
+        setAgentsPlaygroundOpen(false);
+        setSelectedAgentName(null);
+      }
+    }
+
+    window.addEventListener("popstate", syncRouteFromHistory);
+
+    return () => {
+      window.removeEventListener("popstate", syncRouteFromHistory);
+    };
   }, []);
 
   function applyDashboardPayload(payload: DashboardData) {
@@ -1541,7 +1592,7 @@ export default function Home() {
   return (
   <main className="h-svh overflow-hidden bg-sidebar text-foreground">
     <div className="flex h-svh min-h-0 flex-col">
-        <div className="grid h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-3 py-2 md:px-4">
+        <div className="grid h-11 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-3 py-1.5 md:px-4">
           <div className="flex min-w-0 items-center gap-2">
             {!sidebarOpen && (
               <Tooltip>
@@ -6796,7 +6847,7 @@ function SettingsPage({
       <PageHeader description={pageDescriptions.settings} title="Settings" />
       <Tabs className="gap-4" defaultValue="profile">
         <TabsList
-          className="w-full max-w-full flex-nowrap justify-start gap-x-1 overflow-x-auto"
+          className="w-full max-w-full flex-nowrap justify-start gap-x-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           variant="underline"
         >
           {settingsTabs.map((tab) => (
@@ -7548,7 +7599,7 @@ function SettingsWorkspaceUsersTable({
           />
         </div>
 
-        <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+        <div className={tableViewportClassName}>
           <Table className="min-w-[760px]">
             <TableHeader>
               <TableRow>
@@ -8378,14 +8429,28 @@ function SettingsStatGrid({ stats }: { stats: readonly [string, string][] }) {
 }
 
 function AdminPage() {
-  const [profileView, setProfileView] = useState<AdminProfileView | null>(null);
+  const [profileView, setProfileView] = useState<AdminProfileView | null>(
+    getInitialAdminProfileView,
+  );
   const [activeAdminTab, setActiveAdminTab] =
-    useState<AdminTabKey>("overview");
+    useState<AdminTabKey>(() =>
+      getInitialAdminProfileView() ? "workspaces" : getInitialAdminTab(),
+    );
   const [adminData, setAdminData] = useState<AdminData>(emptyAdminData);
   const [isAdminLoading, setIsAdminLoading] = useState(true);
 
   useEffect(() => {
-    setActiveAdminTab(getInitialAdminTab());
+    function syncAdminRouteFromHistory() {
+      const nextProfileView = getInitialAdminProfileView();
+      setActiveAdminTab(nextProfileView ? "workspaces" : getInitialAdminTab());
+      setProfileView(nextProfileView);
+    }
+
+    window.addEventListener("popstate", syncAdminRouteFromHistory);
+
+    return () => {
+      window.removeEventListener("popstate", syncAdminRouteFromHistory);
+    };
   }, []);
 
   useEffect(() => {
@@ -8481,7 +8546,17 @@ function AdminPage() {
     const tab = isAdminTabKey(value) ? value : "overview";
     setActiveAdminTab(tab);
     setProfileView(null);
-    updateAppRouteState({ adminTab: tab, page: "admin" });
+    updateAppRouteState({ adminProfile: null, adminTab: tab, page: "admin" });
+  }
+
+  function openAdminProfile(profile: AdminProfileView | null) {
+    setProfileView(profile);
+    setActiveAdminTab("workspaces");
+    updateAppRouteState({
+      adminProfile: profile,
+      adminTab: "workspaces",
+      page: "admin",
+    });
   }
 
   return (
@@ -8489,7 +8564,7 @@ function AdminPage() {
       <PageHeader description={pageDescriptions.admin} title="Admin Console" />
       <Tabs value={activeAdminTab} onValueChange={selectAdminTab}>
         <TabsList
-          className="w-full max-w-full flex-nowrap justify-start gap-x-1 overflow-x-auto"
+          className="w-full max-w-full flex-nowrap justify-start gap-x-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           variant="underline"
         >
           {adminTabs.map((tab) => (
@@ -8506,7 +8581,7 @@ function AdminPage() {
         <TabsContent value="workspaces">
           <AdminWorkspacesUsersTab
             adminData={adminData}
-            onOpenProfile={setProfileView}
+            onOpenProfile={openAdminProfile}
             profileView={profileView}
           />
         </TabsContent>
@@ -8770,9 +8845,34 @@ function AdminLogsTable({
 
     return matchesSearch && matchesFilter && matchesSource;
   });
+  const exportVisibleLogs = () => {
+    downloadCsv(
+      `atmet-system-logs-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["Time", "Type", "User", "Event", "Details", "Status"],
+      visibleRows.map((row) => [
+        row.time,
+        row.source,
+        row.user,
+        row.event,
+        row.detail,
+        row.status,
+      ]),
+    );
+  };
 
   return (
     <SettingsSection
+      action={
+        <Button
+          disabled={visibleRows.length === 0}
+          onClick={exportVisibleLogs}
+          size="sm"
+          variant="outline"
+        >
+          <Icon icon={File01Icon} />
+          Export CSV
+        </Button>
+      }
       description={description}
       icon={File01Icon}
       title={title}
@@ -8796,7 +8896,7 @@ function AdminLogsTable({
           searchValue={logSearch}
         />
       </div>
-      <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+      <div className={tableViewportClassName}>
         <Table className="min-w-[920px]">
           <TableHeader>
             <TableRow>
@@ -9061,7 +9161,9 @@ function AdminRequestsTab({ rows }: { rows: AdminRequestRow[] }) {
   const [requests, setRequests] = useState(rows);
   const [updatingRequestId, setUpdatingRequestId] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [sentRequestIds, setSentRequestIds] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   useEffect(() => {
     setRequests(rows);
@@ -9069,7 +9171,6 @@ function AdminRequestsTab({ rows }: { rows: AdminRequestRow[] }) {
 
   async function updateRequestStatus(requestId: string, status: "approved" | "rejected") {
     setError("");
-    setNotice("");
     setUpdatingRequestId(requestId);
 
     try {
@@ -9094,16 +9195,11 @@ function AdminRequestsTab({ rows }: { rows: AdminRequestRow[] }) {
       }
 
       if (status === "approved") {
-        const delivery = asRecord(payload.delivery);
-        const provider = asString(delivery.provider);
-        const email = updatedRequest?.email ?? "this user";
-        setNotice(
-          provider === "resend"
-            ? `Approval email sent to ${email} with Resend.`
-            : provider === "custom_smtp"
-              ? `Approval email sent to ${email} with custom SMTP.`
-              : `Approval email sent to ${email} with Supabase Auth.`,
-        );
+        setSentRequestIds((currentIds) => {
+          const nextIds = new Set(currentIds);
+          nextIds.add(requestId);
+          return nextIds;
+        });
       }
     } catch (requestError) {
       setError(
@@ -9123,15 +9219,11 @@ function AdminRequestsTab({ rows }: { rows: AdminRequestRow[] }) {
           {error}
         </div>
       ) : null}
-      {notice ? (
-        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-emerald-700 text-sm dark:text-emerald-300">
-          {notice}
-        </div>
-      ) : null}
       <AdminRequestsTable
         description="Confirm waitlist users when they are ready to join Atmet."
         onUpdateStatus={updateRequestStatus}
         rows={requests}
+        sentRequestIds={sentRequestIds}
         title="Waitlist requests"
         updatingRequestId={updatingRequestId}
       />
@@ -9196,7 +9288,7 @@ function AdminRolesTab({ rows }: { rows: AdminRoleRow[] }) {
             searchValue={roleSearch}
           />
         </div>
-        <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+        <div className={tableViewportClassName}>
           <Table className="min-w-[720px]">
             <TableHeader>
               <TableRow>
@@ -9517,6 +9609,9 @@ type TableSelectFilter = {
   value: string;
 };
 
+const tableViewportClassName =
+  "min-w-0 max-w-full max-h-[32rem] overflow-auto overscroll-contain";
+
 function normalizeFilterValue(value: string) {
   return value.trim().toLowerCase() || "unknown";
 }
@@ -9545,6 +9640,37 @@ function matchesTableSearch(values: unknown[], search: string) {
   return values.some((value) =>
     String(value ?? "").toLowerCase().includes(query),
   );
+}
+
+function csvCell(value: unknown) {
+  const text = String(value ?? "");
+
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replaceAll('"', '""')}"`;
+  }
+
+  return text;
+}
+
+function downloadCsv(
+  filename: string,
+  headers: string[],
+  rows: unknown[][],
+) {
+  const csv = [headers, ...rows]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function TableFilterControls({
@@ -9670,7 +9796,7 @@ function AdminWorkspacesTable({
           searchValue={workspaceSearch}
         />
       </div>
-      <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+      <div className={tableViewportClassName}>
         <Table className="min-w-[900px]">
           <TableHeader>
             <TableRow>
@@ -9706,7 +9832,16 @@ function AdminWorkspacesTable({
                   <AdminStatusBadge status={status} />
                 </TableCell>
                 <TableCell className="text-right">
-                  <Button size="xs" variant="outline">Open</Button>
+                  <Button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenProfile({ name: workspace, type: "workspace" });
+                    }}
+                    size="xs"
+                    variant="outline"
+                  >
+                    Open
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}
@@ -9782,7 +9917,7 @@ function AdminUsersTable({
           searchValue={userSearch}
         />
       </div>
-      <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+      <div className={tableViewportClassName}>
         <Table className="min-w-[1040px]">
           <TableHeader>
             <TableRow>
@@ -9820,7 +9955,16 @@ function AdminUsersTable({
                 </TableCell>
                 <TableCell className="text-muted-foreground">{lastActive}</TableCell>
                 <TableCell className="text-right">
-                  <Button size="xs" variant="outline">Open</Button>
+                  <Button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenProfile({ name: user, type: "user" });
+                    }}
+                    size="xs"
+                    variant="outline"
+                  >
+                    Open
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}
@@ -9868,8 +10012,10 @@ function AdminWorkspaceProfile({
       </SettingsTabGrid>
     );
   }
-  const [workspaceName, owner, plan, members, status, usage, created] =
+  const [workspaceName, owner, plan, members, status, usage, created, workspaceId] =
     workspace;
+  const workspaceSlug = workspaceName.toLowerCase().replace(/\s+/g, "-");
+  const workspaceUrl = `https://app.atmetai.com/workspace/${workspaceSlug}`;
   const workspaceUsers = adminData.users.filter(
     ([, , userWorkspace]) => userWorkspace === workspaceName,
   );
@@ -9924,9 +10070,89 @@ function AdminWorkspaceProfile({
           description="Public workspace URL used by users and invitations."
           title="Workspace URL"
         >
-          <Button size="sm" variant="outline">
-            atmetai.com/{workspaceName.toLowerCase().replace(/\s+/g, "-")}
+          <Button
+            onClick={() => navigator.clipboard?.writeText(workspaceUrl)}
+            size="sm"
+            variant="outline"
+          >
+            <Icon icon={ClipboardCopyIcon} />
+            Copy URL
           </Button>
+        </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection
+        description="Super admin controls for this workspace."
+        icon={ShieldCheck}
+        title="Workspace actions"
+      >
+        <SettingsRow
+          description="Copy the workspace ID for audits, support, or backend checks."
+          title="Workspace ID"
+        >
+          <Button
+            disabled={!workspaceId}
+            onClick={() => navigator.clipboard?.writeText(workspaceId)}
+            size="sm"
+            variant="outline"
+          >
+            <Icon icon={ClipboardCopyIcon} />
+            Copy ID
+          </Button>
+        </SettingsRow>
+        <SettingsRow
+          description="Move billing and limits to a different plan."
+          title="Plan override"
+        >
+          <SettingsActionDialogButton
+            confirmLabel="Save plan"
+            description={`Change ${workspaceName} from ${plan} to another plan.`}
+            icon={WalletCardsIcon}
+            title="Change workspace plan"
+            triggerLabel="Change plan"
+          >
+            <Input defaultValue={plan} placeholder="Starter, Pro, or Business" />
+          </SettingsActionDialogButton>
+        </SettingsRow>
+        <SettingsRow
+          description="Transfer the workspace owner when a team changes ownership."
+          title="Owner"
+        >
+          <SettingsActionDialogButton
+            confirmLabel="Transfer owner"
+            description={`Choose the new owner for ${workspaceName}.`}
+            icon={Users}
+            title="Transfer workspace ownership"
+            triggerLabel="Transfer owner"
+          >
+            <Input defaultValue={owner} placeholder="Owner email or name" />
+          </SettingsActionDialogButton>
+        </SettingsRow>
+        <SettingsRow
+          description="Pause access for every member without deleting workspace data."
+          title="Access"
+        >
+          <SettingsActionDialogButton
+            confirmLabel="Suspend workspace"
+            description={`${workspaceName} members will lose access until a super admin restores it.`}
+            icon={PauseCircleIcon}
+            title="Suspend workspace"
+            triggerLabel="Suspend"
+          />
+        </SettingsRow>
+        <SettingsRow
+          description="Permanently remove this workspace and all related records."
+          title="Danger zone"
+        >
+          <SettingsActionDialogButton
+            className="text-red-600 hover:text-red-600 dark:text-red-300"
+            confirmLabel="Delete workspace"
+            description={`This will permanently delete ${workspaceName}. This action cannot be undone.`}
+            icon={Delete02Icon}
+            title="Delete workspace"
+            triggerLabel="Delete"
+            variant="outline"
+          />
         </SettingsRow>
       </SettingsSection>
 
@@ -9954,7 +10180,7 @@ function AdminWorkspaceProfile({
             searchValue={workspaceUserSearch}
           />
         </div>
-        <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+        <div className={tableViewportClassName}>
           <Table className="min-w-[760px]">
             <TableHeader>
               <TableRow>
@@ -10052,6 +10278,77 @@ function AdminUserProfile({
           />
         </SettingsRow>
       </SettingsSection>
+
+      <SettingsSection
+        description="Super admin controls for this user."
+        icon={ShieldCheck}
+        title="User actions"
+      >
+        <SettingsRow
+          description="Copy the user email for support, invites, or audit trails."
+          title="Email"
+        >
+          <Button
+            disabled={!email}
+            onClick={() => navigator.clipboard?.writeText(email)}
+            size="sm"
+            variant="outline"
+          >
+            <Icon icon={ClipboardCopyIcon} />
+            Copy email
+          </Button>
+        </SettingsRow>
+        <SettingsRow
+          description="Update this user role inside their assigned workspace."
+          title="Role override"
+        >
+          <SettingsActionDialogButton
+            confirmLabel="Save role"
+            description={`Change ${userName}'s role for ${workspace || "this workspace"}.`}
+            icon={ProfileIcon}
+            title="Change user role"
+            triggerLabel="Change role"
+          >
+            <Input defaultValue={role} placeholder="Owner, Admin, Member, Viewer" />
+          </SettingsActionDialogButton>
+        </SettingsRow>
+        <SettingsRow
+          description="Send a secure reset link to the user's email address."
+          title="Password"
+        >
+          <SettingsActionDialogButton
+            confirmLabel="Send reset"
+            description={`Send a password reset link to ${email || userName}.`}
+            icon={SendHorizontal}
+            title="Send password reset"
+            triggerLabel="Send reset"
+          />
+        </SettingsRow>
+        <SettingsRow
+          description="Invalidate active sessions so the user has to sign in again."
+          title="Sessions"
+        >
+          <SettingsActionDialogButton
+            confirmLabel="Force sign out"
+            description={`${userName} will be signed out from active sessions.`}
+            icon={Logout03Icon}
+            title="Force sign out"
+            triggerLabel="Force sign out"
+          />
+        </SettingsRow>
+        <SettingsRow
+          description="Remove this user from their current workspace membership."
+          title="Membership"
+        >
+          <SettingsActionDialogButton
+            confirmLabel="Remove member"
+            description={`Remove ${userName} from ${workspace || "their workspace"}.`}
+            icon={Delete02Icon}
+            title="Remove from workspace"
+            triggerLabel="Remove member"
+          />
+        </SettingsRow>
+      </SettingsSection>
     </SettingsTabGrid>
   );
 }
@@ -10060,12 +10357,14 @@ function AdminRequestsTable({
   description,
   onUpdateStatus,
   rows,
+  sentRequestIds,
   title,
   updatingRequestId,
 }: {
   description: string;
   onUpdateStatus: (requestId: string, status: "approved" | "rejected") => void;
   rows: readonly AdminRequestRow[];
+  sentRequestIds: Set<string>;
   title: string;
   updatingRequestId: string | null;
 }) {
@@ -10143,7 +10442,7 @@ function AdminRequestsTable({
           searchValue={requestSearch}
         />
       </div>
-      <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+      <div className={tableViewportClassName}>
         <Table className="min-w-[1360px]">
           <TableHeader>
             <TableRow>
@@ -10214,6 +10513,9 @@ function AdminRequestsTable({
                         size="xs"
                         variant="outline"
                       >
+                        {sentRequestIds.has(row.id) ? (
+                          <Icon className="text-success" icon={CheckIcon} />
+                        ) : null}
                         Resend email
                       </Button>
                     ) : (

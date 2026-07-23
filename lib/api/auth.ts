@@ -3,6 +3,7 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { forbidden, unauthorized } from "@/lib/api/http";
+import { isUserSessionExpired } from "@/lib/auth/session";
 
 export type ApiAuthContext = {
   admin: SupabaseClient;
@@ -23,6 +24,11 @@ export async function requireUser(): Promise<ApiAuthContext | NextResponse> {
 
   if (error || !user) {
     return unauthorized();
+  }
+
+  if (isUserSessionExpired(user)) {
+    await supabase.auth.signOut();
+    return unauthorized("Session expired");
   }
 
   return {

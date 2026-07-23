@@ -26,6 +26,8 @@ export async function POST(request: Request) {
       return badRequest(error.message);
     }
 
+    await auth.supabase.auth.signOut();
+
     return ok({ success: true });
   } catch (error) {
     return serverError(error);

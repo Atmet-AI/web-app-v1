@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isUserSessionExpired } from "@/lib/auth/session";
 
 function getSupabaseProxyEnv() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -110,6 +111,20 @@ export async function proxy(request: NextRequest) {
 
   if (!user) {
     return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  if (isUserSessionExpired(user)) {
+    await supabase.auth.signOut();
+
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("error", "session_expired");
+    const redirectResponse = NextResponse.redirect(loginUrl);
+
+    pendingCookies.forEach(({ name, value, options }) => {
+      redirectResponse.cookies.set(name, value, options);
+    });
+
+    return redirectResponse;
   }
 
   const workspaceInviteId = user.user_metadata?.workspace_invite_id;
