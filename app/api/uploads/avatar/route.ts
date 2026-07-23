@@ -88,7 +88,9 @@ export async function POST(request: Request) {
     const path = `${target}/${ownerKey}/${crypto.randomUUID()}.${extension}`;
     const arrayBuffer = await file.arrayBuffer();
 
-    const { error: uploadError } = await auth.supabase.storage
+    const dataClient = hasSupabaseServiceRoleKey() ? auth.admin : auth.supabase;
+
+    const { error: uploadError } = await dataClient.storage
       .from(AVATAR_BUCKET)
       .upload(path, Buffer.from(arrayBuffer), {
         contentType: file.type,
@@ -105,13 +107,13 @@ export async function POST(request: Request) {
       throw uploadError;
     }
 
-    const { data: publicUrlData } = auth.supabase.storage
+    const { data: publicUrlData } = dataClient.storage
       .from(AVATAR_BUCKET)
       .getPublicUrl(path);
     const avatarUrl = publicUrlData.publicUrl;
 
     if (target === "workspace") {
-      const { data: workspace, error } = await auth.supabase
+      const { data: workspace, error } = await dataClient
         .from("workspaces")
         .update({ avatar_url: avatarUrl })
         .eq("id", workspaceId)
@@ -125,10 +127,16 @@ export async function POST(request: Request) {
       return ok({ avatarUrl, workspace });
     }
 
-    const { data: profile, error } = await auth.supabase
+    const { data: profile, error } = await dataClient
       .from("profiles")
-      .update({ avatar_url: avatarUrl })
-      .eq("id", auth.user.id)
+      .upsert(
+        {
+          avatar_url: avatarUrl,
+          email: auth.user.email ?? "",
+          id: auth.user.id,
+        },
+        { onConflict: "id" },
+      )
       .select("*")
       .single();
 

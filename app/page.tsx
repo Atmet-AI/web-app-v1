@@ -1385,15 +1385,22 @@ export default function Home() {
                 }
               }}
               onInvitePeople={async (email) => {
-                if (!activeWorkspaceId) return;
-                try {
-                  await fetch(`/api/workspaces/${activeWorkspaceId}/members`, {
+                if (!activeWorkspaceId) {
+                  throw new Error("Choose a workspace before sending an invite");
+                }
+
+                const response = await fetch(
+                  `/api/workspaces/${activeWorkspaceId}/members`,
+                  {
                     body: JSON.stringify({ email, role: "member" }),
                     headers: { "Content-Type": "application/json" },
                     method: "POST",
-                  });
-                } catch (error) {
-                  console.error(error);
+                  },
+                );
+
+                if (!response.ok) {
+                  const payload = asRecord(await response.json().catch(() => ({})));
+                  throw new Error(asString(payload.error, "Could not send invite"));
                 }
               }}
               onSelectWorkspace={(nextWorkspace) => setWorkspace(nextWorkspace)}
@@ -1786,21 +1793,36 @@ function WorkspaceInviteDialog({
   workspaceName: string;
 }) {
   const [email, setEmail] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isSending, setIsSending] = useState(false);
   const trimmedEmail = email.trim();
 
   function resetForm() {
     setEmail("");
+    setErrorMessage("");
+    setIsSending(false);
   }
 
-  function submitInvite(event: React.FormEvent<HTMLFormElement>) {
+  async function submitInvite(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!trimmedEmail) {
+    if (!trimmedEmail || isSending) {
       return;
     }
 
-    void onInvite(trimmedEmail);
-    resetForm();
-    onOpenChange(false);
+    setErrorMessage("");
+    setIsSending(true);
+
+    try {
+      await onInvite(trimmedEmail);
+      resetForm();
+      onOpenChange(false);
+      window.alert(`Invite sent to ${trimmedEmail}`);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Could not send invite",
+      );
+      setIsSending(false);
+    }
   }
 
   return (
@@ -1827,19 +1849,25 @@ function WorkspaceInviteDialog({
             <Label htmlFor="workspace-invite-email">Email address</Label>
             <Input
               autoFocus
+              disabled={isSending}
               id="workspace-invite-email"
               onChange={(event) => setEmail(event.target.value)}
               placeholder="teammate@company.com"
               type="email"
               value={email}
             />
+            {errorMessage && (
+              <p className="text-xs leading-5 text-destructive">
+                {errorMessage}
+              </p>
+            )}
           </DialogPanel>
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="outline" />}>
               Cancel
             </DialogClose>
-            <Button disabled={!trimmedEmail} type="submit">
-              Send invite
+            <Button disabled={!trimmedEmail || isSending} type="submit">
+              {isSending ? "Sending..." : "Send invite"}
             </Button>
           </DialogFooter>
         </form>
@@ -8506,34 +8534,7 @@ function AdminWorkspacesUsersTab({
         />
       </SettingsSection>
       <SettingsSection
-        action={
-          <SettingsActionDialogButton
-            confirmLabel="Send invite"
-            description="Add a user to an existing workspace and assign a role."
-            icon={PlusSignIcon}
-            title="Invite user"
-            triggerLabel="Invite user"
-          >
-            <div className="grid gap-2">
-              <Label>Email</Label>
-              <Input placeholder="user@company.com" size="sm" />
-            </div>
-            <div className="grid gap-2">
-              <Label>Workspace</Label>
-              <Button className="justify-between" size="sm" variant="outline">
-                {adminData.workspaces[0]?.[0] ?? "Choose workspace"}
-                <Icon icon={ChevronDownIcon} />
-              </Button>
-            </div>
-            <div className="grid gap-2">
-              <Label>Role</Label>
-              <Button className="justify-between" size="sm" variant="outline">
-                Member
-                <Icon icon={ChevronDownIcon} />
-              </Button>
-            </div>
-          </SettingsActionDialogButton>
-        }
+        action={<AdminInviteUserDialog workspaces={adminData.workspaces} />}
         description="Review people, roles, workspace membership, and access state."
         icon={Users}
         title="Users"
@@ -8544,6 +8545,163 @@ function AdminWorkspacesUsersTab({
         />
       </SettingsSection>
     </SettingsTabGrid>
+  );
+}
+
+function AdminInviteUserDialog({
+  workspaces,
+}: {
+  workspaces: AdminWorkspaceRow[];
+}) {
+  const [email, setEmail] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [role, setRole] = useState("member");
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(
+    workspaces[0]?.[7] ?? "",
+  );
+  const trimmedEmail = email.trim();
+
+  useEffect(() => {
+    if (!selectedWorkspaceId && workspaces[0]?.[7]) {
+      setSelectedWorkspaceId(workspaces[0][7]);
+    }
+  }, [selectedWorkspaceId, workspaces]);
+
+  function resetForm() {
+    setEmail("");
+    setErrorMessage("");
+    setIsSending(false);
+    setRole("member");
+    setSelectedWorkspaceId(workspaces[0]?.[7] ?? "");
+  }
+
+  async function submitInvite(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!trimmedEmail || !selectedWorkspaceId || isSending) {
+      return;
+    }
+
+    setErrorMessage("");
+    setIsSending(true);
+
+    try {
+      const response = await fetch(`/api/workspaces/${selectedWorkspaceId}/members`, {
+        body: JSON.stringify({ email: trimmedEmail, role }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const payload = asRecord(await response.json().catch(() => ({})));
+        throw new Error(asString(payload.error, "Could not send invite"));
+      }
+
+      setOpen(false);
+      resetForm();
+      window.alert(`Invite sent to ${trimmedEmail}`);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Could not send invite",
+      );
+      setIsSending(false);
+    }
+  }
+
+  return (
+    <Dialog
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) {
+          resetForm();
+        }
+      }}
+      open={open}
+    >
+      <Button onClick={() => setOpen(true)} size="sm" variant="outline">
+        <Icon icon={PlusSignIcon} />
+        Invite user
+      </Button>
+      <DialogPopup className="max-w-md rounded-xl">
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={submitInvite}>
+          <DialogHeader className="gap-1 border-b border-border/70 px-4 py-3">
+            <DialogTitle className="text-base leading-6">Invite user</DialogTitle>
+            <DialogDescription className="text-xs leading-5">
+              Add a user to a workspace and assign their access role.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="grid gap-3 p-4" scrollFade={false}>
+            <div className="grid gap-1.5">
+              <Label htmlFor="admin-invite-email">Email</Label>
+              <Input
+                autoFocus
+                disabled={isSending}
+                id="admin-invite-email"
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="user@company.com"
+                type="email"
+                value={email}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Workspace</Label>
+              <Select
+                disabled={isSending || workspaces.length === 0}
+                onValueChange={(value) => setSelectedWorkspaceId(value ?? "")}
+                value={selectedWorkspaceId}
+              >
+                <SelectTrigger size="sm">
+                  <SelectValue placeholder="Choose workspace" />
+                </SelectTrigger>
+                <SelectPopup>
+                  {workspaces.map((workspace) => (
+                    <SelectItem key={workspace[7]} value={workspace[7]}>
+                      {workspace[0]}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Role</Label>
+              <Select
+                disabled={isSending}
+                onValueChange={(value) => setRole(value ?? "member")}
+                value={role}
+              >
+                <SelectTrigger size="sm">
+                  <SelectValue placeholder="Select role" />
+                </SelectTrigger>
+                <SelectPopup>
+                  {["member", "admin", "viewer"].map((roleOption) => (
+                    <SelectItem key={roleOption} value={roleOption}>
+                      {roleOption[0]?.toUpperCase() + roleOption.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </div>
+            {errorMessage && (
+              <p className="text-xs leading-5 text-destructive">
+                {errorMessage}
+              </p>
+            )}
+          </DialogPanel>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button
+              disabled={!trimmedEmail || !selectedWorkspaceId || isSending}
+              type="submit"
+            >
+              {isSending ? "Sending..." : "Send invite"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogPopup>
+    </Dialog>
   );
 }
 

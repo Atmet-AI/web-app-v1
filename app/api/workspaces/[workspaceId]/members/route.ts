@@ -50,7 +50,12 @@ export async function POST(request: Request, context: RouteContext) {
 
     const rawToken = crypto.randomBytes(24).toString("hex");
     const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
-    const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
+    const requestOrigin = new URL(request.url).origin;
+    const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL;
+    const origin =
+      configuredOrigin && !configuredOrigin.includes("localhost")
+        ? configuredOrigin
+        : requestOrigin;
     const signupUrl = `${origin}/signup?invite=${rawToken}&type=invite`;
 
     const { data, error } = await auth.admin
@@ -79,7 +84,27 @@ export async function POST(request: Request, context: RouteContext) {
     });
 
     if (inviteError) {
-      throw inviteError;
+      const existingUserError = inviteError.message
+        .toLowerCase()
+        .includes("already");
+
+      if (!existingUserError) {
+        await auth.admin.from("workspace_invites").delete().eq("id", data.id);
+        throw inviteError;
+      }
+
+      const { error: magicLinkError } = await auth.supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: signupUrl,
+          shouldCreateUser: false,
+        },
+      });
+
+      if (magicLinkError) {
+        await auth.admin.from("workspace_invites").delete().eq("id", data.id);
+        throw magicLinkError;
+      }
     }
 
     return created({

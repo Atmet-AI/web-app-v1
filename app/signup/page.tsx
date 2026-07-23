@@ -5,9 +5,8 @@ import {
   FileUploadIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,6 +36,17 @@ const phoneCountries = [
   { code: "+971", flag: "🇦🇪", name: "United Arab Emirates" },
 ];
 
+type InviteContext = {
+  admin?: {
+    avatarUrl?: string;
+    name?: string;
+  };
+  workspace?: {
+    avatarUrl?: string;
+    name?: string;
+  };
+};
+
 export default function SignupPage() {
   return (
     <Suspense fallback={<SignupShell />}>
@@ -64,7 +74,11 @@ function SignupContent() {
   const [phoneCountry, setPhoneCountry] = useState(phoneCountries[0].name);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [inviteContext, setInviteContext] = useState<InviteContext | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploadingProfileImage, setIsUploadingProfileImage] = useState(false);
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState("");
+  const profileImageInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const query = window.matchMedia("(prefers-color-scheme: dark)");
@@ -88,6 +102,80 @@ function SignupContent() {
       ? inviteParam
       : "";
   const isInvitedUser = Boolean(inviteParam) || searchParams.get("type") === "invite";
+
+  useEffect(() => {
+    if (!isInvitedUser) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const params = new URLSearchParams();
+    if (inviteToken) {
+      params.set("token", inviteToken);
+    }
+
+    async function loadInviteContext() {
+      try {
+        const response = await fetch(`/api/auth/invite-context?${params}`, {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        setInviteContext((await response.json()) as InviteContext);
+      } catch (error) {
+        if ((error as Error).name !== "AbortError") {
+          console.error(error);
+        }
+      }
+    }
+
+    void loadInviteContext();
+
+    return () => controller.abort();
+  }, [inviteToken, isInvitedUser]);
+
+  async function uploadProfileImage(file: File | undefined) {
+    if (!file || isUploadingProfileImage) {
+      return;
+    }
+
+    setErrorMessage("");
+    setIsUploadingProfileImage(true);
+
+    try {
+      const formData = new FormData();
+      formData.set("target", "profile");
+      formData.set("file", file);
+
+      const response = await fetch("/api/uploads/avatar", {
+        body: formData,
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        avatarUrl?: string;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        setErrorMessage(payload.error ?? "Could not upload profile image.");
+        return;
+      }
+
+      setProfileAvatarUrl(payload.avatarUrl ?? "");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Could not upload profile image.",
+      );
+    } finally {
+      setIsUploadingProfileImage(false);
+      if (profileImageInputRef.current) {
+        profileImageInputRef.current.value = "";
+      }
+    }
+  }
 
   async function submitSignup(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -139,6 +227,7 @@ function SignupContent() {
             invited: isInvitedUser,
             password,
             profile: {
+              avatarUrl: profileAvatarUrl,
               fullName,
               phoneNumber: phoneNumber.trim()
                 ? `${selectedCountry.code} ${phoneNumber.trim()}`
@@ -246,21 +335,23 @@ function SignupContent() {
           {step === 2 && isInvitedUser && (
             <div className="grid gap-8">
               <div className="flex items-center justify-center gap-5 py-7">
-                <div className="grid size-20 shrink-0 place-items-center rounded-2xl border border-input bg-background p-4 shadow-xs/5 dark:bg-input/32">
-                  <Image
-                    alt="Atmet Workspace"
-                    className="size-full object-contain dark:invert"
-                    height={48}
-                    src="/Atmet Logos/Atmet Dark mode.svg"
-                    width={48}
-                  />
-                </div>
+                <SignupAvatarPreview
+                  fallback={getInitials(
+                    inviteContext?.workspace?.name ?? "Workspace",
+                  )}
+                  name={inviteContext?.workspace?.name ?? "Workspace"}
+                  src={inviteContext?.workspace?.avatarUrl}
+                />
                 <div className="font-medium text-muted-foreground text-xl">
                   x
                 </div>
-                <div className="grid size-20 shrink-0 place-items-center rounded-2xl bg-primary text-2xl text-primary-foreground font-semibold">
-                  AH
-                </div>
+                <SignupAvatarPreview
+                  fallback={getInitials(
+                    inviteContext?.admin?.name ?? "Workspace admin",
+                  )}
+                  name={inviteContext?.admin?.name ?? "Workspace admin"}
+                  src={inviteContext?.admin?.avatarUrl}
+                />
               </div>
 
               <Button className="w-full" disabled={isSubmitting} type="submit">
@@ -324,9 +415,12 @@ function SignupContent() {
           {step === 3 && (
             <div className="grid gap-6">
               <div className="flex items-center gap-4">
-                <div className="grid size-16 shrink-0 place-items-center rounded-xl border border-input bg-background font-semibold text-muted-foreground shadow-xs/5 dark:bg-input/32">
-                  A
-                </div>
+                <SignupAvatarPreview
+                  className="size-16 rounded-xl text-xl"
+                  fallback={getInitials(firstName || "A")}
+                  name="Profile image"
+                  src={profileAvatarUrl}
+                />
                 <div className="min-w-0 flex-1">
                   <p className="font-medium text-muted-foreground">
                     Profile image
@@ -335,8 +429,19 @@ function SignupContent() {
                     Optional image
                   </p>
                 </div>
+                <input
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) =>
+                    void uploadProfileImage(event.target.files?.[0])
+                  }
+                  ref={profileImageInputRef}
+                  type="file"
+                />
                 <button
                   className="grid size-11 place-items-center rounded-lg text-foreground outline-none transition-[background-color,scale] duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]"
+                  disabled={isUploadingProfileImage}
+                  onClick={() => profileImageInputRef.current?.click()}
                   type="button"
                 >
                   <HugeiconsIcon className="size-5" icon={FileUploadIcon} />
@@ -431,6 +536,48 @@ function SignupContent() {
   );
 }
 
+function getInitials(value: string) {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  const initials =
+    parts.length > 1
+      ? `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`
+      : parts[0]?.slice(0, 2) ?? "A";
+
+  return initials.toUpperCase();
+}
+
+function SignupAvatarPreview({
+  className,
+  fallback,
+  name,
+  src,
+}: {
+  className?: string;
+  fallback: string;
+  name: string;
+  src?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "grid size-20 shrink-0 place-items-center overflow-hidden rounded-2xl border border-input bg-background text-2xl font-semibold text-foreground shadow-xs/5 dark:bg-input/32",
+        className,
+      )}
+    >
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          alt={name}
+          className="size-full object-cover"
+          src={src}
+        />
+      ) : (
+        fallback
+      )}
+    </div>
+  );
+}
+
 function SignupProgress({ currentStep }: { currentStep: 2 | 3 }) {
   return (
     <div className="mb-14 grid grid-cols-2 gap-3">
@@ -485,6 +632,7 @@ function PasswordField({
           aria-label={showPassword ? "Hide password" : "Show password"}
           className="absolute inset-y-0 end-0 grid w-10 place-items-center text-muted-foreground outline-none transition-[color,scale] duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]"
           onClick={onToggle}
+          tabIndex={-1}
           type="button"
         >
           <HugeiconsIcon className="size-4.5" icon={EyeIcon} />

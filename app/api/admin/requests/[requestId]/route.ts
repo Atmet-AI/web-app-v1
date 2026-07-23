@@ -39,7 +39,12 @@ export async function PATCH(request: Request, context: RouteContext) {
     let signupUrl: string | null = null;
 
     if (status === "approved") {
-      const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
+      const requestOrigin = new URL(request.url).origin;
+      const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL;
+      const origin =
+        configuredOrigin && !configuredOrigin.includes("localhost")
+          ? configuredOrigin
+          : requestOrigin;
       signupUrl = `${origin}/signup?approved=1&request=${requestId}`;
       const { error: inviteError } = await auth.admin.auth.admin.inviteUserByEmail(data.email, {
         data: {

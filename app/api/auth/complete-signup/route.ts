@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { isRouteResponse, requireUser } from "@/lib/api/auth";
 import { badRequest, booleanValue, created, jsonObject, ok, readJson, serverError, stringValue } from "@/lib/api/http";
+import { hasSupabaseServiceRoleKey } from "@/lib/supabase/admin";
 
 export async function POST(request: Request) {
   try {
@@ -29,8 +30,11 @@ export async function POST(request: Request) {
     const avatarUrl = stringValue(profile.avatarUrl);
     const roleTitle = stringValue(profile.roleTitle);
     const timezone = stringValue(profile.timezone, "Asia/Amman");
+    const profileClient = hasSupabaseServiceRoleKey()
+      ? context.admin
+      : context.supabase;
 
-    const { error: profileError } = await context.admin.from("profiles").upsert({
+    const { error: profileError } = await profileClient.from("profiles").upsert({
       id: context.user.id,
       email: context.user.email ?? "",
       full_name: fullName || context.user.user_metadata?.full_name || null,
