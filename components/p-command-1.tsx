@@ -74,7 +74,7 @@ export default function CommandPalette({
         render={
           <Button
             className={cn(
-              "hidden h-7 min-w-48 max-w-[38vw] justify-between rounded-lg border-border/35 bg-background px-2.5 text-muted-foreground text-xs ring-1 ring-sidebar-border/25 transition-[background-color,scale] duration-150 hover:bg-sidebar-accent active:scale-[0.96] sm:flex md:w-72 dark:border-white/8 dark:ring-white/5",
+              "hidden h-6.5 min-w-44 max-w-[34vw] justify-between rounded-lg border-black/8 bg-white px-2 text-muted-foreground text-xs shadow-xs/5 transition-[background-color,scale] duration-150 hover:bg-stone-50 active:scale-[0.96] sm:flex md:w-64 dark:border-white/10 dark:bg-stone-950 dark:text-stone-400 dark:hover:bg-stone-900",
               triggerClassName,
             )}
             variant="outline"
@@ -86,8 +86,8 @@ export default function CommandPalette({
           <span className="truncate">{triggerLabel}</span>
         </span>
         <KbdGroup className="hidden shrink-0 sm:inline-flex">
-          <Kbd className="h-4 min-w-4 px-1 text-[0.625rem]">⌘</Kbd>
-          <Kbd className="h-4 min-w-4 px-1 text-[0.625rem]">K</Kbd>
+          <Kbd className="h-3.5 min-w-3.5 px-1 text-[0.56rem]">⌘</Kbd>
+          <Kbd className="h-3.5 min-w-3.5 px-1 text-[0.56rem]">K</Kbd>
         </KbdGroup>
       </CommandDialogTrigger>
       <CommandDialogPopup>

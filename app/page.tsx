@@ -1,6 +1,9 @@
 "use client";
 
 import Image from "next/image";
+import { palettes as oreoAvatarPalettes } from "@oreo-design/avatar";
+import { Avatar as OreoAvatar } from "@oreo-design/avatar/react";
+import { GradientSpin } from "gradient-spin";
 import {
   Ai as AiLogoIcon,
   AiBrainIcon,
@@ -9,6 +12,7 @@ import {
   AppWindowIcon,
   AppWindowMacIcon,
   ArrowRight01Icon,
+  BellIcon,
   BookOpenIcon,
   BoxesIcon,
   Brain03Icon,
@@ -35,6 +39,7 @@ import {
   LifebuoyIcon,
   Logout03Icon,
   MoreHorizontalIcon,
+  Moon02Icon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   PauseCircleIcon,
@@ -53,9 +58,11 @@ import {
   ShieldCheck,
   SparklesIcon,
   SourceCodeIcon,
+  Sun03Icon,
   TextBoldIcon,
   TextItalicIcon,
   TextNumberSignIcon,
+  UserAdd01Icon,
   UserRound,
   Users,
   WalletCardsIcon,
@@ -115,6 +122,14 @@ import {
   MenuTrigger,
 } from "@/components/ui/menu";
 import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller";
+import {
   Progress,
   ProgressIndicator,
   ProgressTrack,
@@ -145,6 +160,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AnthropicBlack } from "@/components/ui/svgs/anthropicBlack";
+import { Drive } from "@/components/ui/svgs/drive";
+import { GithubLight } from "@/components/ui/svgs/githubLight";
+import { Gmail } from "@/components/ui/svgs/gmail";
+import { GoogleCalendar } from "@/components/ui/svgs/googleCalendar";
+import { GoogleSheets } from "@/components/ui/svgs/googleSheets";
+import { Instagram } from "@/components/ui/svgs/instagram";
+import { Openai } from "@/components/ui/svgs/openai";
+import { Slack } from "@/components/ui/svgs/slack";
+import { Telegram } from "@/components/ui/svgs/telegram";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -153,6 +178,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import {
+  bindAtmetSounds,
+  playAtmetSound,
+  setAtmetSoundEnabled,
+} from "@/lib/sound";
 
 type PageKey =
   | "chat"
@@ -185,7 +215,7 @@ type NavigationItem = {
 
 const primaryNavigation = [
   { key: "chat", label: "New chat", icon: PlusSignIcon },
-  { key: "agents", label: "Workflow Agents", icon: WorkflowSquare01Icon },
+  { key: "agents", label: "Workflow Agents", icon: WorkflowCircleIcon },
   { key: "brain", label: "Brain", icon: Brain03Icon },
   { key: "skills", label: "Skills", icon: BoxesIcon },
   { key: "connectors", label: "Connectors", icon: PlugIcon },
@@ -227,6 +257,7 @@ type SkillItem = {
 
 type PlaygroundCard = {
   apps: string[];
+  chatId?: string;
   id: string;
   runtime: "paused" | "running";
   title: string;
@@ -305,6 +336,95 @@ type ConnectorItem = {
   paragraph: string;
 };
 
+const connectorCatalogKeys = [
+  "chatgpt",
+  "claude",
+  "gmail",
+  "email",
+  "drive",
+  "google-sheets",
+  "instagram",
+  "calendar",
+  "telegram",
+  "slack",
+  "github",
+] as const;
+
+const connectorCatalogKeySet = new Set<string>(connectorCatalogKeys);
+
+const defaultConnectorCatalog = [
+  {
+    description: "Use OpenAI chat models inside Atmet workflows.",
+    gradient: "from-emerald-400/20 via-stone-100/10 to-stone-500/10",
+    key: "chatgpt",
+    logo: "AI",
+    name: "ChatGPT",
+  },
+  {
+    description: "Use Anthropic Claude for writing, analysis, and reasoning.",
+    gradient: "from-orange-300/20 via-stone-100/10 to-stone-500/10",
+    key: "claude",
+    logo: "CL",
+    name: "Claude",
+  },
+  {
+    description: "Read, draft, and send Gmail messages with workspace context.",
+    gradient: "from-red-300/20 via-stone-100/10 to-blue-300/10",
+    key: "gmail",
+    logo: "GM",
+    name: "Gmail",
+  },
+  {
+    description: "Search, read, and organize shared workspace files.",
+    gradient: "from-sky-300/20 via-stone-100/10 to-lime-300/10",
+    key: "drive",
+    logo: "DR",
+    name: "Drive",
+  },
+  {
+    description: "Read spreadsheet data and create structured updates.",
+    gradient: "from-green-300/20 via-stone-100/10 to-emerald-300/10",
+    key: "google-sheets",
+    logo: "GS",
+    name: "Google Sheets",
+  },
+  {
+    description: "Track Instagram content, comments, and social workflow context.",
+    gradient: "from-pink-400/20 via-stone-100/10 to-orange-300/10",
+    key: "instagram",
+    logo: "IG",
+    name: "Instagram",
+  },
+  {
+    description: "Use meetings, availability, and follow-ups in Atmet.",
+    gradient: "from-blue-300/20 via-stone-100/10 to-amber-300/10",
+    key: "calendar",
+    logo: "CA",
+    name: "Calendar",
+  },
+  {
+    description: "Route Telegram messages and workflow updates through Atmet.",
+    gradient: "from-sky-400/20 via-stone-100/10 to-cyan-300/10",
+    key: "telegram",
+    logo: "TG",
+    name: "Telegram",
+  },
+  {
+    description: "Summarize channels and turn decisions into tasks.",
+    gradient: "from-violet-400/20 via-stone-100/10 to-amber-300/10",
+    key: "slack",
+    logo: "SL",
+    name: "Slack",
+  },
+  {
+    description: "Track pull requests, issues, reviews, and releases.",
+    gradient: "from-stone-500/20 via-stone-100/10 to-blue-400/10",
+    key: "github",
+    logo: "GH",
+    name: "GitHub",
+  },
+] satisfies DatabaseRecord[];
+
 const settingsTabs = [
   { value: "profile", label: "Profile", icon: UserRound },
   { value: "workspace", label: "Workspace", icon: BuildingIcon },
@@ -370,6 +490,14 @@ function getInitialChatId() {
   return new URLSearchParams(window.location.search).get("chat");
 }
 
+function getInitialAgentName() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return new URLSearchParams(window.location.search).get("agent");
+}
+
 function getInitialAdminProfileView(): AdminProfileView | null {
   if (typeof window === "undefined") {
     return null;
@@ -389,12 +517,14 @@ function getInitialAdminProfileView(): AdminProfileView | null {
 function updateAppRouteState({
   adminTab,
   adminProfile,
+  agentName,
   chatId,
   page,
   replace = false,
 }: {
   adminTab?: AdminTabKey;
   adminProfile?: AdminProfileView | null;
+  agentName?: string | null;
   chatId?: string | null;
   page?: PageKey;
   replace?: boolean;
@@ -436,6 +566,16 @@ function updateAppRouteState({
     }
   } else if (nextPage !== "chat") {
     url.searchParams.delete("chat");
+  }
+
+  if (agentName !== undefined) {
+    if (agentName) {
+      url.searchParams.set("agent", agentName);
+    } else {
+      url.searchParams.delete("agent");
+    }
+  } else if (nextPage !== "agents") {
+    url.searchParams.delete("agent");
   }
 
   const nextPath = `${url.pathname}${url.search}${url.hash}`;
@@ -656,26 +796,108 @@ type WorkflowChatNode = {
   title: string;
 };
 
+type WorkflowSidebarChatMeta = {
+  agentName: string;
+  running: boolean;
+  title: string;
+};
+
 type ChatDraftRequest = {
   chatId: string;
   prompt: string;
   requestId: number;
 };
 
+const lastSelectedChatModelKey = "atmet.chat.selected-model";
 const initialSidebarChats: SidebarChat[] = [];
 
+type ChatModelLogo = "anthropic" | "atmet" | "openai";
+
+type ChatModelOption = {
+  description?: string;
+  icon?: IconSvgElement;
+  id: string;
+  logo?: ChatModelLogo;
+  logoAsset?: {
+    dark?: string;
+    light: string;
+  };
+  name: string;
+  providerKey?: string;
+  setupOnly?: boolean;
+};
+
 const modelOptions = [
-  { name: "Atmet", icon: AiChatIcon },
-  { name: "Gemini 3", icon: SparklesIcon },
-  { name: "GPT-5-mini", icon: AiBrainIcon },
-  { name: "Claude 4.5 Sonnet", icon: AiLogoIcon },
-  { name: "GPT-5-1 Mini", icon: AiBrainIcon },
-  { name: "GPT-5-1", icon: AiBrainIcon },
-] satisfies { name: string; icon: IconSvgElement }[];
+  {
+    description: "Balanced Atmet model",
+    id: "atmet",
+    logo: "atmet",
+    logoAsset: {
+      dark: "/Atmet%20default%20models/dark%20mode%20default.svg",
+      light: "/Atmet%20default%20models/light%20mode%20default.svg",
+    },
+    name: "Atmet Default",
+    providerKey: "atmet",
+  },
+  {
+    description: "Higher reasoning for complex work",
+    id: "atmet-sol",
+    logo: "atmet",
+    logoAsset: {
+      light: "/Atmet%20default%20models/high%20model%20atmet.svg",
+    },
+    name: "Atmet High",
+    providerKey: "atmet",
+  },
+  {
+    description: "Fast, lighter Atmet model",
+    id: "atmet-luna",
+    logo: "atmet",
+    logoAsset: {
+      light: "/Atmet%20default%20models/lite%20model%20atmet.svg",
+    },
+    name: "Atmet Lite",
+    providerKey: "atmet",
+  },
+  {
+    description: "OpenAI model",
+    id: "chatgpt",
+    logo: "openai",
+    name: "ChatGPT",
+    providerKey: "openai",
+  },
+  {
+    description: "Anthropic model",
+    id: "claude-sonnet",
+    logo: "anthropic",
+    name: "Claude",
+    providerKey: "anthropic",
+  },
+] satisfies ChatModelOption[];
+
+const setupModelOptions = [
+  {
+    description: "Add your API key in Settings",
+    icon: CodeIcon,
+    id: "setup-custom-api",
+    name: "Custom API",
+    providerKey: "custom",
+    setupOnly: true,
+  },
+  {
+    description: "Add a local endpoint in Settings",
+    icon: DatabaseIcon,
+    id: "setup-local-model",
+    name: "Local model",
+    providerKey: "local",
+    setupOnly: true,
+  },
+] satisfies ChatModelOption[];
 
 type ComposerOption = {
   id: string;
   kind: "apps" | "skills";
+  connectorKey?: string;
   logo?: string;
   name: string;
   icon?: IconSvgElement;
@@ -703,6 +925,17 @@ type ChatMessage = {
   variant?: AiOutputVariant;
 };
 
+type AiTextSegment =
+  | { text: string; type: "text" }
+  | { code: string; language?: string; type: "code" }
+  | { items: AiTaskListItem[]; type: "task-list" }
+  | { headers: string[]; rows: string[][]; type: "table" };
+
+type AiTaskListItem = {
+  checked: boolean;
+  text: string;
+};
+
 type DatabaseRecord = Record<string, unknown>;
 
 type DashboardData = {
@@ -713,6 +946,7 @@ type DashboardData = {
   chats?: unknown[];
   connections?: unknown[];
   members?: unknown[];
+  notifications?: unknown[];
   preferences?: unknown;
   profile?: unknown;
   setupUrl?: unknown;
@@ -737,11 +971,26 @@ type WorkspaceSummary = {
 type WorkspaceUser = {
   avatarUrl?: string;
   email: string;
+  id: string;
   initials: string;
   lastActive: string;
   name: string;
   role: string;
   status: "Active" | "Invited" | "Limited";
+};
+
+type NotificationItem = {
+  actionStatus: "none" | "pending" | "accepted" | "rejected";
+  actorId?: string;
+  body: string;
+  createdAt: string;
+  id: string;
+  inviteId?: string;
+  metadata: DatabaseRecord;
+  status: "unread" | "read" | "archived";
+  title: string;
+  type: string;
+  workspaceId?: string;
 };
 
 type UsageData = {
@@ -803,6 +1052,47 @@ function getInitialsFromText(value: string) {
     .slice(0, 2)
     .map((word) => word[0]?.toUpperCase())
     .join("");
+}
+
+function getStableColorIndex(seed: string, total: number) {
+  let hash = 0;
+
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+  }
+
+  return total === 0 ? 0 : hash % total;
+}
+
+function OreoFlareAvatar({
+  className,
+  seed,
+  size = 64,
+}: {
+  className?: string;
+  seed: string;
+  size?: number;
+}) {
+  const palette =
+    oreoAvatarPalettes[
+      getStableColorIndex(seed || "atmet", oreoAvatarPalettes.length)
+    ]?.id ?? "rose-milk";
+
+  return (
+    <OreoAvatar
+      background={null}
+      className={className}
+      drift={8}
+      palette={palette}
+      shape="flare"
+      size={size}
+      variantId={seed || palette}
+    />
+  );
+}
+
+function getWorkspaceUserKey(user: Pick<WorkspaceUser, "email" | "id" | "name">) {
+  return user.id || user.email || user.name;
 }
 
 function formatDateLabel(value: unknown) {
@@ -935,11 +1225,31 @@ function mapSkill(row: unknown, index: number): SkillItem | null {
   };
 }
 
+function getMergedConnectorCatalog(apps: unknown[]) {
+  const appsByKey = new Map<string, DatabaseRecord>();
+
+  for (const app of defaultConnectorCatalog) {
+    appsByKey.set(asString(app.key), app);
+  }
+
+  for (const app of apps) {
+    const record = asRecord(app);
+    const key = asString(record.key, asString(record.app_key));
+    if (key && connectorCatalogKeySet.has(key)) {
+      appsByKey.set(key, { ...appsByKey.get(key), ...record, key });
+    }
+  }
+
+  return connectorCatalogKeys
+    .map((key) => appsByKey.get(key))
+    .filter((app): app is DatabaseRecord => Boolean(app));
+}
+
 function mapConnector(app: unknown, connectionsByKey: Set<string>, index: number): ConnectorItem | null {
   const record = asRecord(app);
-  const key = asString(record.key);
+  const key = asString(record.key, asString(record.app_key));
   const name = asString(record.name);
-  if (!key || !name) {
+  if (!key || !name || !connectorCatalogKeySet.has(key)) {
     return null;
   }
 
@@ -985,12 +1295,14 @@ function mapAgent(row: unknown, index: number): Agent | null {
       const appKeys = Array.isArray(node.app_keys)
         ? node.app_keys.map((item) => String(item))
         : [];
+      const sourceChatId = asString(node.source_chat_id);
 
       return {
         apps:
           appKeys.length > 0
             ? appKeys.map((key) => getInitialsFromText(key))
             : ["AT"],
+        ...(sourceChatId ? { chatId: sourceChatId } : {}),
         id: nodeId,
         runtime: mapRuntime(node.runtime_state),
         title: asString(node.title, "Empty chat"),
@@ -1041,11 +1353,45 @@ function mapMember(row: unknown): WorkspaceUser | null {
   return {
     avatarUrl: asString(profile.avatar_url),
     email,
+    id: asString(record.user_id, asString(profile.id, email || name)),
     initials: getInitialsFromText(name || email),
     lastActive: formatDateTimeLabel(profile.last_seen_at) || "Never",
     name,
     role: asString(record.role, "Member"),
     status: status === "invited" ? "Invited" : status === "limited" ? "Limited" : "Active",
+  };
+}
+
+function mapNotification(row: unknown): NotificationItem | null {
+  const record = asRecord(row);
+  const id = asString(record.id);
+  if (!id) {
+    return null;
+  }
+
+  const status = asString(record.status, "unread");
+  const actionStatus = asString(record.action_status, "none");
+
+  return {
+    actionStatus:
+      actionStatus === "pending" ||
+      actionStatus === "accepted" ||
+      actionStatus === "rejected"
+        ? actionStatus
+        : "none",
+    actorId: asString(record.actor_id),
+    body: asString(record.body),
+    createdAt: asString(record.created_at),
+    id,
+    inviteId: asString(record.invite_id),
+    metadata: asRecord(record.metadata),
+    status:
+      status === "read" || status === "archived" || status === "unread"
+        ? status
+        : "unread",
+    title: asString(record.title, "Notification"),
+    type: asString(record.type),
+    workspaceId: asString(record.workspace_id),
   };
 }
 
@@ -1063,25 +1409,30 @@ function mapUsage(value: unknown, chatsCount: number, agentsCount: number): Usag
   };
 }
 
-function getInitialTheme() {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  const stored = window.localStorage.getItem("atmet-theme");
-  if (stored) {
-    return stored === "dark";
-  }
-
-  return window.matchMedia("(prefers-color-scheme: dark)").matches;
-}
-
 async function getResponseError(response: Response, fallback: string) {
   const payload = asRecord(await response.json().catch(() => ({})));
   return asString(payload.error, fallback);
 }
 
-const dashboardCacheKey = "atmet.dashboard.shell.v2";
+function mergeNotifications(
+  nextNotifications: NotificationItem[],
+  currentNotifications: NotificationItem[],
+) {
+  const notificationsById = new Map(
+    currentNotifications.map((notification) => [notification.id, notification]),
+  );
+
+  for (const notification of nextNotifications) {
+    notificationsById.set(notification.id, notification);
+  }
+
+  return Array.from(notificationsById.values()).sort(
+    (a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+}
+
+const dashboardCacheKey = "atmet.dashboard.shell.v3";
 const dashboardCacheMaxAgeMs = 1000 * 60 * 10;
 
 function getCacheableDashboardPayload(payload: DashboardData): DashboardData {
@@ -1090,10 +1441,15 @@ function getCacheableDashboardPayload(payload: DashboardData): DashboardData {
       const record = asRecord(app);
       return {
         app_key: record.app_key,
+        category: record.category,
         description: record.description,
         enabled: record.enabled,
+        gradient: record.gradient,
         icon: record.icon,
+        key: record.key,
+        logo: record.logo,
         name: record.name,
+        paragraph: record.paragraph,
       };
     }),
     chats: asRecordArray(payload.chats).map((chat) => {
@@ -1114,6 +1470,7 @@ function getCacheableDashboardPayload(payload: DashboardData): DashboardData {
     agents: asRecordArray(payload.agents),
     brain: asRecord(payload.brain),
     members: asRecordArray(payload.members),
+    notifications: asRecordArray(payload.notifications),
     profile: asRecord(payload.profile),
     skills: asRecordArray(payload.skills).map((skill) => {
       const record = asRecord(skill);
@@ -1136,7 +1493,9 @@ function getCacheableDashboardPayload(payload: DashboardData): DashboardData {
 
 export default function Home() {
   const [activePage, setActivePage] = useState<PageKey>(getInitialPage);
-  const [agentsPlaygroundOpen, setAgentsPlaygroundOpen] = useState(false);
+  const [agentsPlaygroundOpen, setAgentsPlaygroundOpen] = useState(
+    () => getInitialPage() === "agents" && Boolean(getInitialAgentName()),
+  );
   const [bootstrapError, setBootstrapError] = useState("");
   const [isBootstrapLoading, setIsBootstrapLoading] = useState(true);
   const [isBootstrapRefreshing, setIsBootstrapRefreshing] = useState(false);
@@ -1144,6 +1503,10 @@ export default function Home() {
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [profile, setProfile] = useState<DatabaseRecord | null>(null);
   const [members, setMembers] = useState<WorkspaceUser[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [notificationActionId, setNotificationActionId] = useState<string | null>(
+    null,
+  );
   const [skillList, setSkillList] = useState<SkillItem[]>([]);
   const [connectorList, setConnectorList] = useState<ConnectorItem[]>([]);
   const [connectedConnectorKeys, setConnectedConnectorKeys] = useState<string[]>(
@@ -1156,22 +1519,27 @@ export default function Home() {
   const [workspaceSettings, setWorkspaceSettings] =
     useState<DatabaseRecord | null>(null);
   const [selectedAgentName, setSelectedAgentName] = useState<string | null>(
-    null,
+    () => (getInitialPage() === "agents" ? getInitialAgentName() : null),
   );
   const [agentList, setAgentList] = useState<Agent[]>([]);
   const [activeSidebarChatId, setActiveSidebarChatId] = useState<string | null>(
-    getInitialChatId,
+    null,
   );
   const [chatHistoryOpen, setChatHistoryOpen] = useState(true);
   const [sidebarChats, setSidebarChats] =
     useState<SidebarChat[]>(initialSidebarChats);
   const [creatingChat, setCreatingChat] = useState(false);
+  const [chatParticipantIdsByChat, setChatParticipantIdsByChat] = useState<
+    Record<string, string[]>
+  >({});
   const [workflowChatNodesByAgent, setWorkflowChatNodesByAgent] = useState<
     Record<string, WorkflowChatNode[]>
   >({});
   const [chatDraftRequest, setChatDraftRequest] =
     useState<ChatDraftRequest | null>(null);
-  const [isDark] = useState(getInitialTheme);
+  const [themePreference, setThemePreference] = useState<ThemePreference>(
+    getInitialThemePreference,
+  );
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const sidebarChatCounterRef = useRef(initialSidebarChats.length + 1);
   const chatDraftCounterRef = useRef(1);
@@ -1180,8 +1548,59 @@ export default function Home() {
       ? sidebarChats.find((chat) => chat.id === activeSidebarChatId) ?? null
       : null;
   const activeWorkspaceId = workspace?.id ?? null;
+  const workflowSidebarChatMeta = new Map<string, WorkflowSidebarChatMeta>();
+
+  for (const agent of agentList) {
+    for (const card of agent.workflowCards ?? []) {
+      if (!card.chatId) {
+        continue;
+      }
+
+      workflowSidebarChatMeta.set(card.chatId, {
+        agentName: agent.name,
+        running: agent.runtime === "running",
+        title: card.title,
+      });
+    }
+  }
+
+  for (const [agentName, nodes] of Object.entries(workflowChatNodesByAgent)) {
+    const agent = agentList.find((item) => item.name === agentName);
+
+    for (const node of nodes) {
+      workflowSidebarChatMeta.set(node.chatId, {
+        agentName,
+        running: agent?.runtime === "running",
+        title: node.title,
+      });
+    }
+  }
+
+  useEffect(() => {
+    bindAtmetSounds();
+
+    function playErrorCue() {
+      void playAtmetSound("error");
+    }
+
+    window.addEventListener("error", playErrorCue);
+    window.addEventListener("unhandledrejection", playErrorCue);
+
+    return () => {
+      window.removeEventListener("error", playErrorCue);
+      window.removeEventListener("unhandledrejection", playErrorCue);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (bootstrapError) {
+      void playAtmetSound("error");
+    }
+  }, [bootstrapError]);
+
   const dynamicComposerOptions: ComposerOption[] = [
     ...connectorList.map((connector) => ({
+      connectorKey: connector.key,
       id: `app-${connector.key ?? connector.name}`,
       kind: "apps" as const,
       logo: connector.logo,
@@ -1196,20 +1615,113 @@ export default function Home() {
   ];
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", isDark);
-  }, [isDark]);
+    applyThemePreference(themePreference);
+
+    if (themePreference !== "default") {
+      return;
+    }
+
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const syncSystemTheme = () => applyThemePreference("default");
+    query.addEventListener("change", syncSystemTheme);
+    return () => query.removeEventListener("change", syncSystemTheme);
+  }, [themePreference]);
+
+  function cycleThemePreference() {
+    setThemePreference((current) =>
+      current === "default" ? "light" : current === "light" ? "dark" : "default",
+    );
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshNotifications() {
+      try {
+        const response = await fetch("/api/notifications", { cache: "no-store" });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = asRecord(await response.json());
+        const nextNotifications = asRecordArray(payload.notifications)
+          .map(mapNotification)
+          .filter((item): item is NotificationItem => Boolean(item));
+
+        if (!cancelled) {
+          setNotifications(nextNotifications);
+        }
+      } catch {
+        // Notification polling should never interrupt the workspace shell.
+      }
+    }
+
+    const intervalId = window.setInterval(refreshNotifications, 60_000);
+    window.addEventListener("focus", refreshNotifications);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshNotifications);
+    };
+  }, []);
+
+  async function handleNotificationAction(
+    notificationId: string,
+    action: "accept" | "reject" | "read",
+  ) {
+    if (notificationActionId) {
+      return;
+    }
+
+    setNotificationActionId(notificationId);
+
+    try {
+      const response = await fetch(`/api/notifications/${notificationId}`, {
+        body: JSON.stringify({ action }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          await getResponseError(response, "Could not update notification"),
+        );
+      }
+
+      const payload = asRecord(await response.json());
+      const nextNotifications = asRecordArray(payload.notifications)
+        .map(mapNotification)
+        .filter((item): item is NotificationItem => Boolean(item));
+
+      setNotifications(nextNotifications);
+    } catch (error) {
+      void playAtmetSound("error");
+      window.alert(
+        error instanceof Error ? error.message : "Could not update notification",
+      );
+    } finally {
+      setNotificationActionId(null);
+    }
+  }
 
   useEffect(() => {
     function syncRouteFromHistory() {
       const nextPage = getInitialPage();
+      const nextAgentName = getInitialAgentName();
       setActivePage(nextPage);
       setActiveSidebarChatId(nextPage === "chat" ? getInitialChatId() : null);
-      if (nextPage !== "agents") {
+      if (nextPage === "agents") {
+        setSelectedAgentName(nextAgentName);
+        setAgentsPlaygroundOpen(Boolean(nextAgentName));
+      } else {
         setAgentsPlaygroundOpen(false);
         setSelectedAgentName(null);
       }
     }
 
+    syncRouteFromHistory();
     window.addEventListener("popstate", syncRouteFromHistory);
 
     return () => {
@@ -1237,17 +1749,22 @@ export default function Home() {
     const mappedSkills = asRecordArray(payload.skills)
       .map(mapSkill)
       .filter((item): item is SkillItem => Boolean(item));
-    const mappedConnectors = asRecordArray(payload.apps)
+    const mappedConnectors = getMergedConnectorCatalog(asRecordArray(payload.apps))
       .map((app, index) => mapConnector(app, connectionKeySet, index))
       .filter((item): item is ConnectorItem => Boolean(item));
     const mappedMembers = asRecordArray(payload.members)
       .map(mapMember)
       .filter((item): item is WorkspaceUser => Boolean(item));
+    const mappedNotifications = asRecordArray(payload.notifications)
+      .map(mapNotification)
+      .filter((item): item is NotificationItem => Boolean(item));
+    const mappedWorkspaceSettings = asRecord(payload.workspaceSettings);
 
     setWorkspace(mappedWorkspace);
     setWorkspaces(mappedWorkspaces);
     setProfile(asRecord(payload.profile));
     setMembers(mappedMembers);
+    setNotifications(mappedNotifications);
     setSidebarChats(mappedChats);
     setActiveSidebarChatId((current) =>
       current && mappedChats.some((chat) => chat.id === current)
@@ -1261,7 +1778,8 @@ export default function Home() {
     setUsageData(mapUsage(payload.usage, mappedChats.length, mappedAgents.length));
     setBrainData(asRecord(payload.brain));
     setSubscriptionData(asRecord(payload.subscription));
-    setWorkspaceSettings(asRecord(payload.workspaceSettings));
+    setWorkspaceSettings(mappedWorkspaceSettings);
+    void setAtmetSoundEnabled(asBoolean(mappedWorkspaceSettings.sound_enabled, true));
   }
 
   useEffect(() => {
@@ -1368,13 +1886,27 @@ export default function Home() {
     };
   }, []);
 
-  function selectPage(page: PageKey, options: { chatId?: string | null } = {}) {
+  function selectPage(
+    page: PageKey,
+    options: { agentName?: string | null; chatId?: string | null } = {},
+  ) {
     setActivePage(page);
-    updateAppRouteState({ chatId: options.chatId, page });
-    if (page !== "agents") {
+    updateAppRouteState({
+      agentName: options.agentName,
+      chatId: options.chatId,
+      page,
+    });
+    if (page === "agents" && options.agentName !== undefined) {
+      setSelectedAgentName(options.agentName);
+      setAgentsPlaygroundOpen(Boolean(options.agentName));
+    } else if (page !== "agents") {
       setAgentsPlaygroundOpen(false);
       setSelectedAgentName(null);
     }
+  }
+
+  function openAgentPlayground(agentName: string | null) {
+    selectPage("agents", { agentName });
   }
 
   async function createAgent(name: string) {
@@ -1412,15 +1944,22 @@ export default function Home() {
     ]);
   }
 
-  async function createSidebarChat() {
+  async function createSidebarChat(
+    title?: string,
+    options: { activate?: boolean } = {},
+  ) {
     if (creatingChat) {
       return activeSidebarChatId ?? "";
     }
 
+    const shouldActivate = options.activate ?? true;
     setCreatingChat(true);
     const nextIndex = sidebarChatCounterRef.current;
     sidebarChatCounterRef.current += 1;
-    const nextTitle = `New chat ${nextIndex}`;
+    const trimmedTitle = title?.trim();
+    const nextTitle = trimmedTitle
+      ? trimmedTitle.slice(0, 80)
+      : `New chat ${nextIndex}`;
     let createdChat: SidebarChat | null = null;
 
     if (activeWorkspaceId) {
@@ -1446,9 +1985,13 @@ export default function Home() {
       chat,
       ...current,
     ]);
-    setActiveSidebarChatId(id);
+    if (shouldActivate) {
+      setActiveSidebarChatId(id);
+    }
     setChatHistoryOpen(true);
-    selectPage("chat", { chatId: id });
+    if (shouldActivate) {
+      selectPage("chat", { chatId: id });
+    }
     setCreatingChat(false);
 
     return id;
@@ -1501,6 +2044,14 @@ export default function Home() {
     );
   }
 
+  function updateAgentRuntime(agentName: string, runtime: "paused" | "running") {
+    setAgentList((current) =>
+      current.map((agent) =>
+        agent.name === agentName ? { ...agent, runtime } : agent,
+      ),
+    );
+  }
+
   function copyChatValue(value: string) {
     navigator.clipboard?.writeText(value).catch(() => undefined);
   }
@@ -1508,6 +2059,12 @@ export default function Home() {
   function openSidebarChat(chatId: string) {
     setActiveSidebarChatId(chatId);
     selectPage("chat", { chatId });
+  }
+
+  function startBlankChat() {
+    setActiveSidebarChatId(null);
+    setChatDraftRequest(null);
+    selectPage("chat", { chatId: null });
   }
 
   function insertSkillIntoChat(skill: SkillItem, chatId: string) {
@@ -1524,11 +2081,37 @@ export default function Home() {
   }
 
   async function insertSkillIntoNewChat(skill: SkillItem) {
-    const chatId = await createSidebarChat();
+    const chatId = await createSidebarChat(`Use ${skill.name}`);
     insertSkillIntoChat(skill, chatId);
   }
 
+  function addMemberToChat(chatId: string, memberId: string) {
+    setChatParticipantIdsByChat((current) => {
+      const currentIds = current[chatId] ?? [];
+      if (currentIds.includes(memberId)) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [chatId]: [...currentIds, memberId],
+      };
+    });
+  }
+
+  function removeMemberFromChat(chatId: string, memberId: string) {
+    setChatParticipantIdsByChat((current) => ({
+      ...current,
+      [chatId]: (current[chatId] ?? []).filter((id) => id !== memberId),
+    }));
+  }
+
   function addChatToAgentWorkflow(agentName: string, chat: SidebarChat) {
+    const existingWorkflowNodes = workflowChatNodesByAgent[agentName] ?? [];
+    const chatAlreadyInWorkflow = existingWorkflowNodes.some(
+      (node) => node.chatId === chat.id,
+    );
+
     setWorkflowChatNodesByAgent((current) => {
       const existingNodes = current[agentName] ?? [];
       const alreadyAdded = existingNodes.some(
@@ -1542,9 +2125,68 @@ export default function Home() {
           : [...existingNodes, { chatId: chat.id, title: chat.title }],
       };
     });
+    const agent = agentList.find((item) => item.name === agentName);
+    if (agent?.id && !chatAlreadyInWorkflow) {
+      void fetch(`/api/agents/${agent.id}/nodes`, {
+        body: JSON.stringify({
+          sourceChatId: chat.id,
+          title: chat.title,
+          x: 120,
+          y: 120,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }).catch(() => undefined);
+    }
     setSelectedAgentName(agentName);
     setAgentsPlaygroundOpen(true);
-    selectPage("agents");
+    selectPage("agents", { agentName });
+  }
+
+  async function createWorkflowChatNode(agentName: string, title: string) {
+    const chatId = await createSidebarChat(`${agentName} / ${title}`, {
+      activate: false,
+    });
+    if (!chatId) {
+      return null;
+    }
+
+    const node = { chatId, title };
+    setWorkflowChatNodesByAgent((current) => {
+      const existingNodes = current[agentName] ?? [];
+      if (existingNodes.some((item) => item.chatId === chatId)) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [agentName]: [...existingNodes, node],
+      };
+    });
+
+    return node;
+  }
+
+  function deleteWorkflowChatNode(agentName: string, chatId: string) {
+    setWorkflowChatNodesByAgent((current) => ({
+      ...current,
+      [agentName]: (current[agentName] ?? []).filter(
+        (node) => node.chatId !== chatId,
+      ),
+    }));
+    setAgentList((current) =>
+      current.map((agent) =>
+        agent.name === agentName
+          ? {
+              ...agent,
+              workflowCards: (agent.workflowCards ?? []).filter(
+                (card) => card.chatId !== chatId,
+              ),
+            }
+          : agent,
+      ),
+    );
+    deleteSidebarChat(chatId);
   }
 
   const commandPaletteGroups: CommandPaletteGroup[] = [
@@ -1554,7 +2196,10 @@ export default function Home() {
         ...secondaryNavigation,
         settingsNavigation,
       ].map((item, index) => ({
-        action: () => selectPage(item.key),
+        action: () =>
+          item.key === "agents"
+            ? selectPage("agents", { agentName: null })
+            : selectPage(item.key),
         icon: (
           <Icon
             className="mr-2 size-4 text-muted-foreground"
@@ -1587,34 +2232,82 @@ export default function Home() {
       })),
       value: "Chats",
     },
+    {
+      items: connectorList.map((connector) => ({
+        action: () => selectPage("connectors"),
+        icon: (
+          <span className="mr-2 grid size-4 shrink-0 place-items-center rounded bg-white text-[0.5rem] text-stone-900 shadow-xs/5">
+            <ConnectorLogo
+              className="size-3"
+              connector={connector}
+              fallback={connector.logo}
+            />
+          </span>
+        ),
+        label: connector.name,
+        suffix: connectedConnectorKeys.includes(connector.key ?? connector.name) ? (
+          <Badge className="ml-2 h-5 px-1.5 text-[0.65rem]" variant="success">
+            Connected
+          </Badge>
+        ) : undefined,
+        value: `${connector.key ?? connector.name}-app`,
+      })),
+      value: "Apps",
+    },
+    {
+      items: members.map((member) => ({
+        action: () => selectPage("settings"),
+        icon: (
+          <AvatarTile
+            className="mr-2 size-5 rounded-md border-0 bg-muted text-[0.56rem] shadow-none"
+            initials={member.initials}
+            src={member.avatarUrl}
+          />
+        ),
+        label: member.name,
+        suffix: (
+          <span className="ml-2 max-w-28 truncate text-xs text-muted-foreground">
+            {member.role}
+          </span>
+        ),
+        value: `${getWorkspaceUserKey(member)}-member`,
+      })),
+      value: "People",
+    },
   ];
 
   return (
   <main className="h-svh overflow-hidden bg-sidebar text-foreground">
+    {!sidebarOpen && (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              aria-label="Open sidebar"
+              className="fixed bottom-3 left-3 z-40 grid size-9 place-items-center bg-transparent text-stone-700 transition-[color,scale] hover:text-stone-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] dark:text-stone-300 dark:hover:text-white"
+              onClick={() => setSidebarOpen(true)}
+              type="button"
+            />
+          }
+        >
+          <Icon className="size-4" icon={PanelLeftCloseIcon} />
+        </TooltipTrigger>
+        <TooltipPopup>Open sidebar</TooltipPopup>
+      </Tooltip>
+    )}
     <div className="flex h-svh min-h-0 flex-col">
-        <div className="grid h-11 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-3 py-1.5 md:px-4">
-          <div className="flex min-w-0 items-center gap-2">
-            {!sidebarOpen && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      aria-label="Open sidebar"
-                      onClick={() => setSidebarOpen(true)}
-                      size="icon-sm"
-                      variant="ghost"
-                    />
-                  }
-                >
-                  <Icon icon={PanelLeftOpenIcon} />
-                </TooltipTrigger>
-                <TooltipPopup>Open sidebar</TooltipPopup>
-              </Tooltip>
-            )}
-            {!sidebarOpen && <div className="h-4 w-px shrink-0 bg-sidebar-border" />}
+        <div className="grid h-10 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-3 py-1 md:px-4">
+          <div className="relative flex min-w-0 items-center gap-2">
             <WorkspaceIdentity
               activeChat={activeSidebarChat}
               agents={agentList}
+              chatParticipantIds={
+                activeSidebarChatId
+                  ? chatParticipantIdsByChat[activeSidebarChatId] ?? []
+                  : []
+              }
+              collapsed={!sidebarOpen}
+              members={members}
               onCreateWorkspace={async (workspaceName) => {
                 try {
                   const response = await fetch("/api/workspaces", {
@@ -1650,11 +2343,23 @@ export default function Home() {
                   const payload = asRecord(await response.json().catch(() => ({})));
                   throw new Error(asString(payload.error, "Could not send invite"));
                 }
+
+                const payload = asRecord(await response.json().catch(() => ({})));
+                const nextNotifications = asRecordArray(payload.notifications)
+                  .map(mapNotification)
+                  .filter((item): item is NotificationItem => Boolean(item));
+
+                if (nextNotifications.length > 0) {
+                  setNotifications((current) =>
+                    mergeNotifications(nextNotifications, current),
+                  );
+                }
               }}
               onSelectWorkspace={(nextWorkspace) => setWorkspace(nextWorkspace)}
               onAddChatToAgentWorkflow={addChatToAgentWorkflow}
               onCopyChatValue={copyChatValue}
               onDeleteChat={deleteSidebarChat}
+              onRemoveMemberFromChat={removeMemberFromChat}
               onRenameChat={renameSidebarChat}
               onTogglePin={toggleSidebarChatPin}
               selectedWorkspace={workspace}
@@ -1666,7 +2371,12 @@ export default function Home() {
             triggerIcon={<Icon className="size-3.5" icon={Search01Icon} />}
             triggerLabel="Search or command"
           />
-          <div className="flex min-w-0 justify-end">
+          <div className="flex min-w-0 items-center justify-end gap-1">
+            <NotificationCenter
+              busyId={notificationActionId}
+              notifications={notifications}
+              onAction={handleNotificationAction}
+            />
             <UserIdentity onSelectPage={selectPage} profile={profile} />
           </div>
         </div>
@@ -1695,7 +2405,11 @@ export default function Home() {
                   item={item}
                   loading={item.key === "chat" && creatingChat}
                   onClick={() =>
-                    item.key === "chat" ? createSidebarChat() : selectPage(item.key)
+                    item.key === "chat"
+                      ? startBlankChat()
+                      : item.key === "agents"
+                        ? selectPage("agents", { agentName: null })
+                        : selectPage(item.key)
                   }
                 />
               ))}
@@ -1710,6 +2424,7 @@ export default function Home() {
               onRenameChat={renameSidebarChat}
               onTogglePin={toggleSidebarChatPin}
               open={chatHistoryOpen}
+              workflowChatMeta={workflowSidebarChatMeta}
             />
 
             <nav className="mt-auto grid gap-0.5 pr-1">
@@ -1729,6 +2444,10 @@ export default function Home() {
                     onClick={() => selectPage(settingsNavigation.key)}
                   />
                 </div>
+                <SidebarThemeToggle
+                  onCycle={cycleThemePreference}
+                  preference={themePreference}
+                />
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1740,7 +2459,7 @@ export default function Home() {
                       />
                     }
                   >
-                    <Icon icon={PanelLeftCloseIcon} />
+                    <Icon icon={PanelLeftOpenIcon} />
                   </TooltipTrigger>
                   <TooltipPopup>Close sidebar</TooltipPopup>
                 </Tooltip>
@@ -1753,7 +2472,7 @@ export default function Home() {
           <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-black/5 bg-background dark:border-white/6">
             <div
               className={cn(
-                "mx-auto flex min-h-0 w-full flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-3 md:px-6 md:py-4 lg:px-8 lg:py-5",
+                "mx-auto flex min-h-0 w-full flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-6 py-3 md:px-6 md:py-4 lg:px-6 lg:py-5",
                 activePage === "agents" && agentsPlaygroundOpen
                   ? "max-w-none"
                   : "max-w-5xl",
@@ -1772,17 +2491,30 @@ export default function Home() {
               {activePage === "chat" && (
                 <ChatPage
                   activeChatId={activeSidebarChatId}
+                  chatParticipantIds={
+                    activeSidebarChatId
+                      ? chatParticipantIdsByChat[activeSidebarChatId] ?? []
+                      : []
+                  }
                   composerOptions={dynamicComposerOptions}
                   draftRequest={chatDraftRequest}
+                  members={members}
+                  onAddMemberToChat={addMemberToChat}
+                  onCreateChat={createSidebarChat}
+                  workspaceId={activeWorkspaceId}
                 />
               )}
               {activePage === "agents" && (
                 <AgentsPage
                   agents={agentList}
                   onCreateAgent={createAgent}
+                  onCreateWorkflowChatNode={createWorkflowChatNode}
+                  onDeleteWorkflowChatNode={deleteWorkflowChatNode}
+                  onAgentRuntimeChange={updateAgentRuntime}
                   onPlaygroundChange={setAgentsPlaygroundOpen}
-                  onSelectAgentName={setSelectedAgentName}
+                  onSelectAgentName={openAgentPlayground}
                   selectedAgentName={selectedAgentName}
+                  workspaceId={activeWorkspaceId}
                   workflowChatNodesByAgent={workflowChatNodesByAgent}
                 />
               )}
@@ -1848,11 +2580,15 @@ export default function Home() {
 function WorkspaceIdentity({
   activeChat,
   agents,
+  chatParticipantIds,
+  collapsed = false,
+  members,
   onAddChatToAgentWorkflow,
   onCopyChatValue,
   onCreateWorkspace,
   onDeleteChat,
   onInvitePeople,
+  onRemoveMemberFromChat,
   onRenameChat,
   onSelectWorkspace,
   onTogglePin,
@@ -1861,11 +2597,15 @@ function WorkspaceIdentity({
 }: {
   activeChat: SidebarChat | null;
   agents: Agent[];
+  chatParticipantIds: string[];
+  collapsed?: boolean;
+  members: WorkspaceUser[];
   onAddChatToAgentWorkflow: (agentName: string, chat: SidebarChat) => void;
   onCopyChatValue: (value: string) => void;
   onCreateWorkspace: (workspaceName: string) => void | Promise<void>;
   onDeleteChat: (chatId: string) => void;
   onInvitePeople: (email: string) => void | Promise<void>;
+  onRemoveMemberFromChat: (chatId: string, memberId: string) => void;
   onRenameChat: (chatId: string) => void;
   onSelectWorkspace: (workspace: WorkspaceSummary) => void;
   onTogglePin: (chatId: string) => void;
@@ -1879,7 +2619,13 @@ function WorkspaceIdentity({
 
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <AtmetLogo className="size-5" plain />
+      <AtmetLogo
+        className={cn(
+          "size-5 transition-opacity",
+          collapsed && "opacity-40",
+        )}
+        plain
+      />
       <div className="h-4 w-px shrink-0 bg-sidebar-border" />
       <Menu>
         <MenuTrigger className="flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1 outline-none transition-[background-color] hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring">
@@ -1953,9 +2699,12 @@ function WorkspaceIdentity({
             <ChatActionsMenu
               agents={agents}
               chat={activeChat}
+              chatParticipantIds={chatParticipantIds}
+              members={members}
               onAddChatToAgentWorkflow={onAddChatToAgentWorkflow}
               onCopyChatValue={onCopyChatValue}
               onDeleteChat={onDeleteChat}
+              onRemoveMemberFromChat={onRemoveMemberFromChat}
               onRenameChat={onRenameChat}
               onTogglePin={onTogglePin}
             />
@@ -2048,35 +2797,96 @@ function WorkspaceInviteDialog({
   open: boolean;
   workspaceName: string;
 }) {
-  const [email, setEmail] = useState("");
+  const [emailInput, setEmailInput] = useState("");
+  const [emails, setEmails] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const trimmedEmail = email.trim();
+  const [sentSuccessfully, setSentSuccessfully] = useState(false);
+  const trimmedEmailInput = emailInput.trim();
+  const canSendInvite = emails.length > 0 || trimmedEmailInput.length > 0;
+
+  useEffect(() => {
+    if (errorMessage) {
+      void playAtmetSound("error");
+    }
+  }, [errorMessage]);
+
+  function normalizeInviteEmail(value: string) {
+    return value.trim().replace(/[,\s;]+$/g, "").toLowerCase();
+  }
+
+  function addInviteEmail(value: string) {
+    const nextEmail = normalizeInviteEmail(value);
+
+    if (!nextEmail) {
+      return false;
+    }
+
+    if (!nextEmail.includes("@")) {
+      setErrorMessage("Enter a valid email address.");
+      return false;
+    }
+
+    setEmails((currentEmails) =>
+      currentEmails.includes(nextEmail)
+        ? currentEmails
+        : [...currentEmails, nextEmail],
+    );
+    setEmailInput("");
+    setErrorMessage("");
+    setSentSuccessfully(false);
+    return true;
+  }
+
+  function removeInviteEmail(emailToRemove: string) {
+    setEmails((currentEmails) =>
+      currentEmails.filter((currentEmail) => currentEmail !== emailToRemove),
+    );
+    setSentSuccessfully(false);
+  }
 
   function resetForm() {
-    setEmail("");
+    setEmailInput("");
+    setEmails([]);
     setErrorMessage("");
     setIsSending(false);
+    setSentSuccessfully(false);
   }
 
   async function submitInvite(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!trimmedEmail || isSending) {
+    if (!canSendInvite || isSending) {
+      return;
+    }
+
+    const pendingEmails = emails.length
+      ? emails
+      : [normalizeInviteEmail(emailInput)];
+
+    if (pendingEmails.some((pendingEmail) => !pendingEmail.includes("@"))) {
+      setErrorMessage("Enter a valid email address.");
       return;
     }
 
     setErrorMessage("");
     setIsSending(true);
+    setSentSuccessfully(false);
 
     try {
-      await onInvite(trimmedEmail);
-      resetForm();
-      onOpenChange(false);
-      window.alert(`Invite sent to ${trimmedEmail}`);
+      for (const inviteEmail of pendingEmails) {
+        await onInvite(inviteEmail);
+      }
+
+      setEmailInput("");
+      setEmails([]);
+      setErrorMessage("");
+      setSentSuccessfully(true);
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Could not send invite",
       );
+      setSentSuccessfully(false);
+    } finally {
       setIsSending(false);
     }
   }
@@ -2103,15 +2913,72 @@ function WorkspaceInviteDialog({
           </DialogHeader>
           <DialogPanel className="grid gap-2 p-4" scrollFade={false}>
             <Label htmlFor="workspace-invite-email">Email address</Label>
-            <Input
-              autoFocus
-              disabled={isSending}
-              id="workspace-invite-email"
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="teammate@company.com"
-              type="email"
-              value={email}
-            />
+            <div
+              className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-lg border border-input bg-background px-2 py-1 text-sm shadow-xs transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20"
+              onClick={(event) => {
+                const input = event.currentTarget.querySelector("input");
+                input?.focus();
+              }}
+            >
+              {emails.map((inviteEmail) => (
+                <span
+                  className="inline-flex h-6 max-w-full items-center gap-1 rounded-md border border-border/70 bg-muted px-2 text-xs text-foreground"
+                  key={inviteEmail}
+                >
+                  <span className="max-w-48 truncate">{inviteEmail}</span>
+                  <button
+                    aria-label={`Remove ${inviteEmail}`}
+                    className="-mr-1 grid size-4 place-items-center rounded text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                    disabled={isSending}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      removeInviteEmail(inviteEmail);
+                    }}
+                    type="button"
+                  >
+                    x
+                  </button>
+                </span>
+              ))}
+              <input
+                autoFocus
+                className="h-7 min-w-36 flex-1 bg-transparent px-1 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isSending}
+                id="workspace-invite-email"
+                onBlur={() => {
+                  if (trimmedEmailInput.includes("@")) {
+                    addInviteEmail(trimmedEmailInput);
+                  }
+                }}
+                onChange={(event) => {
+                  setEmailInput(event.target.value);
+                  setSentSuccessfully(false);
+                }}
+                onKeyDown={(event) => {
+                  if (
+                    [" ", "Enter", ","].includes(event.key) &&
+                    trimmedEmailInput
+                  ) {
+                    event.preventDefault();
+                    addInviteEmail(trimmedEmailInput);
+                  }
+
+                  if (
+                    event.key === "Backspace" &&
+                    !emailInput &&
+                    emails.length > 0
+                  ) {
+                    event.preventDefault();
+                    removeInviteEmail(emails[emails.length - 1]);
+                  }
+                }}
+                placeholder={
+                  emails.length ? "Add another email" : "teammate@company.com"
+                }
+                type="text"
+                value={emailInput}
+              />
+            </div>
             {errorMessage && (
               <p className="text-xs leading-5 text-destructive">
                 {errorMessage}
@@ -2122,8 +2989,15 @@ function WorkspaceInviteDialog({
             <DialogClose render={<Button type="button" variant="outline" />}>
               Cancel
             </DialogClose>
-            <Button loading={isSending} disabled={!trimmedEmail} type="submit">
-              Send invite
+            <Button loading={isSending} disabled={!canSendInvite} type="submit">
+              {sentSuccessfully ? (
+                <>
+                  <Icon className="size-3.5" icon={CheckIcon} />
+                  Sent successfully
+                </>
+              ) : (
+                "Send invite"
+              )}
             </Button>
           </DialogFooter>
         </form>
@@ -2135,22 +3009,31 @@ function WorkspaceInviteDialog({
 function ChatActionsMenu({
   agents,
   chat,
+  chatParticipantIds,
+  members,
   onAddChatToAgentWorkflow,
   onCopyChatValue,
   onDeleteChat,
+  onRemoveMemberFromChat,
   onRenameChat,
   onTogglePin,
 }: {
   agents: Agent[];
   chat: SidebarChat;
+  chatParticipantIds: string[];
+  members: WorkspaceUser[];
   onAddChatToAgentWorkflow: (agentName: string, chat: SidebarChat) => void;
   onCopyChatValue: (value: string) => void;
   onDeleteChat: (chatId: string) => void;
+  onRemoveMemberFromChat: (chatId: string, memberId: string) => void;
   onRenameChat: (chatId: string) => void;
   onTogglePin: (chatId: string) => void;
 }) {
   const [workflowDialogOpen, setWorkflowDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const participantMembers = members.filter((member) =>
+    chatParticipantIds.includes(getWorkspaceUserKey(member)),
+  );
   const shortcuts = {
     copy: "⇧⌘C",
     deeplink: "⌥⌘L",
@@ -2209,6 +3092,44 @@ function ChatActionsMenu({
             label="Add in an agent workflow"
             onClick={() => setWorkflowDialogOpen(true)}
           />
+          <MenuSeparator />
+          <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+            People in this chat
+          </div>
+          {participantMembers.length > 0 ? (
+            participantMembers.map((member) => (
+              <MenuItem
+                className="min-h-10"
+                key={getWorkspaceUserKey(member)}
+                onClick={() =>
+                  onRemoveMemberFromChat(chat.id, getWorkspaceUserKey(member))
+                }
+              >
+                <AvatarTile
+                  className="size-6 rounded-md border-0 bg-muted text-[0.625rem] shadow-none"
+                  initials={member.initials}
+                  src={member.avatarUrl}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{member.name}</span>
+                  <span className="block truncate text-muted-foreground text-xs">
+                    {member.email || member.role}
+                  </span>
+                </span>
+                <Button
+                  className="h-6 px-2 text-xs text-red-600 hover:text-red-600 dark:text-red-500"
+                  size="xs"
+                  variant="ghost"
+                >
+                  Remove
+                </Button>
+              </MenuItem>
+            ))
+          ) : (
+            <div className="px-2 py-2 text-xs leading-5 text-muted-foreground">
+              No people added yet.
+            </div>
+          )}
           <MenuSeparator />
           <ChatActionItem
             icon={AppWindowMacIcon}
@@ -2387,6 +3308,208 @@ function ChatActionItem({
   );
 }
 
+function NotificationCenter({
+  busyId,
+  notifications,
+  onAction,
+}: {
+  busyId: string | null;
+  notifications: NotificationItem[];
+  onAction: (
+    notificationId: string,
+    action: "accept" | "reject" | "read",
+  ) => void;
+}) {
+  const unreadCount = notifications.filter(
+    (notification) => notification.status === "unread",
+  ).length;
+
+  return (
+    <Menu>
+      <MenuTrigger
+        aria-label="Open notifications"
+        className="relative grid size-8 shrink-0 place-items-center rounded-lg text-sidebar-foreground outline-none transition-[background-color,color] hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+      >
+        <Icon className="size-4 text-muted-foreground" icon={BellIcon} />
+        {unreadCount > 0 && (
+          <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-success shadow-[0_0_0_2px_hsl(var(--sidebar-background))]" />
+        )}
+      </MenuTrigger>
+      <MenuPopup align="end" className="w-[22rem] max-w-[calc(100vw-2rem)] p-1" sideOffset={8}>
+        <div className="flex items-center justify-between px-2 py-2">
+          <p className="text-sm font-medium leading-none">Notifications</p>
+          {unreadCount > 0 && (
+            <Badge className="h-5 px-1.5 text-[0.65rem]" variant="success">
+              {unreadCount} new
+            </Badge>
+          )}
+        </div>
+        {notifications.length === 0 ? (
+          <div className="px-2 pb-3 pt-1 text-xs leading-5 text-muted-foreground">
+            No notifications yet.
+          </div>
+        ) : (
+          <div className="max-h-96 overflow-y-auto pr-1">
+            {notifications.map((notification) => (
+              <NotificationRow
+                busy={busyId === notification.id}
+                disabled={Boolean(busyId)}
+                key={notification.id}
+                notification={notification}
+                onAction={onAction}
+              />
+            ))}
+          </div>
+        )}
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+function NotificationRow({
+  busy,
+  disabled,
+  notification,
+  onAction,
+}: {
+  busy: boolean;
+  disabled: boolean;
+  notification: NotificationItem;
+  onAction: (
+    notificationId: string,
+    action: "accept" | "reject" | "read",
+  ) => void;
+}) {
+  const actionable =
+    notification.type === "workspace_invite" &&
+    notification.actionStatus === "pending";
+  const invitedEmail = asString(notification.metadata.invitedEmail);
+  const workspaceName = asString(notification.metadata.workspaceName);
+
+  return (
+    <div
+      className={cn(
+        "group rounded-lg px-2 py-2 transition-[background-color]",
+        notification.status === "unread" ? "bg-sidebar-accent/70" : "hover:bg-sidebar-accent/55",
+      )}
+      onClick={() => {
+        if (notification.status === "unread" && !actionable) {
+          onAction(notification.id, "read");
+        }
+      }}
+      role="button"
+      tabIndex={0}
+    >
+      <div className="flex items-start gap-2">
+        <div className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+          <Icon
+            className="size-4"
+            icon={
+              notification.type === "workspace_invite_accepted"
+                ? CheckIcon
+                : notification.type === "workspace_invite_rejected"
+                  ? Delete02Icon
+                  : Users
+            }
+          />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <p className="min-w-0 truncate text-sm font-medium leading-5">
+              {notification.title}
+            </p>
+            <NotificationStatusBadge notification={notification} />
+          </div>
+          <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
+            {notification.body}
+          </p>
+          {(workspaceName || invitedEmail) && (
+            <p className="mt-1 truncate text-[0.68rem] leading-none text-muted-foreground/75">
+              {[workspaceName, invitedEmail].filter(Boolean).join(" / ")}
+            </p>
+          )}
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="text-[0.68rem] leading-none text-muted-foreground/75">
+              {formatDateTimeLabel(notification.createdAt)}
+            </span>
+            {actionable && (
+              <div className="flex items-center gap-1">
+                <Button
+                  className="h-7 px-2 text-xs"
+                  disabled={disabled}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onAction(notification.id, "reject");
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Reject
+                </Button>
+                <Button
+                  className="h-7 px-2 text-xs"
+                  disabled={disabled}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onAction(notification.id, "accept");
+                  }}
+                  size="sm"
+                  type="button"
+                >
+                  {busy ? <Spinner className="size-3" /> : "Accept"}
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NotificationStatusBadge({
+  notification,
+}: {
+  notification: NotificationItem;
+}) {
+  if (notification.actionStatus === "accepted") {
+    return (
+      <Badge className="h-5 px-1.5 text-[0.65rem]" variant="success">
+        Accepted
+      </Badge>
+    );
+  }
+
+  if (notification.actionStatus === "rejected") {
+    return (
+      <Badge className="h-5 px-1.5 text-[0.65rem]" variant="destructive">
+        Rejected
+      </Badge>
+    );
+  }
+
+  if (notification.actionStatus === "pending") {
+    return (
+      <Badge className="h-5 px-1.5 text-[0.65rem]" variant="warning">
+        Pending
+      </Badge>
+    );
+  }
+
+  if (notification.status === "unread") {
+    return (
+      <Badge className="h-5 px-1.5 text-[0.65rem]" variant="outline">
+        New
+      </Badge>
+    );
+  }
+
+  return null;
+}
+
 function UserIdentity({
   onSelectPage,
   profile,
@@ -2476,6 +3599,70 @@ function NavButton({
   );
 }
 
+function SidebarThemeToggle({
+  onCycle,
+  preference,
+}: {
+  onCycle: () => void;
+  preference: ThemePreference;
+}) {
+  const icon =
+    preference === "light"
+      ? Sun03Icon
+      : preference === "dark"
+        ? Moon02Icon
+        : AppWindowMacIcon;
+  const label =
+    preference === "light"
+      ? "Light theme"
+      : preference === "dark"
+        ? "Dark theme"
+        : "System theme";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            aria-label={label}
+            className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-[background-color,color] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+            onClick={onCycle}
+            type="button"
+          />
+        }
+      >
+        <Icon className="size-4" icon={icon} />
+      </TooltipTrigger>
+      <TooltipPopup>{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function WorkflowChatSpinnerIcon({ running }: { running: boolean }) {
+  const color = running ? "#22c55e" : "#8a8a8a";
+
+  return (
+    <span className="grid size-3.5 shrink-0 place-items-center">
+      <GradientSpin
+        cellGap={1}
+        cellRadius={1}
+        cellSize={2}
+        colorBy="row"
+        dim={0.12}
+        gradient={[
+          { color, position: 0 },
+          { color, position: 1 },
+        ]}
+        label={running ? "Workflow agent running" : "Workflow chat"}
+        pattern="arrow-up"
+        period={600}
+        rows={4}
+        cols={4}
+      />
+    </span>
+  );
+}
+
 function SidebarChatHistory({
   activeChatId,
   chats,
@@ -2485,6 +3672,7 @@ function SidebarChatHistory({
   onRenameChat,
   onTogglePin,
   open,
+  workflowChatMeta,
 }: {
   activeChatId: string | null;
   chats: SidebarChat[];
@@ -2494,6 +3682,7 @@ function SidebarChatHistory({
   onRenameChat: (chatId: string) => void;
   onTogglePin: (chatId: string) => void;
   open: boolean;
+  workflowChatMeta: ReadonlyMap<string, WorkflowSidebarChatMeta>;
 }) {
   const orderedChats = [...chats].sort((first, second) =>
     Number(second.pinned) - Number(first.pinned),
@@ -2512,55 +3701,69 @@ function SidebarChatHistory({
         </CollapsibleTrigger>
         <CollapsiblePanel>
           <div className="mt-1 grid gap-0.5">
-            {orderedChats.map((chat) => (
-              <div
-                className={cn(
-                  "group flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-[background-color,color]",
-                  activeChatId === chat.id
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                )}
-                key={chat.id}
-              >
-                <button
-                  className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none"
-                  onClick={() => onOpenChat(chat.id)}
-                  type="button"
-                >
-                  <Icon className="size-3.5 opacity-70" icon={Chat01Icon} />
-                  <span className="min-w-0 flex-1 truncate">{chat.title}</span>
-                  {chat.pinned && (
-                    <Icon className="size-3 opacity-60" icon={PinIcon} />
+            {orderedChats.map((chat) => {
+              const workflowMeta = workflowChatMeta.get(chat.id);
+              const isWorkflowChat = Boolean(workflowMeta);
+              const chatTitle = workflowMeta
+                ? `${workflowMeta.agentName} / ${workflowMeta.title || chat.title}`
+                : chat.title;
+
+              return (
+                <div
+                  className={cn(
+                    "group flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-[background-color,color]",
+                    activeChatId === chat.id
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                   )}
-                </button>
-                <Menu>
-                  <MenuTrigger
-                    className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 outline-none transition-[background-color,color,opacity] hover:bg-background/70 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover:opacity-100"
-                    onClick={(event) => event.stopPropagation()}
+                  key={chat.id}
+                >
+                  <button
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none"
+                    onClick={() => onOpenChat(chat.id)}
+                    type="button"
                   >
-                    <Icon className="size-3.5" icon={MoreHorizontalIcon} />
-                  </MenuTrigger>
-                  <MenuPopup align="end" className="min-w-36" sideOffset={6}>
-                    <MenuItem onClick={() => onTogglePin(chat.id)}>
-                      <Icon icon={chat.pinned ? PinOffIcon : PinIcon} />
-                      {chat.pinned ? "Unpin" : "Pin"}
-                    </MenuItem>
-                    <MenuItem onClick={() => onRenameChat(chat.id)}>
-                      <Icon icon={Edit02Icon} />
-                      Rename
-                    </MenuItem>
-                    <MenuSeparator />
-                    <MenuItem
-                      onClick={() => onDeleteChat(chat.id)}
-                      variant="destructive"
+                    {isWorkflowChat ? (
+                      <WorkflowChatSpinnerIcon
+                        running={Boolean(workflowMeta?.running)}
+                      />
+                    ) : (
+                      <Icon className="size-3.5 opacity-70" icon={Chat01Icon} />
+                    )}
+                    <span className="min-w-0 flex-1 truncate">{chatTitle}</span>
+                    {chat.pinned && (
+                      <Icon className="size-3 opacity-60" icon={PinIcon} />
+                    )}
+                  </button>
+                  <Menu>
+                    <MenuTrigger
+                      className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 outline-none transition-[background-color,color,opacity] hover:bg-background/70 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover:opacity-100"
+                      onClick={(event) => event.stopPropagation()}
                     >
-                      <Icon icon={Delete02Icon} />
-                      Delete
-                    </MenuItem>
-                  </MenuPopup>
-                </Menu>
-              </div>
-            ))}
+                      <Icon className="size-3.5" icon={MoreHorizontalIcon} />
+                    </MenuTrigger>
+                    <MenuPopup align="end" className="min-w-36" sideOffset={6}>
+                      <MenuItem onClick={() => onTogglePin(chat.id)}>
+                        <Icon icon={chat.pinned ? PinOffIcon : PinIcon} />
+                        {chat.pinned ? "Unpin" : "Pin"}
+                      </MenuItem>
+                      <MenuItem onClick={() => onRenameChat(chat.id)}>
+                        <Icon icon={Edit02Icon} />
+                        Rename
+                      </MenuItem>
+                      <MenuSeparator />
+                      <MenuItem
+                        onClick={() => onDeleteChat(chat.id)}
+                        variant="destructive"
+                      >
+                        <Icon icon={Delete02Icon} />
+                        Delete
+                      </MenuItem>
+                    </MenuPopup>
+                  </Menu>
+                </div>
+              );
+            })}
           </div>
         </CollapsiblePanel>
       </div>
@@ -2594,48 +3797,99 @@ function PageHeader({
 
 function ChatPage({
   activeChatId,
+  chatParticipantIds,
   composerOptions,
   draftRequest,
+  members,
+  onAddMemberToChat,
+  onCreateChat,
+  workspaceId,
 }: {
   activeChatId: string | null;
+  chatParticipantIds: string[];
   composerOptions: ComposerOption[];
   draftRequest: ChatDraftRequest | null;
+  members: WorkspaceUser[];
+  onAddMemberToChat: (chatId: string, memberId: string) => void;
+  onCreateChat: (title: string) => Promise<string>;
+  workspaceId: string | null;
 }) {
   return (
     <ChatExperience
       activeChatId={activeChatId}
+      chatParticipantIds={chatParticipantIds}
       composerOptions={composerOptions}
       draftRequest={
         draftRequest?.chatId === activeChatId ? draftRequest : null
       }
-      key={activeChatId ?? "new-chat"}
+      members={members}
+      onAddMemberToChat={onAddMemberToChat}
+      onCreateChat={onCreateChat}
+      workspaceId={workspaceId}
     />
   );
 }
 
 function ChatExperience({
   activeChatId = null,
+  chatParticipantIds = [],
   compact = false,
   composerOptions = [],
   draftRequest = null,
+  members = [],
+  onAddMemberToChat,
+  onCreateChat,
+  workspaceId = null,
 }: {
   activeChatId?: string | null;
+  chatParticipantIds?: string[];
   compact?: boolean;
   composerOptions?: ComposerOption[];
   draftRequest?: ChatDraftRequest | null;
+  members?: WorkspaceUser[];
+  onAddMemberToChat?: (chatId: string, memberId: string) => void;
+  onCreateChat?: (title: string) => Promise<string>;
+  workspaceId?: string | null;
 }) {
-  const [selectedModel, setSelectedModel] = useState(modelOptions[0]);
+  const [selectedModel, setSelectedModel] = useState<ChatModelOption>(
+    modelOptions[0],
+  );
+  const [userModelOptions, setUserModelOptions] = useState<ChatModelOption[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isSending, setIsSending] = useState(false);
   const [composerIsEmpty, setComposerIsEmpty] = useState(true);
   const [mention, setMention] = useState<{
     kind: ComposerOption["kind"];
     query: string;
   } | null>(null);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  const messageScrollerViewportRef = useRef<HTMLDivElement>(null);
   const mentionPopupRef = useRef<HTMLDivElement>(null);
   const mentionRangeRef = useRef<Range | null>(null);
+  const keepChatAtEndRef = useRef(false);
+  const skipNextMessageLoadRef = useRef(false);
+  const skipNextMessageLoadForChatIdRef = useRef<string | null>(null);
   const hasMessages = messages.length > 0;
+  const availableModelOptions = [...modelOptions, ...userModelOptions];
+  const atmetModelOptions = availableModelOptions.filter(
+    (model) => model.providerKey === "atmet",
+  );
+  const otherModelOptions = availableModelOptions.filter(
+    (model) => model.providerKey !== "atmet",
+  );
+  const visibleSetupModelOptions = setupModelOptions.filter((option) => {
+    if (option.providerKey === "custom") {
+      return !userModelOptions.some((model) => model.providerKey === "custom");
+    }
+
+    if (option.providerKey === "local") {
+      return !userModelOptions.some((model) => model.providerKey === "local");
+    }
+
+    return true;
+  });
   const mentionOptions = mention
     ? composerOptions.filter(
         (option) =>
@@ -2643,6 +3897,123 @@ function ChatExperience({
           option.name.toLowerCase().includes(mention.query.toLowerCase()),
       )
     : [];
+  const availableMembers = members.filter(
+    (member) => !chatParticipantIds.includes(getWorkspaceUserKey(member)),
+  );
+
+  function keepChatAtEndOnNextPaint() {
+    keepChatAtEndRef.current = true;
+  }
+
+  useEffect(() => {
+    if (!keepChatAtEndRef.current) {
+      return;
+    }
+
+    const scrollToEnd = () => {
+      const viewport = messageScrollerViewportRef.current;
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight;
+      }
+    };
+
+    const firstFrameId = requestAnimationFrame(scrollToEnd);
+    const secondFrameId = requestAnimationFrame(() => {
+      requestAnimationFrame(scrollToEnd);
+    });
+    const settleTimeoutId = window.setTimeout(() => {
+      scrollToEnd();
+      keepChatAtEndRef.current = false;
+    }, 160);
+
+    return () => {
+      cancelAnimationFrame(firstFrameId);
+      cancelAnimationFrame(secondFrameId);
+      window.clearTimeout(settleTimeoutId);
+    };
+  }, [messages]);
+
+  function selectModel(model: ChatModelOption) {
+    setSelectedModel(model);
+    try {
+      window.localStorage.setItem(lastSelectedChatModelKey, model.id);
+    } catch {
+      // Model selection still works if localStorage is unavailable.
+    }
+  }
+
+  useEffect(() => {
+    try {
+      const storedModelId = window.localStorage.getItem(lastSelectedChatModelKey);
+      const storedModel = modelOptions.find((model) => model.id === storedModelId);
+      if (storedModel) {
+        setSelectedModel(storedModel);
+      }
+    } catch {
+      // Ignore storage failures.
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadUserModels() {
+      try {
+        const response = await fetch("/api/user-model-connections", {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = asRecord(await response.json());
+        const connections = asRecordArray(payload.connections)
+          .filter((connection) => asBoolean(connection.enabled, true))
+          .map((connection) => {
+            const providerKey = asString(connection.providerKey);
+            const displayName = asString(
+              connection.displayName,
+              providerKey === "local" ? "Local model" : "Custom API",
+            );
+            return {
+              icon: providerKey === "local" ? DatabaseIcon : CodeIcon,
+              description:
+                providerKey === "local"
+                  ? "Your local model endpoint"
+                  : "Your connected model",
+              id: `user-connection:${asString(connection.id)}`,
+              name: displayName,
+              providerKey,
+            };
+          })
+          .filter((option) => option.id !== "user-connection:");
+
+        if (!cancelled) {
+          setUserModelOptions(connections);
+          try {
+            const storedModelId = window.localStorage.getItem(lastSelectedChatModelKey);
+            const storedModel = [...modelOptions, ...connections].find(
+              (model) => model.id === storedModelId,
+            );
+            if (storedModel) {
+              setSelectedModel(storedModel);
+            }
+          } catch {
+            // Ignore storage failures.
+          }
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    void loadUserModels();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!mention) {
@@ -2674,6 +4045,16 @@ function ChatExperience({
         return;
       }
 
+      if (
+        skipNextMessageLoadRef.current &&
+        (!skipNextMessageLoadForChatIdRef.current ||
+          skipNextMessageLoadForChatIdRef.current === activeChatId)
+      ) {
+        skipNextMessageLoadRef.current = false;
+        skipNextMessageLoadForChatIdRef.current = null;
+        return;
+      }
+
       try {
         const response = await fetch(`/api/chats/${activeChatId}/messages`, {
           cache: "no-store",
@@ -2689,6 +4070,7 @@ function ChatExperience({
           .filter((message): message is ChatMessage => Boolean(message));
 
         if (!cancelled) {
+          keepChatAtEndOnNextPaint();
           setMessages(loadedMessages);
         }
       } catch (error) {
@@ -2811,7 +4193,7 @@ function ChatExperience({
 
   async function sendComposerMessage() {
     const editor = editorRef.current;
-    if (!editor) {
+    if (!editor || isSending) {
       return;
     }
 
@@ -2826,40 +4208,116 @@ function ChatExperience({
       id: `pending-${Date.now()}`,
       role: "user" as const,
     };
-    setMessages((current) => [...current, optimisticMessage]);
+    const assistantPendingId = `thinking-${Date.now()}`;
+    const thinkingMessage = {
+      content: "",
+      id: assistantPendingId,
+      role: "assistant" as const,
+      state: "thinking" as const,
+    };
+    keepChatAtEndOnNextPaint();
+    setMessages((current) => [...current, optimisticMessage, thinkingMessage]);
 
     editor.innerHTML = "";
     setComposerIsEmpty(true);
     setMention(null);
     mentionRangeRef.current = null;
 
-    if (!activeChatId) {
+    setIsSending(true);
+    let targetChatId = activeChatId ?? "";
+
+    if (!targetChatId && workspaceId && onCreateChat) {
+      skipNextMessageLoadRef.current = true;
+      targetChatId = await onCreateChat(content);
+      skipNextMessageLoadForChatIdRef.current = targetChatId || null;
+    }
+
+    if (!targetChatId) {
+      skipNextMessageLoadRef.current = false;
+      skipNextMessageLoadForChatIdRef.current = null;
+    }
+
+    if (!targetChatId || !workspaceId) {
+      keepChatAtEndOnNextPaint();
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === assistantPendingId
+            ? {
+                ...message,
+                content: "Create or select a chat before sending a message.",
+                state: "complete",
+              }
+            : message,
+        ),
+      );
+      setIsSending(false);
       return;
     }
 
     try {
-      const response = await fetch(`/api/chats/${activeChatId}/messages`, {
-        body: JSON.stringify({ content, role: "user" }),
+      const response = await fetch("/api/ai/chat", {
+        body: JSON.stringify({
+          chatId: targetChatId,
+          content,
+          modelKey: selectedModel.id,
+          workspaceId,
+        }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
       });
 
+      const payload = asRecord(await response.json().catch(() => ({})));
       if (!response.ok) {
-        return;
-      }
-
-      const payload = asRecord(await response.json());
-      const savedMessage = mapChatMessage(payload.message);
-
-      if (savedMessage) {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === optimisticMessage.id ? savedMessage : message,
-          ),
+        throw new Error(
+          asString(payload.error) ||
+            asString(payload.message) ||
+            "Atmet could not send this message.",
         );
       }
+
+      const savedUserMessage = mapChatMessage(payload.userMessage);
+      const savedAssistantMessage = mapChatMessage(payload.assistantMessage);
+
+      if (savedAssistantMessage) {
+        void playAtmetSound("success");
+      }
+
+      keepChatAtEndOnNextPaint();
+      setMessages((current) =>
+        current.map((message) => {
+          if (message.id === optimisticMessage.id && savedUserMessage) {
+            return savedUserMessage;
+          }
+
+          if (message.id === assistantPendingId && savedAssistantMessage) {
+            return {
+              ...savedAssistantMessage,
+              state: "complete" as const,
+            };
+          }
+
+          return message;
+        }),
+      );
     } catch (error) {
       console.error(error);
+      void playAtmetSound("error");
+      const message =
+        error instanceof Error ? error.message : "Unexpected AI error.";
+      keepChatAtEndOnNextPaint();
+      setMessages((current) =>
+        current.map((currentMessage) =>
+          currentMessage.id === assistantPendingId
+            ? {
+                ...currentMessage,
+                content: `Atmet could not complete this message: ${message}`,
+                state: "complete",
+              }
+            : currentMessage,
+        ),
+      );
+    } finally {
+      setIsSending(false);
     }
   }
 
@@ -3000,7 +4458,7 @@ function ChatExperience({
   return (
     <div
       className={cn(
-        "flex flex-1 flex-col",
+        "relative flex flex-1 flex-col",
         compact
           ? "min-h-full justify-end"
           : "min-h-[calc(100svh-8rem)]",
@@ -3009,27 +4467,45 @@ function ChatExperience({
       )}
     >
       {hasMessages && (
-        <div
-          className={cn(
-            "mx-auto flex min-h-0 w-full flex-1 flex-col gap-4 overflow-y-auto pb-5 pr-1",
-            compact ? "max-w-none" : "max-w-3xl",
-          )}
+        <MessageScrollerProvider
+          autoScroll
+          defaultScrollPosition="end"
+          scrollPreviousItemPeek={48}
         >
-          {messages.map((message) => (
-            <ChatMessageBubble key={message.id} message={message} />
-          ))}
-        </div>
+          <div
+            className={cn(
+              "relative mx-auto min-h-0 w-full flex-1",
+              compact ? "max-w-none" : "max-w-[min(100%,96rem)]",
+            )}
+          >
+            <MessageScroller className="min-h-0">
+              <MessageScrollerViewport
+                className="px-3 pb-52 sm:px-4 lg:px-6"
+                ref={messageScrollerViewportRef}
+              >
+                <MessageScrollerContent>
+                  {messages.map((message) => (
+                    <MessageScrollerItem
+                      key={message.id}
+                      messageId={message.id}
+                    >
+                      <ChatMessageBubble message={message} />
+                    </MessageScrollerItem>
+                  ))}
+                </MessageScrollerContent>
+              </MessageScrollerViewport>
+              <MessageScrollerButton />
+            </MessageScroller>
+          </div>
+        </MessageScrollerProvider>
       )}
 
       <div
         className={cn(
-          "mx-auto w-full",
-          compact ? "max-w-none" : "max-w-3xl",
-          hasMessages &&
-            "sticky bottom-0 z-10 shrink-0 bg-background pb-1 pt-3",
+          "relative mx-auto w-full max-w-none rounded-2xl border border-black/10 bg-white/28 backdrop-blur-2xl backdrop-saturate-150 dark:border-white/10 dark:bg-white/[0.035]",
+          hasMessages && "absolute inset-x-0 bottom-1 z-10",
         )}
       >
-        <div className="relative rounded-2xl border border-black/8 bg-background shadow-xs/5 dark:border-white/8">
           <div
             aria-label="Message Atmet"
             className="relative min-h-[10.5rem] cursor-text px-4 py-4 text-base leading-7 outline-none sm:text-sm"
@@ -3093,23 +4569,61 @@ function ChatExperience({
           <div className="flex flex-wrap items-center gap-2 px-3 pb-2 pt-2">
             <Menu>
               <MenuTrigger className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-sm font-medium text-muted-foreground outline-none transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-                <AtmetLogo className="size-5" />
+                <ChatModelMark className="size-5" model={selectedModel} />
                 {selectedModel.name}
                 <Icon className="size-3.5 opacity-70" icon={ChevronDownIcon} />
               </MenuTrigger>
-              <MenuPopup align="start" className="min-w-56" sideOffset={8}>
-                {modelOptions.map((model) => (
-                  <MenuItem
-                    key={model.name}
-                    onClick={() => setSelectedModel(model)}
-                  >
-                    <Icon icon={model.icon} />
-                    <span className="flex-1">{model.name}</span>
-                    {selectedModel.name === model.name && (
-                      <Icon className="text-info" icon={CheckIcon} />
-                    )}
-                  </MenuItem>
-                ))}
+              <MenuPopup align="start" className="min-w-64" sideOffset={8}>
+                {atmetModelOptions.length > 0 ? (
+                  <>
+                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                      Atmet models
+                    </div>
+                    {atmetModelOptions.map((model) => (
+                      <ChatModelMenuItem
+                        key={model.id}
+                        model={model}
+                        onSelect={() => selectModel(model)}
+                        selected={selectedModel.id === model.id}
+                      />
+                    ))}
+                  </>
+                ) : null}
+                {otherModelOptions.length > 0 ? (
+                  <>
+                    {atmetModelOptions.length > 0 ? <MenuSeparator /> : null}
+                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                      Other models
+                    </div>
+                    {otherModelOptions.map((model) => (
+                      <ChatModelMenuItem
+                        key={model.id}
+                        model={model}
+                        onSelect={() => selectModel(model)}
+                        selected={selectedModel.id === model.id}
+                      />
+                    ))}
+                  </>
+                ) : null}
+                {visibleSetupModelOptions.length > 0 ? (
+                  <>
+                    <MenuSeparator />
+                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                      Add models
+                    </div>
+                    {visibleSetupModelOptions.map((model) => (
+                      <MenuItem disabled key={model.id}>
+                        <ChatModelMark model={model} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">{model.name}</span>
+                          <span className="block truncate text-muted-foreground text-xs">
+                            {model.description}
+                          </span>
+                        </span>
+                      </MenuItem>
+                    ))}
+                  </>
+                ) : null}
               </MenuPopup>
             </Menu>
 
@@ -3134,18 +4648,145 @@ function ChatExperience({
 
             <div className="min-w-3 flex-1" />
 
-            <Button size="sm" variant="ghost">
-              Add
-              <Icon icon={PlusSignIcon} />
-            </Button>
-            <Button onClick={sendComposerMessage} size="sm">
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button size="sm" variant="ghost">
+                    Add
+                    <Icon icon={PlusSignIcon} />
+                  </Button>
+                }
+              />
+              <MenuPopup align="end" className="min-w-64" sideOffset={8}>
+                <MenuItem onClick={() => fileInputRef.current?.click()}>
+                  <Icon icon={FileUploadIcon} />
+                  Upload file
+                </MenuItem>
+                <MenuSeparator />
+                <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                  Add people
+                </div>
+                {activeChatId ? (
+                  availableMembers.length > 0 ? (
+                    availableMembers.map((member) => (
+                      <MenuItem
+                        className="min-h-10"
+                        key={getWorkspaceUserKey(member)}
+                        onClick={() =>
+                          onAddMemberToChat?.(
+                            activeChatId,
+                            getWorkspaceUserKey(member),
+                          )
+                        }
+                      >
+                        <AvatarTile
+                          className="size-6 rounded-md border-0 bg-muted text-[0.625rem] shadow-none"
+                          initials={member.initials}
+                          src={member.avatarUrl}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">{member.name}</span>
+                          <span className="block truncate text-muted-foreground text-xs">
+                            {member.email || member.role}
+                          </span>
+                        </span>
+                        <Icon className="text-info" icon={UserAdd01Icon} />
+                      </MenuItem>
+                    ))
+                  ) : (
+                    <div className="px-2 py-2 text-xs leading-5 text-muted-foreground">
+                      Everyone is already in this chat.
+                    </div>
+                  )
+                ) : (
+                  <div className="px-2 py-2 text-xs leading-5 text-muted-foreground">
+                    Send the first message before adding people.
+                  </div>
+                )}
+              </MenuPopup>
+            </Menu>
+            <input
+              className="hidden"
+              onChange={(event) => {
+                event.currentTarget.value = "";
+              }}
+              ref={fileInputRef}
+              type="file"
+            />
+            <Button disabled={isSending} onClick={sendComposerMessage} size="sm">
               Send
-              <Icon icon={SendHorizontal} />
+              {isSending ? (
+                <Spinner className="size-3.5" />
+              ) : (
+                <Icon icon={SendHorizontal} />
+              )}
             </Button>
           </div>
-        </div>
       </div>
     </div>
+  );
+}
+
+function ConnectorLogo({
+  className,
+  connector,
+  fallback,
+}: {
+  className?: string;
+  connector?: Pick<ConnectorItem, "key" | "logo" | "name"> | null;
+  fallback?: string;
+}) {
+  const logoClassName = cn("size-full object-contain", className);
+  const key = connector?.key;
+
+  if (key === "chatgpt") {
+    return <Openai className={logoClassName} />;
+  }
+
+  if (key === "claude") {
+    return <AnthropicBlack className={logoClassName} />;
+  }
+
+  if (key === "email") {
+    return <Gmail className={logoClassName} />;
+  }
+
+  if (key === "gmail") {
+    return <Gmail className={logoClassName} />;
+  }
+
+  if (key === "drive") {
+    return <Drive className={logoClassName} />;
+  }
+
+  if (key === "google-sheets") {
+    return <GoogleSheets className={logoClassName} />;
+  }
+
+  if (key === "instagram") {
+    return <Instagram className={logoClassName} />;
+  }
+
+  if (key === "calendar") {
+    return <GoogleCalendar className={logoClassName} />;
+  }
+
+  if (key === "telegram") {
+    return <Telegram className={logoClassName} />;
+  }
+
+  if (key === "slack") {
+    return <Slack className={logoClassName} />;
+  }
+
+  if (key === "github") {
+    return <GithubLight className={logoClassName} />;
+  }
+
+  return (
+    <span>
+      {connector?.logo ?? fallback ?? getOptionInitials(connector?.name ?? "")}
+    </span>
   );
 }
 
@@ -3176,15 +4817,95 @@ function ComposerOptionIcon({
         compact ? "size-4 text-[0.55rem]" : "size-5 text-[0.625rem]",
       )}
     >
-      {option.logo}
+      <ConnectorLogo
+        className={compact ? "size-2.5" : "size-3.5"}
+        connector={{
+          key: option.connectorKey,
+          logo: option.logo ?? getOptionInitials(option.name),
+          name: option.name,
+        }}
+      />
     </span>
   );
+}
+
+function ChatModelMenuItem({
+  model,
+  onSelect,
+  selected,
+}: {
+  model: ChatModelOption;
+  onSelect: () => void;
+  selected: boolean;
+}) {
+  return (
+    <MenuItem onClick={onSelect}>
+      <ChatModelMark model={model} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{model.name}</span>
+        {model.description ? (
+          <span className="block truncate text-muted-foreground text-xs">
+            {model.description}
+          </span>
+        ) : null}
+      </span>
+      {selected ? <Icon className="text-info" icon={CheckIcon} /> : null}
+    </MenuItem>
+  );
+}
+
+function ChatModelMark({
+  className,
+  model,
+}: {
+  className?: string;
+  model: ChatModelOption;
+}) {
+  const logoClassName = cn("size-4 shrink-0", className);
+
+  if (model.logoAsset) {
+    return (
+      <span className={cn("relative block overflow-hidden", logoClassName)}>
+        <Image
+          alt={`${model.name} logo`}
+          className={cn("size-full object-contain", model.logoAsset.dark && "dark:hidden")}
+          height={20}
+          src={model.logoAsset.light}
+          width={20}
+        />
+        {model.logoAsset.dark ? (
+          <Image
+            alt=""
+            aria-hidden="true"
+            className="hidden size-full object-contain dark:block"
+            height={20}
+            src={model.logoAsset.dark}
+            width={20}
+          />
+        ) : null}
+      </span>
+    );
+  }
+
+  if (model.logo === "atmet") {
+    return <AtmetLogo className={logoClassName} plain />;
+  }
+
+  if (model.logo === "openai") {
+    return <Openai className={cn(logoClassName, "dark:invert")} />;
+  }
+
+  if (model.logo === "anthropic") {
+    return <AnthropicBlack className={cn(logoClassName, "dark:invert")} />;
+  }
+
+  return <Icon className={logoClassName} icon={model.icon ?? AiChatIcon} />;
 }
 
 function ChatMessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === "user") {
     return (
-      <div className="flex justify-end">
+      <div className="flex justify-end px-1 sm:px-2 lg:px-3">
         <div className="max-w-[80%] whitespace-pre-wrap rounded-xl bg-secondary px-3 py-2 text-sm leading-6 text-secondary-foreground">
           {message.content}
         </div>
@@ -3193,15 +4914,10 @@ function ChatMessageBubble({ message }: { message: ChatMessage }) {
   }
 
   return (
-    <div className="flex justify-start">
-      <div className="grid max-w-[92%] gap-3">
-        {message.variant ? (
-          <AiOutputDemo variant={message.variant} />
-        ) : message.state === "thinking" ? (
-          <>
-            <AiThinkingState />
-            <AiToolState />
-          </>
+    <div className="flex justify-start px-1 sm:px-2 lg:px-3">
+      <div className="grid w-full max-w-full gap-3">
+        {message.state === "thinking" ? (
+          <AiThinkingState />
         ) : (
           <AiTextResponse text={message.content} />
         )}
@@ -3243,30 +4959,33 @@ function AiOutputDemo({ variant }: { variant: AiOutputVariant }) {
 
 function AiThinkingState() {
   return (
-    <div className="inline-flex w-fit items-center gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-sm text-muted-foreground">
-      <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70" />
-      Thinking...
+    <div
+      aria-label="Atmet is generating"
+      className="grid w-fit place-items-center px-1 py-1"
+    >
+      <GradientSpin
+        cellGap={1}
+        cellRadius={1}
+        cellSize={5}
+        colorBy="row"
+        dim={0.1}
+        gradient={[
+          { color: "#000000", position: 0 },
+          { color: "#000000", position: 1 },
+        ]}
+        label="Atmet is thinking"
+        pattern="arrow-up"
+        period={600}
+        rows={4}
+        cols={4}
+        className="dark:invert"
+      />
     </div>
   );
 }
 
 function AiReasoningState() {
-  return (
-    <div className="w-fit rounded-lg border border-black/8 bg-background p-3 text-sm dark:border-white/8">
-      <button
-        className="inline-flex items-center gap-1 text-muted-foreground"
-        type="button"
-      >
-        Thought for 5s
-        <Icon className="size-3" icon={ChevronDownIcon} />
-      </button>
-      <div className="mt-3 grid gap-2 text-muted-foreground">
-        <p>Identified the requested output format.</p>
-        <p>Checked available workspace context.</p>
-        <p>Prepared a concise final response.</p>
-      </div>
-    </div>
-  );
+  return <AiThinkingState />;
 }
 
 function AiToolState() {
@@ -3298,7 +5017,7 @@ function AiWebSearchState() {
   ];
 
   return (
-    <div className="w-fit rounded-lg border border-black/8 bg-background p-3 text-sm dark:border-white/8">
+    <div className="w-full max-w-full rounded-xl bg-background p-3 text-sm shadow-[0_0_0_1px_rgba(0,0,0,0.08)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
       <div className="flex items-center gap-2 font-medium">
         <Icon className="size-3.5 text-muted-foreground" icon={Search01Icon} />
         {"Searching \"JWT auth vulnerabilities\""}
@@ -3317,7 +5036,7 @@ function AiWebSearchState() {
 
 function AiFileDiffState() {
   return (
-    <div className="w-fit overflow-hidden rounded-lg border border-black/8 bg-background text-sm dark:border-white/8">
+    <div className="w-full max-w-full rounded-xl border border-black/8 bg-background text-sm dark:border-white/8">
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <div className="flex items-center gap-2 font-mono text-xs">
           <Icon className="size-3.5 text-muted-foreground" icon={File01Icon} />
@@ -3348,7 +5067,7 @@ function AiFileDiffState() {
 
 function AiImageGenerationState() {
   return (
-    <div className="w-fit rounded-lg border border-black/8 bg-background p-3 text-sm dark:border-white/8">
+    <div className="w-full max-w-full rounded-xl bg-background p-3 text-sm shadow-[0_0_0_1px_rgba(0,0,0,0.08)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
       <div className="mx-auto grid size-28 place-items-center rounded-lg border border-dashed border-border bg-[radial-gradient(circle,currentColor_1px,transparent_1px)] bg-[length:8px_8px] text-muted-foreground">
         <span className="rounded bg-background px-1.5 py-0.5 text-xs">
           1024 x 1024
@@ -3363,22 +5082,537 @@ function AiImageGenerationState() {
 }
 
 function AiTextResponse({ text }: { text: string }) {
+  const segments = parseAiTextSegments(text);
+
   return (
-    <div className="max-w-prose text-sm leading-6 text-foreground">
-      <p className="whitespace-pre-wrap">{text}</p>
-      <p className="mt-3 text-muted-foreground">
-        AI output will appear here once a model response is available for this
-        chat.
-      </p>
+    <div className="grid max-w-[min(100%,52rem)] gap-3 text-sm leading-6 text-foreground">
+      {segments.map((segment, index) => {
+        if (segment.type === "code") {
+          return (
+            <AiCodeBlock
+              code={segment.code}
+              filename={
+                segment.language ? `snippet.${segment.language}` : "snippet.txt"
+              }
+              key={`${segment.type}-${index}`}
+            />
+          );
+        }
+
+        if (segment.type === "task-list") {
+          return (
+            <AiTaskList
+              items={segment.items}
+              key={`${segment.type}-${index}`}
+            />
+          );
+        }
+
+        if (segment.type === "table") {
+          return (
+            <AiMarkdownTable
+              headers={segment.headers}
+              key={`${segment.type}-${index}`}
+              rows={segment.rows}
+            />
+          );
+        }
+
+        return (
+          <AiMarkdownTextBlock
+            key={`${segment.type}-${index}`}
+            text={segment.text}
+          />
+        );
+      })}
     </div>
   );
 }
 
-function AiStreamingText() {
+function parseAiTextSegments(text: string): AiTextSegment[] {
+  const fallbackText = text.trim() || "Atmet returned an empty response.";
+  const segments: AiTextSegment[] = [];
+  const fencePattern = /```([a-zA-Z0-9_-]+)?\s*\n([\s\S]*?)```/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  function pushTextSegments(value: string) {
+    const parsedSegments = parseMarkdownTextSegments(value);
+    segments.push(...parsedSegments);
+  }
+
+  while ((match = fencePattern.exec(fallbackText))) {
+    const textBefore = fallbackText.slice(cursor, match.index).trim();
+    if (textBefore) {
+      pushTextSegments(textBefore);
+    }
+
+    segments.push({
+      code: match[2].trimEnd(),
+      language: match[1],
+      type: "code",
+    });
+    cursor = match.index + match[0].length;
+  }
+
+  const textAfter = fallbackText.slice(cursor).trim();
+  if (textAfter) {
+    pushTextSegments(textAfter);
+  }
+
+  return segments.length ? segments : [{ text: fallbackText, type: "text" }];
+}
+
+function parseMarkdownTextSegments(text: string): AiTextSegment[] {
+  const output: AiTextSegment[] = [];
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const textBuffer: string[] = [];
+
+  function flushText() {
+    const value = textBuffer.join("\n").trim();
+    if (value) {
+      output.push({ text: value, type: "text" });
+    }
+    textBuffer.length = 0;
+  }
+
+  for (let index = 0; index < lines.length; ) {
+    if (isMarkdownTaskListStart(lines[index] ?? "")) {
+      flushText();
+      const taskLines: string[] = [];
+
+      while (index < lines.length && isMarkdownTaskListStart(lines[index] ?? "")) {
+        taskLines.push(lines[index]);
+        index += 1;
+      }
+
+      output.push({ items: parseMarkdownTaskList(taskLines), type: "task-list" });
+      continue;
+    }
+
+    if (isMarkdownTableStart(lines, index)) {
+      flushText();
+      const tableLines = [lines[index]];
+      index += 1;
+
+      if (isMarkdownTableSeparator(lines[index] ?? "")) {
+        tableLines.push(lines[index]);
+        index += 1;
+      }
+
+      while (index < lines.length && isMarkdownTableRow(lines[index] ?? "")) {
+        tableLines.push(lines[index]);
+        index += 1;
+      }
+
+      output.push(parseMarkdownTable(tableLines));
+      continue;
+    }
+
+    textBuffer.push(lines[index]);
+    index += 1;
+  }
+
+  flushText();
+  return output;
+}
+
+function isMarkdownTaskListStart(line: string) {
+  return /^\s*[-*]\s+\[[ xX]\]\s+/.test(line);
+}
+
+function parseMarkdownTaskList(lines: string[]): AiTaskListItem[] {
+  return lines
+    .map((line) => {
+      const match = /^\s*[-*]\s+\[([ xX])\]\s+(.+)$/.exec(line.trim());
+
+      return {
+        checked: match?.[1]?.toLowerCase() === "x",
+        text: match?.[2] ?? line.trim(),
+      };
+    })
+    .filter((item) => item.text.trim().length > 0);
+}
+
+function isMarkdownTableStart(lines: string[], index: number) {
+  const current = lines[index] ?? "";
+  const next = lines[index + 1] ?? "";
+
+  return Boolean(
+    isMarkdownTableRow(current) &&
+      (isMarkdownTableSeparator(next) || isMarkdownTableRow(next)),
+  );
+}
+
+function isMarkdownTableRow(line: string) {
+  return splitMarkdownTableRow(line).length > 1;
+}
+
+function isMarkdownTableSeparator(line: string) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function splitMarkdownTableRow(line: string) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function parseMarkdownTable(lines: string[]): AiTextSegment {
+  const headers = splitMarkdownTableRow(lines[0] ?? "");
+  const hasSeparator = isMarkdownTableSeparator(lines[1] ?? "");
+  const rows = normalizeMarkdownTableRows(
+    headers,
+    lines.slice(hasSeparator ? 2 : 1).map(splitMarkdownTableRow),
+  );
+
+  return {
+    headers: headers.length ? headers : ["Column"],
+    rows,
+    type: "table",
+  };
+}
+
+function normalizeMarkdownTableRows(headers: string[], rows: string[][]) {
+  const columnCount = Math.max(headers.length, 1);
+  const normalizedRows: string[][] = [];
+
+  rows.forEach((row) => {
+    if (!row.some(Boolean)) {
+      return;
+    }
+
+    if (row.length < columnCount && normalizedRows.length) {
+      const previous = normalizedRows[normalizedRows.length - 1];
+      previous[columnCount - 1] = [previous[columnCount - 1], row.join(" ")]
+        .filter(Boolean)
+        .join(" ");
+      return;
+    }
+
+    normalizedRows.push(
+      Array.from({ length: columnCount }, (_, index) => row[index] ?? ""),
+    );
+  });
+
+  return normalizedRows;
+}
+
+function AiMarkdownTextBlock({ text }: { text: string }) {
+  const lines = text.split("\n");
+  const elements: React.ReactNode[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index].trim();
+
+    if (!line) {
+      index += 1;
+      continue;
+    }
+
+    const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+    if (heading) {
+      const level = heading[1].length;
+      const className = cn(
+        "font-semibold tracking-normal text-foreground",
+        level === 1 && "text-xl leading-7",
+        level === 2 && "text-lg leading-7",
+        level >= 3 && "text-base leading-6",
+      );
+      elements.push(
+        <div className={className} key={`heading-${index}`}>
+          {renderInlineMarkdown(heading[2])}
+        </div>,
+      );
+      index += 1;
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(line)) {
+      const items: string[] = [];
+      while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^[-*]\s+/, ""));
+        index += 1;
+      }
+      elements.push(
+        <ul className="grid gap-1.5" key={`list-${index}`}>
+          {items.map((item, itemIndex) => (
+            <li
+              className="grid grid-cols-[0.875rem_1fr] gap-2"
+              key={`${item}-${itemIndex}`}
+            >
+              <span className="mt-[0.62em] size-1.5 rounded-full bg-muted-foreground/45" />
+              <span>{renderInlineMarkdown(item)}</span>
+            </li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(line)) {
+      const items: string[] = [];
+      while (index < lines.length && /^\d+\.\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^\d+\.\s+/, ""));
+        index += 1;
+      }
+      elements.push(
+        <ol className="grid gap-1.5 [counter-reset:item]" key={`ordered-${index}`}>
+          {items.map((item, itemIndex) => (
+            <li
+              className="grid grid-cols-[1.5rem_1fr] gap-2 [counter-increment:item]"
+              key={`${item}-${itemIndex}`}
+            >
+              <span className="mt-0.5 text-right text-xs tabular-nums text-muted-foreground before:content-[counter(item)'.']" />
+              <span>{renderInlineMarkdown(item)}</span>
+            </li>
+          ))}
+        </ol>,
+      );
+      continue;
+    }
+
+    if (/^>\s?/.test(line)) {
+      const quoteLines: string[] = [];
+      while (index < lines.length && /^>\s?/.test(lines[index].trim())) {
+        quoteLines.push(lines[index].trim().replace(/^>\s?/, ""));
+        index += 1;
+      }
+      elements.push(
+        <blockquote
+          className="border-l border-border pl-3 text-muted-foreground"
+          key={`quote-${index}`}
+        >
+          {renderInlineMarkdown(quoteLines.join(" "))}
+        </blockquote>,
+      );
+      continue;
+    }
+
+    const paragraphLines: string[] = [];
+    while (index < lines.length) {
+      const paragraphLine = lines[index].trim();
+      if (
+        !paragraphLine ||
+        /^(#{1,4})\s+/.test(paragraphLine) ||
+        /^[-*]\s+/.test(paragraphLine) ||
+        /^\d+\.\s+/.test(paragraphLine) ||
+        /^>\s?/.test(paragraphLine)
+      ) {
+        break;
+      }
+      paragraphLines.push(paragraphLine);
+      index += 1;
+    }
+
+    elements.push(
+      <p className="whitespace-pre-wrap" key={`paragraph-${index}`}>
+        {renderInlineMarkdown(paragraphLines.join(" "))}
+      </p>,
+    );
+  }
+
+  return <div className="grid gap-3">{elements}</div>;
+}
+
+function renderInlineMarkdown(text: string) {
+  const parts: React.ReactNode[] = [];
+  const pattern =
+    /(\[[^\]]+\]\((https?:\/\/[^)\s]+|\/[^)\s]+|#[^)\s]+)\)|`[^`]+?`|\*\*[^*]+?\*\*|\[\d{1,3}\])/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text))) {
+    if (match.index > cursor) {
+      parts.push(text.slice(cursor, match.index));
+    }
+
+    const token = match[0];
+    if (token.startsWith("[") && token.includes("](")) {
+      const labelEnd = token.indexOf("](");
+      const label = token.slice(1, labelEnd);
+      const href = token.slice(labelEnd + 2, -1);
+      parts.push(
+        <a
+          className="underline underline-offset-4"
+          href={href}
+          key={`${token}-${match.index}`}
+          rel="noreferrer"
+          target={href.startsWith("http") ? "_blank" : undefined}
+        >
+          {label}
+        </a>,
+      );
+    } else if (/^\[\d{1,3}\]$/.test(token)) {
+      parts.push(
+        <sup
+          className="mx-0.5 inline-flex size-4 items-center justify-center rounded-full bg-secondary text-[0.65rem] font-medium leading-none text-muted-foreground align-super"
+          key={`${token}-${match.index}`}
+        >
+          {token.slice(1, -1)}
+        </sup>,
+      );
+    } else if (token.startsWith("**")) {
+      parts.push(
+        <strong className="font-semibold" key={`${token}-${match.index}`}>
+          {token.slice(2, -2)}
+        </strong>,
+      );
+    } else {
+      parts.push(
+        <code
+          className="rounded bg-secondary px-1 py-0.5 font-mono text-[0.92em]"
+          key={`${token}-${match.index}`}
+        >
+          {token.slice(1, -1)}
+        </code>,
+      );
+    }
+
+    cursor = match.index + token.length;
+  }
+
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor));
+  }
+
+  return parts.length ? parts : text;
+}
+
+function AiMarkdownTable({
+  headers,
+  rows,
+}: {
+  headers: string[];
+  rows: string[][];
+}) {
+  const table = normalizeAiTableData(headers, rows);
+  const comparison =
+    table.headers.length > 2 &&
+    /^(feature|capability|item|plan|tier|resource)$/i.test(
+      table.headers[0] ?? "",
+    );
+
+  return (
+    <AiGeneratedTable
+      headers={table.headers}
+      rows={table.rows}
+      variant={comparison ? "comparison" : "data"}
+    />
+  );
+}
+
+function normalizeAiTableData(headers: string[], rows: string[][]) {
+  const columnCount = Math.max(
+    1,
+    headers.length,
+    ...rows.map((row) => row.length),
+  );
+  const normalizedHeaders = Array.from(
+    { length: columnCount },
+    (_, index) => headers[index] || `Column ${index + 1}`,
+  );
+
+  return {
+    headers: normalizedHeaders,
+    rows: rows.map((row) =>
+      normalizedHeaders.map((_, index) => row[index] ?? ""),
+    ),
+  };
+}
+
+function AiGeneratedTable({
+  headers,
+  rows,
+  variant = "data",
+}: {
+  headers: string[];
+  rows: string[][];
+  variant?: "comparison" | "data";
+}) {
+  return (
+    <div className="w-full max-w-full rounded-xl border border-black/8 bg-background text-sm text-foreground dark:border-white/8">
+      <div className="max-w-full overflow-x-auto rounded-[inherit]">
+        <table className="min-w-max border-separate border-spacing-0">
+          <thead>
+            <tr>
+              {headers.map((header, index) => (
+                <th
+                  className={cn(
+                    "h-9 whitespace-nowrap border-b border-r border-border/55 bg-muted/25 px-3 text-left align-middle text-xs font-medium text-muted-foreground last:border-r-0",
+                    variant === "comparison" && index > 0 && "text-center",
+                  )}
+                  key={`${header}-${index}`}
+                >
+                  {renderInlineMarkdown(header)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {headers.map((_, cellIndex) => (
+                  <td
+                    className={cn(
+                      "h-10 min-w-28 border-b border-r border-border/45 px-3 align-middle last:border-r-0",
+                      rowIndex === rows.length - 1 && "border-b-0",
+                      variant === "comparison" &&
+                        cellIndex > 0 &&
+                        "text-center",
+                      cellIndex === 0 && "max-w-60 font-medium",
+                    )}
+                    key={`${rowIndex}-${cellIndex}`}
+                  >
+                    {renderAiTableValue(
+                      row[cellIndex] ?? "",
+                      variant === "comparison" && cellIndex > 0,
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function renderAiTableValue(value: string, symbolic = false) {
+  const normalizedValue = value.trim();
+  const positive = /^(check|checked|yes|true|done|included|✓|✅)$/i.test(
+    normalizedValue,
+  );
+  const negative = /^(-|—|no|false|none|n\/a|x|✕|❌)$/i.test(normalizedValue);
+
+  if (symbolic && positive) {
+    return (
+      <span className="inline-flex size-5 items-center justify-center rounded-full bg-success/10 text-success">
+        <Icon className="size-3.5" icon={CheckIcon} />
+      </span>
+    );
+  }
+
+  if (symbolic && negative) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+
+  return renderInlineMarkdown(value);
+}
+
+function AiStreamingText({
+  text = "Generating your release notes for v2.4 - summarizing the 28 merged pull requests",
+}: {
+  text?: string;
+} = {}) {
   return (
     <div className="max-w-prose text-sm leading-6 text-foreground">
-      Generating your release notes for v2.4 - summarizing the 28 merged pull
-      requests
+      {text}
       <span className="ml-0.5 inline-block h-4 w-1 translate-y-0.5 animate-caret-blink bg-foreground" />
     </div>
   );
@@ -3401,13 +5635,23 @@ function AiInlineCitations() {
   );
 }
 
-function AiCodeBlock() {
+function AiCodeBlock({
+  code,
+  filename = "utils.ts",
+}: {
+  code?: string;
+  filename?: string;
+} = {}) {
+  const fallbackCode =
+    "export const sum = (a: number, b: number) =>\n  a + b;\n\nexport const clamp = (n: number, min: number, max: number) =>\n  Math.min(Math.max(n, min), max);";
+  const lines = (code?.trimEnd() || fallbackCode).split("\n");
+
   return (
-    <div className="w-fit overflow-hidden rounded-lg border border-black/8 bg-background text-sm dark:border-white/8">
+    <div className="w-full max-w-full overflow-hidden rounded-xl border border-black/8 bg-background text-sm dark:border-white/8">
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <div className="flex items-center gap-2 font-mono text-xs">
           <Icon className="size-3.5 text-muted-foreground" icon={File01Icon} />
-          utils.ts
+          {filename}
         </div>
         <button
           className="text-xs text-muted-foreground hover:text-foreground"
@@ -3416,15 +5660,58 @@ function AiCodeBlock() {
           Copy
         </button>
       </div>
-      <pre className="p-3 text-xs leading-5 text-foreground">
+      <pre className="max-w-full overflow-x-auto p-3 text-xs leading-5 text-foreground">
         <code>
-          <span className="text-muted-foreground">1 </span>export const sum = (a: number, b: number) =&gt;{"\n"}
-          <span className="text-muted-foreground">2 </span>  a + b;{"\n"}
-          <span className="text-muted-foreground">3 </span>{"\n"}
-          <span className="text-muted-foreground">4 </span>export const clamp = (n: number, min: number, max: number) =&gt;{"\n"}
-          <span className="text-muted-foreground">5 </span>  Math.min(Math.max(n, min), max);
+          {lines.map((line, index) => (
+            <span className="block" key={`${index}-${line}`}>
+              <span className="mr-3 select-none text-muted-foreground">
+                {index + 1}
+              </span>
+              {line}
+            </span>
+          ))}
         </code>
       </pre>
+    </div>
+  );
+}
+
+function AiTaskList({ items }: { items: AiTaskListItem[] }) {
+  const completedCount = items.filter((item) => item.checked).length;
+  return (
+    <div className="w-fit min-w-72 max-w-full rounded-xl bg-background p-3 text-sm shadow-[0_0_0_1px_rgba(0,0,0,0.08)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2 font-medium">
+          <Icon className="size-3.5 text-success" icon={CheckIcon} />
+          To-dos
+        </div>
+        <span className="tabular-nums text-muted-foreground">
+          {completedCount}/{items.length}
+        </span>
+      </div>
+      <div className="grid gap-1.5">
+        {items.map((item, index) => (
+          <div
+            className={cn(
+              "flex items-center gap-2",
+              item.checked ? "text-muted-foreground" : "text-foreground",
+            )}
+            key={`${item.text}-${index}`}
+          >
+            <span
+              className={cn(
+                "grid size-3.5 place-items-center rounded-full shadow-[0_0_0_1px_rgba(0,0,0,0.18)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.18)]",
+                item.checked && "bg-success text-success-foreground shadow-none",
+              )}
+            >
+              {item.checked && <Icon className="size-2.5" icon={CheckIcon} />}
+            </span>
+            <span className={cn(item.checked && "line-through")}>
+              {renderInlineMarkdown(item.text)}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -3439,23 +5726,12 @@ function AiTodoList() {
   ];
 
   return (
-    <div className="w-80 rounded-lg border border-black/8 bg-background p-3 text-sm dark:border-white/8">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-2 font-medium">
-          <Icon className="size-3.5 text-success" icon={CheckIcon} />
-          To-dos
-        </div>
-        <span className="text-muted-foreground">5/5</span>
-      </div>
-      <div className="grid gap-1.5">
-        {todos.map((todo) => (
-          <div className="flex items-center gap-2 text-muted-foreground" key={todo}>
-            <Icon className="size-3.5" icon={CheckIcon} />
-            <span className="line-through">{todo}</span>
-          </div>
-        ))}
-      </div>
-    </div>
+    <AiTaskList
+      items={todos.map((todo) => ({
+        checked: true,
+        text: todo,
+      }))}
+    />
   );
 }
 
@@ -3466,40 +5742,7 @@ function AiDataTable() {
     ["llama-3.1", "128k", "$0.90"],
   ];
 
-  return (
-    <div className="w-fit overflow-hidden rounded-lg border border-black/8 bg-background text-sm dark:border-white/8">
-      <table>
-        <thead>
-          <tr className="border-b border-border">
-            <th className="px-3 py-2 text-left font-medium">Model</th>
-            <th className="border-l border-border px-3 py-2 text-left font-medium">
-              Context
-            </th>
-            <th className="border-l border-border px-3 py-2 text-left font-medium">
-              $/1M in
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr className="border-b border-border last:border-b-0" key={row[0]}>
-              {row.map((cell, index) => (
-                <td
-                  className={cn(
-                    "px-3 py-2",
-                    index > 0 && "border-l border-border",
-                  )}
-                  key={cell}
-                >
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+  return <AiGeneratedTable headers={["Model", "Context", "$/1M in"]} rows={rows} />;
 }
 
 function AiComparisonTable() {
@@ -3511,40 +5754,11 @@ function AiComparisonTable() {
   ];
 
   return (
-    <div className="w-fit overflow-hidden rounded-lg border border-black/8 bg-background text-sm dark:border-white/8">
-      <table>
-        <thead>
-          <tr className="border-b border-border">
-            <th className="px-3 py-2 text-left font-medium">Feature</th>
-            <th className="border-l border-border px-3 py-2 text-left font-medium">
-              Personal
-            </th>
-            <th className="border-l border-border px-3 py-2 text-left font-medium">
-              Enterprise
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr className="border-b border-border last:border-b-0" key={row[0]}>
-              <td className="max-w-36 truncate px-3 py-2">{row[0]}</td>
-              {row.slice(1).map((cell, index) => (
-                <td
-                  className="border-l border-border px-3 py-2 text-success"
-                  key={`${row[0]}-${index}`}
-                >
-                  {cell === "check" ? (
-                    <Icon className="size-3.5" icon={CheckIcon} />
-                  ) : (
-                    <span className="text-muted-foreground">-</span>
-                  )}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <AiGeneratedTable
+      headers={["Feature", "Personal", "Enterprise"]}
+      rows={rows}
+      variant="comparison"
+    />
   );
 }
 
@@ -3718,17 +5932,28 @@ type AgentFilter = "active" | "all" | "beta" | "draft" | "paused" | "running";
 
 function AgentsPage({
   agents,
+  onAgentRuntimeChange,
   onCreateAgent,
+  onCreateWorkflowChatNode,
+  onDeleteWorkflowChatNode,
   onPlaygroundChange,
   onSelectAgentName,
   selectedAgentName,
+  workspaceId,
   workflowChatNodesByAgent,
 }: {
   agents: Agent[];
+  onAgentRuntimeChange: (agentName: string, runtime: "paused" | "running") => void;
   onCreateAgent: (name: string) => void;
+  onCreateWorkflowChatNode: (
+    agentName: string,
+    title: string,
+  ) => Promise<WorkflowChatNode | null>;
+  onDeleteWorkflowChatNode: (agentName: string, chatId: string) => void;
   onPlaygroundChange: (open: boolean) => void;
   onSelectAgentName: (name: string | null) => void;
   selectedAgentName: string | null;
+  workspaceId: string | null;
   workflowChatNodesByAgent: Record<string, WorkflowChatNode[]>;
 }) {
   const [agentFilter, setAgentFilter] = useState<AgentFilter>("all");
@@ -3759,10 +5984,14 @@ function AgentsPage({
         key={`${selectedAgent.name}-${
           workflowChatNodesByAgent[selectedAgent.name]?.length ?? 0
         }`}
+        onAgentRuntimeChange={onAgentRuntimeChange}
+        onCreateWorkflowChatNode={onCreateWorkflowChatNode}
+        onDeleteWorkflowChatNode={onDeleteWorkflowChatNode}
         onBack={() => {
           onSelectAgentName(null);
           onPlaygroundChange(false);
         }}
+        workspaceId={workspaceId}
         workflowChatNodes={workflowChatNodesByAgent[selectedAgent.name] ?? []}
       />
     );
@@ -3959,11 +6188,17 @@ function AgentAppLogo({
   return (
     <div
       className={cn(
-        "grid place-items-center rounded-xl border border-black/8 bg-white text-xs font-semibold text-stone-900 dark:border-white/10",
+        "relative grid place-items-center overflow-hidden rounded-xl text-xs font-semibold text-stone-900 ring-1 ring-black/8 dark:ring-white/10",
         className,
       )}
     >
-      {logo}
+      <OreoFlareAvatar
+        className="absolute inset-0 size-full"
+        seed={`agent-app-${logo}`}
+      />
+      <span className="relative z-10 grid min-h-5 min-w-5 place-items-center rounded-md bg-white/72 px-1 text-stone-900 shadow-xs/5 backdrop-blur-[1px] dark:bg-stone-950/62 dark:text-stone-100">
+        {logo}
+      </span>
     </div>
   );
 }
@@ -4072,11 +6307,22 @@ function getWorkflowRunOrder(
 
 function AgentPlayground({
   agent,
+  onAgentRuntimeChange,
   onBack,
+  onCreateWorkflowChatNode,
+  onDeleteWorkflowChatNode,
+  workspaceId,
   workflowChatNodes,
 }: {
   agent: Agent;
+  onAgentRuntimeChange: (agentName: string, runtime: "paused" | "running") => void;
   onBack: () => void;
+  onCreateWorkflowChatNode: (
+    agentName: string,
+    title: string,
+  ) => Promise<WorkflowChatNode | null>;
+  onDeleteWorkflowChatNode: (agentName: string, chatId: string) => void;
+  workspaceId: string | null;
   workflowChatNodes: WorkflowChatNode[];
 }) {
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -4086,6 +6332,7 @@ function AgentPlayground({
     ...(agent.workflowCards ?? []).map((card) => ({ ...card, apps: [...card.apps] })),
     ...workflowChatNodes.map((node, index) => ({
       apps: ["AT"],
+      chatId: node.chatId,
       id: getWorkflowChatCardId(node.chatId),
       runtime: "paused" as const,
       title: node.title,
@@ -4099,6 +6346,7 @@ function AgentPlayground({
   const [drag, setDrag] = useState<PlaygroundDrag>(null);
   const [nodeDrag, setNodeDrag] = useState<NodeDrag>(null);
   const [contextMenu, setContextMenu] = useState<PlaygroundContextMenu>(null);
+  const [deleteNodeId, setDeleteNodeId] = useState<string | null>(null);
   const [completedRunCardIds, setCompletedRunCardIds] = useState<string[]>([]);
   const [highlightedCardIds, setHighlightedCardIds] = useState<string[]>(() =>
     workflowChatNodes.map((node) => getWorkflowChatCardId(node.chatId)),
@@ -4106,6 +6354,7 @@ function AgentPlayground({
   const [openNodeChatId, setOpenNodeChatId] = useState<string | null>(null);
   const [runningCardId, setRunningCardId] = useState<string | null>(null);
   const openNodeChat = cards.find((card) => card.id === openNodeChatId);
+  const nodeToDelete = cards.find((card) => card.id === deleteNodeId) ?? null;
 
   useEffect(() => {
     return () => {
@@ -4295,21 +6544,55 @@ function AgentPlayground({
     setContextMenu({ targetId, ...getContextMenuPoint(event) });
   }
 
-  function createEmptyNode() {
+  async function createEmptyNode() {
     const point = contextMenu ?? { x: 160, y: 120 };
-    const id = `node-${Date.now()}`;
+    const title = "Empty chat";
+    const workflowNode = await onCreateWorkflowChatNode(agent.name, title);
+    const id = workflowNode
+      ? getWorkflowChatCardId(workflowNode.chatId)
+      : `node-${Date.now()}`;
+    const position = clampCardPosition(point.x - 120, point.y - 64);
 
     setCards((current) => [
       ...current,
       {
         apps: [],
+        chatId: workflowNode?.chatId,
         id,
         runtime: "paused",
-        title: "Empty chat",
-        ...clampCardPosition(point.x - 120, point.y - 64),
+        title: workflowNode?.title ?? title,
+        ...position,
       },
     ]);
     setOpenNodeChatId(id);
+    setContextMenu(null);
+
+    if (agent.id && workflowNode) {
+      void fetch(`/api/agents/${agent.id}/nodes`, {
+        body: JSON.stringify({
+          sourceChatId: workflowNode.chatId,
+          title: workflowNode.title,
+          x: position.x,
+          y: position.y,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }).catch(() => undefined);
+    }
+  }
+
+  function setAgentRunningState(running: boolean) {
+    const runtime = running ? "running" : "paused";
+    setAgentRunning(running);
+    onAgentRuntimeChange(agent.name, runtime);
+  }
+
+  function requestDeleteNode(cardId: string | null) {
+    if (!cardId) {
+      return;
+    }
+
+    setDeleteNodeId(cardId);
     setContextMenu(null);
   }
 
@@ -4318,6 +6601,7 @@ function AgentPlayground({
       return;
     }
 
+    const card = cards.find((item) => item.id === cardId);
     setCards((current) => current.filter((card) => card.id !== cardId));
     setConnections((current) =>
       current.filter(
@@ -4327,6 +6611,19 @@ function AgentPlayground({
     if (openNodeChatId === cardId) {
       setOpenNodeChatId(null);
     }
+    if (card?.chatId) {
+      onDeleteWorkflowChatNode(agent.name, card.chatId);
+    }
+    if (agent.id) {
+      const params = new URLSearchParams({ id: cardId });
+      if (card?.chatId) {
+        params.set("sourceChatId", card.chatId);
+      }
+      void fetch(`/api/agents/${agent.id}/nodes?${params.toString()}`, {
+        method: "DELETE",
+      }).catch(() => undefined);
+    }
+    setDeleteNodeId(null);
     setContextMenu(null);
   }
 
@@ -4350,7 +6647,7 @@ function AgentPlayground({
     }
 
     clearRunTimeouts(runTimeoutsRef);
-    setAgentRunning(true);
+    setAgentRunningState(true);
     setCompletedRunCardIds([]);
 
     orderedCardIds.forEach((cardId, index) => {
@@ -4380,7 +6677,7 @@ function AgentPlayground({
 
   function pauseAgentWorkflow() {
     clearRunTimeouts(runTimeoutsRef);
-    setAgentRunning(false);
+    setAgentRunningState(false);
     setRunningCardId(null);
     setCompletedRunCardIds([]);
   }
@@ -4424,7 +6721,7 @@ function AgentPlayground({
           <AgentSettingsSheet
             agent={agent}
             agentRunning={agentRunning}
-            onAgentRunningChange={setAgentRunning}
+            onAgentRunningChange={setAgentRunningState}
           />
         </div>
       </div>
@@ -4473,7 +6770,7 @@ function AgentPlayground({
             <AgentPlaygroundContextMenu
               menu={contextMenu}
               onCreateNode={createEmptyNode}
-              onDeleteNode={() => deleteNode(contextMenu.targetId)}
+              onDeleteNode={() => requestDeleteNode(contextMenu.targetId)}
               onRunNode={() => runNode(contextMenu.targetId)}
               onUpdateNode={() => openNodeChatSheet(contextMenu.targetId)}
             />
@@ -4488,7 +6785,40 @@ function AgentPlayground({
           }
         }}
         open={Boolean(openNodeChat)}
+        workspaceId={workspaceId}
       />
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteNodeId(null);
+          }
+        }}
+        open={Boolean(nodeToDelete)}
+      >
+        <DialogPopup className="max-w-md rounded-xl">
+          <DialogHeader>
+            <DialogTitle>Delete node</DialogTitle>
+            <DialogDescription>
+              Delete &quot;{nodeToDelete?.title ?? "this node"}&quot; from this
+              agent workflow. The linked chat will also be removed from the
+              sidebar.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button
+              className="text-red-600 hover:text-red-600 dark:text-red-500"
+              onClick={() => deleteNode(nodeToDelete?.id ?? null)}
+              type="button"
+              variant="ghost"
+            >
+              Delete node
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
     </div>
   );
 }
@@ -4508,6 +6838,32 @@ function AgentPlaygroundWires({
 
   return (
     <svg className="pointer-events-none absolute inset-0 z-10 size-full">
+      <defs>
+        <marker
+          id="workflow-wire-arrow"
+          markerHeight="8"
+          markerUnits="strokeWidth"
+          markerWidth="8"
+          orient="auto"
+          refX="7"
+          refY="4"
+          viewBox="0 0 8 8"
+        >
+          <path className="fill-border" d="M 0 0 L 8 4 L 0 8 z" />
+        </marker>
+        <marker
+          id="workflow-wire-arrow-active"
+          markerHeight="8"
+          markerUnits="strokeWidth"
+          markerWidth="8"
+          orient="auto"
+          refX="7"
+          refY="4"
+          viewBox="0 0 8 8"
+        >
+          <path className="fill-foreground/45" d="M 0 0 L 8 4 L 0 8 z" />
+        </marker>
+      </defs>
       {connections.map((connection) => {
         const from = cards.find((card) => card.id === connection.from);
         const to = cards.find((card) => card.id === connection.to);
@@ -4524,6 +6880,7 @@ function AgentPlaygroundWires({
             d={getWirePath(start.x, start.y, end.x, end.y)}
             fill="none"
             key={`${connection.from}-${connection.to}`}
+            markerEnd="url(#workflow-wire-arrow)"
             strokeWidth="2"
           />
         );
@@ -4533,6 +6890,7 @@ function AgentPlaygroundWires({
           className="stroke-foreground/45"
           d={getWirePath(activeCard.x + 240, activeCard.y + 64, drag.x, drag.y)}
           fill="none"
+          markerEnd="url(#workflow-wire-arrow-active)"
           strokeDasharray="6 6"
           strokeWidth="2"
         />
@@ -4606,16 +6964,23 @@ function AgentNodeChatSheet({
   card,
   onOpenChange,
   open,
+  workspaceId,
 }: {
   card?: PlaygroundCard;
   onOpenChange: (open: boolean) => void;
   open: boolean;
+  workspaceId: string | null;
 }) {
   return (
     <Sheet onOpenChange={onOpenChange} open={open}>
       <SheetPopup className="sm:max-w-2xl" side="right" variant="inset">
         <div className="flex min-h-0 flex-1 flex-col p-4 pt-12">
-          <ChatExperience compact key={card?.id ?? "node-chat"} />
+          <ChatExperience
+            activeChatId={card?.chatId ?? null}
+            compact
+            key={card?.chatId ?? card?.id ?? "node-chat"}
+            workspaceId={workspaceId}
+          />
         </div>
       </SheetPopup>
     </Sheet>
@@ -4950,6 +7315,30 @@ function getRandomSkillVisual() {
   };
 }
 
+function SkillIconTile({
+  className,
+  icon,
+  seed,
+}: {
+  className?: string;
+  icon: IconSvgElement;
+  seed: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-lg ring-1 ring-black/5 dark:ring-white/8",
+        className,
+      )}
+    >
+      <OreoFlareAvatar className="absolute inset-0 size-full" seed={seed} />
+      <span className="relative z-10 grid size-7 place-items-center rounded-md bg-white/72 text-stone-800 shadow-xs/5 backdrop-blur-[1px] dark:bg-stone-950/62 dark:text-stone-100">
+        <Icon className="size-4" icon={icon} />
+      </span>
+    </div>
+  );
+}
+
 type SkillFilter = "all" | "custom" | "default";
 
 function SkillsPage({
@@ -5138,36 +7527,26 @@ function SkillsPage({
         {visibleSkills.map((skill) => (
           <Card className="overflow-hidden bg-background dark:bg-background" key={skill.id}>
             <CardPanel className="flex items-center gap-3 p-2.5">
-              <button
-                className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1.5 text-left outline-none transition-[background-color] hover:bg-muted/55 focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => setSelectedSkillId(skill.id)}
-                type="button"
-              >
-                <div
-                  className={cn(
-                    "grid size-9 shrink-0 place-items-center rounded-lg bg-linear-to-br text-foreground ring-1 ring-black/5 dark:ring-white/8",
-                    skill.gradient,
-                  )}
-                >
-                  <span className="grid size-7 place-items-center rounded-md bg-white/80 text-stone-800 shadow-xs/5 dark:bg-stone-950/70 dark:text-stone-100">
-                    <Icon className="size-4" icon={skill.icon} />
-                  </span>
-                </div>
+              <div className="flex min-w-0 flex-1 items-center gap-3 p-1.5">
+                <SkillIconTile
+                  icon={skill.icon}
+                  seed={`skill-${skill.id}-${skill.name}`}
+                />
                 <div className="min-w-0">
-                  <h2 className="truncate text-sm font-semibold">
-                    {skill.name}
+                  <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+                    <span className="truncate">{skill.name}</span>
+                    <Badge
+                      className="shrink-0"
+                      variant={skill.source === "default" ? "outline" : "info"}
+                    >
+                      {skill.source === "default" ? "Default" : "Created"}
+                    </Badge>
                   </h2>
                   <p className="mt-0.5 truncate text-xs text-muted-foreground">
                     {skill.description}
                   </p>
                 </div>
-                <Badge
-                  className="ml-auto hidden sm:inline-flex"
-                  variant={skill.source === "default" ? "outline" : "info"}
-                >
-                  {skill.source === "default" ? "Default" : "Created"}
-                </Badge>
-              </button>
+              </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 <Button
                   onClick={() => setSelectedSkillId(skill.id)}
@@ -5546,16 +7925,11 @@ function SkillMarkdownEditor({
             Back
           </Button>
           <div className="mt-2 flex items-start gap-3">
-            <div
-              className={cn(
-                "grid size-10 shrink-0 place-items-center rounded-xl bg-linear-to-br text-foreground ring-1 ring-black/5 dark:ring-white/8",
-                skill.gradient,
-              )}
-            >
-              <span className="grid size-8 place-items-center rounded-lg bg-white/80 text-stone-800 shadow-xs/5 dark:bg-stone-950/70 dark:text-stone-100">
-                <Icon className="size-4" icon={skill.icon} />
-              </span>
-            </div>
+            <SkillIconTile
+              className="size-10 rounded-xl [&>span]:size-8"
+              icon={skill.icon}
+              seed={`skill-${skill.id}-${skill.name}`}
+            />
             <div className="grid min-w-0 max-w-xl flex-1 gap-2">
               {previewing || readOnly ? (
                 <div className="min-w-0 py-0.5">
@@ -5822,7 +8196,7 @@ function MarkdownBlock({ block }: { block: MarkdownBlock }) {
         )}
       >
         {block.items.map((item, index) => (
-          <li key={`${item}-${index}`}>{renderInlineMarkdown(item)}</li>
+          <li key={`${item}-${index}`}>{renderSkillInlineMarkdown(item)}</li>
         ))}
       </ListTag>
     );
@@ -5837,29 +8211,29 @@ function MarkdownBlock({ block }: { block: MarkdownBlock }) {
   }
 
   if (block.type === "h1") {
-    return <h1 className="text-xl font-semibold">{renderInlineMarkdown(block.text)}</h1>;
+    return <h1 className="text-xl font-semibold">{renderSkillInlineMarkdown(block.text)}</h1>;
   }
 
   if (block.type === "h2") {
-    return <h2 className="text-base font-semibold">{renderInlineMarkdown(block.text)}</h2>;
+    return <h2 className="text-base font-semibold">{renderSkillInlineMarkdown(block.text)}</h2>;
   }
 
   if (block.type === "h3") {
-    return <h3 className="text-sm font-semibold">{renderInlineMarkdown(block.text)}</h3>;
+    return <h3 className="text-sm font-semibold">{renderSkillInlineMarkdown(block.text)}</h3>;
   }
 
   if (block.type === "blockquote") {
     return (
       <blockquote className="border-l-2 border-border pl-3 text-muted-foreground">
-        {renderInlineMarkdown(block.text)}
+        {renderSkillInlineMarkdown(block.text)}
       </blockquote>
     );
   }
 
-  return <p className="text-foreground">{renderInlineMarkdown(block.text)}</p>;
+  return <p className="text-foreground">{renderSkillInlineMarkdown(block.text)}</p>;
 }
 
-function renderInlineMarkdown(text: string) {
+function renderSkillInlineMarkdown(text: string) {
   return text
     .split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g)
     .filter(Boolean)
@@ -6555,8 +8929,8 @@ function ConnectorsPage({
           return (
             <Card className="min-h-56 bg-background dark:bg-background" key={connector.name}>
               <CardHeader className="flex-1 p-4">
-                <div className="flex size-11 items-center justify-center rounded-xl border border-black/8 bg-white text-sm font-semibold text-stone-900 shadow-xs/5 dark:border-white/10">
-                  {connector.logo}
+                <div className="flex size-11 items-center justify-center rounded-xl border border-black/8 bg-white p-2 text-sm font-semibold text-stone-900 shadow-xs/5 dark:border-white/10">
+                  <ConnectorLogo connector={connector} />
                 </div>
                 <CardTitle>{connector.name}</CardTitle>
                 <CardDescription className="line-clamp-3">
@@ -6567,7 +8941,8 @@ function ConnectorsPage({
                 <Button
                   className="w-full active:scale-[0.96]"
                   onClick={() => setSelectedConnectorName(connector.name)}
-                  variant={connected ? "secondary" : "outline"}
+                  size="sm"
+                  variant={connected ? "secondary" : "default"}
                 >
                   <Icon icon={PlugIcon} />
                   {connected ? "Manage" : "Connect"}
@@ -6653,8 +9028,8 @@ function ConnectorProfilePage({
         >
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div className="flex min-w-0 items-center gap-4">
-              <div className="grid size-20 shrink-0 place-items-center rounded-2xl bg-white text-xl font-semibold text-stone-900 shadow-xs/5 ring-1 ring-black/10 dark:ring-white/10">
-                {connector.logo}
+              <div className="grid size-20 shrink-0 place-items-center rounded-2xl bg-white p-4 text-xl font-semibold text-stone-900 shadow-xs/5 ring-1 ring-black/10 dark:ring-white/10">
+                <ConnectorLogo connector={connector} />
               </div>
               <div className="min-w-0">
                 <Badge variant={connected ? "success" : "outline"}>
@@ -6732,10 +9107,12 @@ const timezoneOptions = [
 function AvatarTile({
   className,
   initials,
+  seed,
   src,
 }: {
   className?: string;
   initials: string;
+  seed?: string;
   src?: string;
 }) {
   const [failed, setFailed] = useState(false);
@@ -6761,7 +9138,15 @@ function AvatarTile({
           unoptimized
         />
       ) : (
-        initials
+        <>
+          <OreoFlareAvatar
+            className="absolute inset-0 size-full"
+            seed={seed ?? initials}
+          />
+          <span className="relative z-10 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.45)]">
+            {initials}
+          </span>
+        </>
       )}
     </div>
   );
@@ -6978,6 +9363,7 @@ function SettingsProfileTab({
       setAvatarUrl(asString(nextProfile.avatar_url, avatarUrl));
       onProfileChange(nextProfile);
     } catch (error) {
+      void playAtmetSound("error");
       window.alert(error instanceof Error ? error.message : "Avatar upload failed");
     } finally {
       setUploadingAvatar(false);
@@ -7014,6 +9400,7 @@ function SettingsProfileTab({
       setSavedValues(values);
       setAvatarUrl(asString(nextProfile.avatar_url, avatarUrl));
     } catch (error) {
+      void playAtmetSound("error");
       window.alert(error instanceof Error ? error.message : "Could not save profile");
     } finally {
       setSavingProfile(false);
@@ -7322,6 +9709,7 @@ function SettingsWorkspaceTab({
         onWorkspaceChange(nextWorkspace);
       }
     } catch (error) {
+      void playAtmetSound("error");
       window.alert(error instanceof Error ? error.message : "Avatar upload failed");
     } finally {
       setUploadingAvatar(false);
@@ -7367,6 +9755,7 @@ function SettingsWorkspaceTab({
         setAvatarUrl(nextWorkspace.avatarUrl ?? avatarUrl);
       }
     } catch (error) {
+      void playAtmetSound("error");
       window.alert(error instanceof Error ? error.message : "Could not save workspace");
     } finally {
       setSavingWorkspace(false);
@@ -7760,6 +10149,13 @@ function SettingsGeneralTab({
   );
   const [savingSettings, setSavingSettings] = useState(false);
 
+  useEffect(() => {
+    const nextSoundEnabled = asBoolean(workspaceSettings?.sound_enabled, true);
+    setSoundEnabled(nextSoundEnabled);
+    void setAtmetSoundEnabled(nextSoundEnabled);
+    setTimezone(asString(workspaceSettings?.default_timezone, "Asia/Amman"));
+  }, [workspaceSettings]);
+
   async function saveGeneralSetting(patch: DatabaseRecord) {
     if (!workspaceId) {
       return;
@@ -7781,6 +10177,7 @@ function SettingsGeneralTab({
       const payload = asRecord(await response.json());
       onWorkspaceSettingsChange(asRecord(payload.settings));
     } catch (error) {
+      void playAtmetSound("error");
       window.alert(error instanceof Error ? error.message : "Could not save settings");
     } finally {
       setSavingSettings(false);
@@ -7789,6 +10186,7 @@ function SettingsGeneralTab({
 
   function updateSoundEnabled(checked: boolean) {
     setSoundEnabled(checked);
+    void setAtmetSoundEnabled(checked);
     void saveGeneralSetting({ sound_enabled: checked });
   }
 
@@ -7800,6 +10198,7 @@ function SettingsGeneralTab({
   return (
     <SettingsTabGrid>
       <SettingsThemeSelector />
+      <SettingsModelAccess />
       <SettingsSection
         description="Manage startup, sound, timezone, and formatting."
         icon={Settings01Icon}
@@ -7844,6 +10243,315 @@ function SettingsGeneralTab({
         </SettingsRow>
       </SettingsSection>
     </SettingsTabGrid>
+  );
+}
+
+type UserModelProviderKey = "custom" | "local";
+
+type UserModelConnectionForm = {
+  apiKey: string;
+  baseUrl: string;
+  displayName: string;
+  hasApiKey: boolean;
+  modelId: string;
+};
+
+function getDefaultUserModelConnectionForm(
+  providerKey: UserModelProviderKey,
+): UserModelConnectionForm {
+  if (providerKey === "local") {
+    return {
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1",
+      displayName: "Local model",
+      hasApiKey: false,
+      modelId: "llama3.1",
+    };
+  }
+
+  return {
+    apiKey: "",
+    baseUrl: "https://api.openai.com/v1",
+    displayName: "Custom API",
+    hasApiKey: false,
+    modelId: "gpt-5-mini",
+  };
+}
+
+function SettingsModelAccess() {
+  const [forms, setForms] = useState<Record<UserModelProviderKey, UserModelConnectionForm>>({
+    custom: getDefaultUserModelConnectionForm("custom"),
+    local: getDefaultUserModelConnectionForm("local"),
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<UserModelProviderKey | null>(null);
+  const [saved, setSaved] = useState<UserModelProviderKey | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    if (errorMessage) {
+      void playAtmetSound("error");
+    }
+  }, [errorMessage]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadConnections() {
+      try {
+        const response = await fetch("/api/user-model-connections", {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = asRecord(await response.json().catch(() => ({})));
+        const connections = asRecordArray(payload.connections);
+        if (!alive) {
+          return;
+        }
+
+        setForms((current) => {
+          const next = { ...current };
+
+          for (const connection of connections) {
+            const providerKey = asString(connection.providerKey) as UserModelProviderKey;
+            if (providerKey !== "custom" && providerKey !== "local") {
+              continue;
+            }
+
+            next[providerKey] = {
+              ...next[providerKey],
+              apiKey: "",
+              baseUrl: asString(connection.baseUrl, next[providerKey].baseUrl),
+              displayName: asString(
+                connection.displayName,
+                next[providerKey].displayName,
+              ),
+              hasApiKey: asBoolean(connection.hasApiKey),
+              modelId: asString(connection.modelId, next[providerKey].modelId),
+            };
+          }
+
+          return next;
+        });
+      } finally {
+        if (alive) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadConnections();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function updateForm(
+    providerKey: UserModelProviderKey,
+    key: keyof UserModelConnectionForm,
+    value: string,
+  ) {
+    setSaved(null);
+    setErrorMessage("");
+    setForms((current) => ({
+      ...current,
+      [providerKey]: {
+        ...current[providerKey],
+        [key]: value,
+      },
+    }));
+  }
+
+  async function saveConnection(providerKey: UserModelProviderKey) {
+    const form = forms[providerKey];
+    setSaving(providerKey);
+    setSaved(null);
+    setErrorMessage("");
+
+    try {
+      const response = await fetch("/api/user-model-connections", {
+        body: JSON.stringify({
+          apiKey: form.apiKey,
+          baseUrl: form.baseUrl,
+          displayName: form.displayName,
+          modelId: form.modelId,
+          providerKey,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = asRecord(await response.json().catch(() => ({})));
+      if (!response.ok) {
+        throw new Error(asString(payload.error, "Could not save model"));
+      }
+
+      const connection = asRecord(payload.connection);
+      setForms((current) => ({
+        ...current,
+        [providerKey]: {
+          ...current[providerKey],
+          apiKey: "",
+          baseUrl: asString(connection.baseUrl, current[providerKey].baseUrl),
+          displayName: asString(
+            connection.displayName,
+            current[providerKey].displayName,
+          ),
+          hasApiKey: asBoolean(connection.hasApiKey),
+          modelId: asString(connection.modelId, current[providerKey].modelId),
+        },
+      }));
+      setSaved(providerKey);
+      window.setTimeout(() => {
+        setSaved((current) => (current === providerKey ? null : current));
+      }, 1800);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not save model");
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  return (
+    <SettingsSection
+      action={loading ? <Spinner className="size-4 text-muted-foreground" /> : null}
+      description="Add your own cloud API model or local model endpoint."
+      icon={AiBrainIcon}
+      title="Model access"
+    >
+      <div className="grid gap-3 p-4 lg:grid-cols-2">
+        <ModelConnectionCard
+          description="Connect an OpenAI-compatible endpoint with your own API key."
+          form={forms.custom}
+          onChange={(key, value) => updateForm("custom", key, value)}
+          onSave={() => saveConnection("custom")}
+          saved={saved === "custom"}
+          saving={saving === "custom"}
+          title="Custom API model"
+        />
+        <ModelConnectionCard
+          description="Use a local OpenAI-compatible server, such as Ollama or LM Studio."
+          form={forms.local}
+          onChange={(key, value) => updateForm("local", key, value)}
+          onSave={() => saveConnection("local")}
+          saved={saved === "local"}
+          saving={saving === "local"}
+          title="Local model"
+        />
+      </div>
+      {errorMessage ? (
+        <div className="px-4 py-3 text-xs font-medium text-red-600 dark:text-red-500">
+          {errorMessage}
+        </div>
+      ) : null}
+    </SettingsSection>
+  );
+}
+
+function ModelConnectionCard({
+  description,
+  form,
+  onChange,
+  onSave,
+  saved,
+  saving,
+  title,
+}: {
+  description: string;
+  form: UserModelConnectionForm;
+  onChange: (key: keyof UserModelConnectionForm, value: string) => void;
+  onSave: () => void;
+  saved: boolean;
+  saving: boolean;
+  title: string;
+}) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-background/70 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
+        </div>
+        {form.hasApiKey ? <Badge variant="success">Saved key</Badge> : null}
+      </div>
+      <div className="mt-3 grid gap-2">
+        <ModelConnectionField
+          label="Display name"
+          onChange={(value) => onChange("displayName", value)}
+          placeholder="My model"
+          value={form.displayName}
+        />
+        <ModelConnectionField
+          label="Model ID"
+          onChange={(value) => onChange("modelId", value)}
+          placeholder="gpt-5-mini"
+          value={form.modelId}
+        />
+        <ModelConnectionField
+          label="Base URL"
+          onChange={(value) => onChange("baseUrl", value)}
+          placeholder="https://api.openai.com/v1"
+          value={form.baseUrl}
+        />
+        <ModelConnectionField
+          label={form.hasApiKey ? "Replace API key" : "API key"}
+          onChange={(value) => onChange("apiKey", value)}
+          placeholder={form.hasApiKey ? "Leave empty to keep current key" : "sk-..."}
+          type="password"
+          value={form.apiKey}
+        />
+      </div>
+      <Button
+        className="mt-3 h-8"
+        disabled={saving}
+        onClick={onSave}
+        size="sm"
+        type="button"
+      >
+        {saving ? (
+          <Spinner className="size-3.5" />
+        ) : (
+          <Icon className="size-3.5" icon={saved ? CheckIcon : SaveIcon} />
+        )}
+        {saved ? "Saved" : "Save model"}
+      </Button>
+    </div>
+  );
+}
+
+function ModelConnectionField({
+  label,
+  onChange,
+  placeholder,
+  type = "text",
+  value,
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  type?: string;
+  value: string;
+}) {
+  const id = `model-${label.toLowerCase().replace(/\s+/g, "-")}`;
+
+  return (
+    <div className="grid gap-1">
+      <Label className="text-xs" htmlFor={id}>
+        {label}
+      </Label>
+      <Input
+        className="h-8 text-sm [&_[data-slot=input]]:h-8 [&_[data-slot=input]]:leading-8"
+        id={id}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        size="sm"
+        type={type}
+        value={value}
+      />
+    </div>
   );
 }
 
@@ -8430,12 +11138,10 @@ function SettingsStatGrid({ stats }: { stats: readonly [string, string][] }) {
 
 function AdminPage() {
   const [profileView, setProfileView] = useState<AdminProfileView | null>(
-    getInitialAdminProfileView,
+    null,
   );
   const [activeAdminTab, setActiveAdminTab] =
-    useState<AdminTabKey>(() =>
-      getInitialAdminProfileView() ? "workspaces" : getInitialAdminTab(),
-    );
+    useState<AdminTabKey>("overview");
   const [adminData, setAdminData] = useState<AdminData>(emptyAdminData);
   const [isAdminLoading, setIsAdminLoading] = useState(true);
 
@@ -8446,6 +11152,7 @@ function AdminPage() {
       setProfileView(nextProfileView);
     }
 
+    syncAdminRouteFromHistory();
     window.addEventListener("popstate", syncAdminRouteFromHistory);
 
     return () => {
@@ -9004,15 +11711,18 @@ function AdminInviteUserDialog({
 }: {
   workspaces: AdminWorkspaceRow[];
 }) {
-  const [email, setEmail] = useState("");
+  const [emailInput, setEmailInput] = useState("");
+  const [emails, setEmails] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [open, setOpen] = useState(false);
   const [role, setRole] = useState("member");
+  const [sentSuccessfully, setSentSuccessfully] = useState(false);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(
     workspaces[0]?.[7] ?? "",
   );
-  const trimmedEmail = email.trim();
+  const trimmedEmailInput = emailInput.trim();
+  const canSendInvite = emails.length > 0 || trimmedEmailInput.length > 0;
 
   useEffect(() => {
     if (!selectedWorkspaceId && workspaces[0]?.[7]) {
@@ -9020,42 +11730,99 @@ function AdminInviteUserDialog({
     }
   }, [selectedWorkspaceId, workspaces]);
 
+  useEffect(() => {
+    if (errorMessage) {
+      void playAtmetSound("error");
+    }
+  }, [errorMessage]);
+
+  function normalizeInviteEmail(value: string) {
+    return value.trim().replace(/[,\s;]+$/g, "").toLowerCase();
+  }
+
+  function addInviteEmail(value: string) {
+    const nextEmail = normalizeInviteEmail(value);
+
+    if (!nextEmail) {
+      return false;
+    }
+
+    if (!nextEmail.includes("@")) {
+      setErrorMessage("Enter a valid email address.");
+      return false;
+    }
+
+    setEmails((currentEmails) =>
+      currentEmails.includes(nextEmail)
+        ? currentEmails
+        : [...currentEmails, nextEmail],
+    );
+    setEmailInput("");
+    setErrorMessage("");
+    setSentSuccessfully(false);
+    return true;
+  }
+
+  function removeInviteEmail(emailToRemove: string) {
+    setEmails((currentEmails) =>
+      currentEmails.filter((currentEmail) => currentEmail !== emailToRemove),
+    );
+    setSentSuccessfully(false);
+  }
+
   function resetForm() {
-    setEmail("");
+    setEmailInput("");
+    setEmails([]);
     setErrorMessage("");
     setIsSending(false);
+    setSentSuccessfully(false);
     setRole("member");
     setSelectedWorkspaceId(workspaces[0]?.[7] ?? "");
   }
 
   async function submitInvite(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!trimmedEmail || !selectedWorkspaceId || isSending) {
+    if (!canSendInvite || !selectedWorkspaceId || isSending) {
+      return;
+    }
+
+    const pendingEmails = emails.length
+      ? emails
+      : [normalizeInviteEmail(emailInput)];
+
+    if (pendingEmails.some((pendingEmail) => !pendingEmail.includes("@"))) {
+      setErrorMessage("Enter a valid email address.");
       return;
     }
 
     setErrorMessage("");
     setIsSending(true);
+    setSentSuccessfully(false);
 
     try {
-      const response = await fetch(`/api/workspaces/${selectedWorkspaceId}/members`, {
-        body: JSON.stringify({ email: trimmedEmail, role }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      });
+      for (const inviteEmail of pendingEmails) {
+        const response = await fetch(`/api/workspaces/${selectedWorkspaceId}/members`, {
+          body: JSON.stringify({ email: inviteEmail, role }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
 
-      if (!response.ok) {
-        const payload = asRecord(await response.json().catch(() => ({})));
-        throw new Error(asString(payload.error, "Could not send invite"));
+        if (!response.ok) {
+          const payload = asRecord(await response.json().catch(() => ({})));
+          throw new Error(asString(payload.error, "Could not send invite"));
+        }
       }
 
-      setOpen(false);
-      resetForm();
-      window.alert(`Invite sent to ${trimmedEmail}`);
+      setEmailInput("");
+      setEmails([]);
+      setErrorMessage("");
+      setSentSuccessfully(true);
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Could not send invite",
       );
+      setSentSuccessfully(false);
+    } finally {
       setIsSending(false);
     }
   }
@@ -9085,15 +11852,70 @@ function AdminInviteUserDialog({
           <DialogPanel className="grid gap-3 p-4" scrollFade={false}>
             <div className="grid gap-1.5">
               <Label htmlFor="admin-invite-email">Email</Label>
-              <Input
-                autoFocus
-                disabled={isSending}
-                id="admin-invite-email"
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="user@company.com"
-                type="email"
-                value={email}
-              />
+              <div
+                className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-lg border border-input bg-background px-2 py-1 text-sm shadow-xs transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20"
+                onClick={(event) => {
+                  const input = event.currentTarget.querySelector("input");
+                  input?.focus();
+                }}
+              >
+                {emails.map((inviteEmail) => (
+                  <span
+                    className="inline-flex h-6 max-w-full items-center gap-1 rounded-md border border-border/70 bg-muted px-2 text-xs text-foreground"
+                    key={inviteEmail}
+                  >
+                    <span className="max-w-48 truncate">{inviteEmail}</span>
+                    <button
+                      aria-label={`Remove ${inviteEmail}`}
+                      className="-mr-1 grid size-4 place-items-center rounded text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                      disabled={isSending}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        removeInviteEmail(inviteEmail);
+                      }}
+                      type="button"
+                    >
+                      x
+                    </button>
+                  </span>
+                ))}
+                <input
+                  autoFocus
+                  className="h-7 min-w-36 flex-1 bg-transparent px-1 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isSending}
+                  id="admin-invite-email"
+                  onBlur={() => {
+                    if (trimmedEmailInput.includes("@")) {
+                      addInviteEmail(trimmedEmailInput);
+                    }
+                  }}
+                  onChange={(event) => {
+                    setEmailInput(event.target.value);
+                    setSentSuccessfully(false);
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      [" ", "Enter", ","].includes(event.key) &&
+                      trimmedEmailInput
+                    ) {
+                      event.preventDefault();
+                      addInviteEmail(trimmedEmailInput);
+                    }
+
+                    if (
+                      event.key === "Backspace" &&
+                      !emailInput &&
+                      emails.length > 0
+                    ) {
+                      event.preventDefault();
+                      removeInviteEmail(emails[emails.length - 1]);
+                    }
+                  }}
+                  placeholder={emails.length ? "Add another email" : "user@company.com"}
+                  type="text"
+                  value={emailInput}
+                />
+              </div>
             </div>
             <div className="grid gap-1.5">
               <Label>Workspace</Label>
@@ -9145,10 +11967,17 @@ function AdminInviteUserDialog({
             </DialogClose>
             <Button
               loading={isSending}
-              disabled={!trimmedEmail || !selectedWorkspaceId}
+              disabled={!canSendInvite || !selectedWorkspaceId}
               type="submit"
             >
-              Send invite
+              {sentSuccessfully ? (
+                <>
+                  <Icon className="size-3.5" icon={CheckIcon} />
+                  Sent successfully
+                </>
+              ) : (
+                "Send invite"
+              )}
             </Button>
           </DialogFooter>
         </form>
@@ -9215,7 +12044,7 @@ function AdminRequestsTab({ rows }: { rows: AdminRequestRow[] }) {
   return (
     <SettingsTabGrid>
       {error ? (
-        <div className="rounded-lg border border-red-500/20 bg-red-500/8 px-3 py-2 text-red-600 text-sm dark:text-red-300">
+        <div className="rounded-lg border border-red-500/20 bg-red-500/8 px-3 py-2 text-red-600 text-sm dark:text-red-500">
           {error}
         </div>
       ) : null}
@@ -10145,7 +12974,7 @@ function AdminWorkspaceProfile({
           title="Danger zone"
         >
           <SettingsActionDialogButton
-            className="text-red-600 hover:text-red-600 dark:text-red-300"
+            className="text-red-600 hover:text-red-600 dark:text-red-500"
             confirmLabel="Delete workspace"
             description={`This will permanently delete ${workspaceName}. This action cannot be undone.`}
             icon={Delete02Icon}
@@ -10564,7 +13393,7 @@ function AdminStatusBadge({ status }: { status: string }) {
 function BootstrapErrorBanner({ error }: { error: string }) {
   return (
     <div
-      className="mb-3 rounded-lg border border-red-500/25 bg-red-500/8 px-3 py-2 text-sm text-red-600 dark:text-red-300"
+      className="mb-3 rounded-lg border border-red-500/25 bg-red-500/8 px-3 py-2 text-sm text-red-600 dark:text-red-500"
       role="alert"
     >
       <div className="flex items-center justify-between gap-3">

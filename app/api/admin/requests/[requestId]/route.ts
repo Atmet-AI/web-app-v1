@@ -1,6 +1,7 @@
 import { isRouteResponse, requireSuperAdmin, type ApiAuthContext } from "@/lib/api/auth";
 import { badRequest, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 import { hasTransactionalMailConfig, sendTransactionalMail } from "@/lib/mail/smtp";
+import { waitlistApprovalEmail } from "@/lib/mail/templates";
 
 type RouteContext = {
   params: Promise<{ requestId: string }>;
@@ -22,40 +23,6 @@ function getAppOrigin(request: Request) {
 function isAlreadyRegisteredError(error: { message?: string } | null) {
   const message = error?.message?.toLowerCase() ?? "";
   return message.includes("already") || message.includes("registered");
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-function signupEmailHtml({
-  actionLink,
-  fullName,
-}: {
-  actionLink: string;
-  fullName: string;
-}) {
-  const escapedActionLink = escapeHtml(actionLink);
-  const escapedFullName = escapeHtml(fullName);
-  const greeting = escapedFullName ? `Hi ${escapedFullName},` : "Hi,";
-
-  return `
-    <div style="font-family:Inter,Arial,sans-serif;line-height:1.6;color:#1c1917">
-      <p>${greeting}</p>
-      <p>Your Atmet access request was approved. Use the secure link below to create your password and finish your account setup.</p>
-      <p>
-        <a href="${escapedActionLink}" style="display:inline-block;border-radius:10px;background:#292524;color:#fff;padding:12px 18px;text-decoration:none">
-          Complete signup
-        </a>
-      </p>
-      <p style="color:#78716c;font-size:13px">If the button does not work, paste this link into your browser:</p>
-      <p style="word-break:break-all;color:#57534e;font-size:13px">${escapedActionLink}</p>
-    </div>
-  `;
 }
 
 function getSignupPath(signupUrl: string) {
@@ -175,7 +142,7 @@ async function sendWaitlistApprovalEmail({
     }
 
     const provider = await sendTransactionalMail({
-      html: signupEmailHtml({ actionLink, fullName }),
+      html: waitlistApprovalEmail({ actionLink, fullName }),
       subject: "Your Atmet access is approved",
       text: [
         fullName ? `Hi ${fullName},` : "Hi,",

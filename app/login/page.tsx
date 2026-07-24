@@ -22,8 +22,10 @@ import {
   SelectValue,
   selectTriggerVariants,
 } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { bindAtmetSounds, playAtmetSound } from "@/lib/sound";
 
 const workTypeOptions = [
   "Founder",
@@ -90,6 +92,22 @@ export default function LoginPage() {
   const otpInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    bindAtmetSounds();
+
+    function playErrorCue() {
+      void playAtmetSound("error");
+    }
+
+    window.addEventListener("error", playErrorCue);
+    window.addEventListener("unhandledrejection", playErrorCue);
+
+    return () => {
+      window.removeEventListener("error", playErrorCue);
+      window.removeEventListener("unhandledrejection", playErrorCue);
+    };
+  }, []);
+
+  useEffect(() => {
     const query = window.matchMedia("(prefers-color-scheme: dark)");
 
     function syncSystemTheme(event?: MediaQueryListEvent) {
@@ -106,6 +124,12 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
+    if (errorMessage) {
+      void playAtmetSound("error");
+    }
+  }, [errorMessage]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const error = params.get("error");
     const code = params.get("code");
@@ -119,7 +143,6 @@ export default function LoginPage() {
     }
 
     if (error === "session_expired") {
-      setErrorMessage("Your session expired. Sign in again to continue.");
       window.history.replaceState(null, "", "/login");
     }
 
@@ -427,7 +450,7 @@ export default function LoginPage() {
     <main className="relative grid min-h-svh bg-background px-5 text-foreground">
       <section
         className={cn(
-          "mx-auto flex w-full flex-col justify-center pb-28 pt-20",
+          "mx-auto flex w-full flex-col justify-center px-3 pb-28 pt-20 sm:px-0",
           isWaitlistMode ? "max-w-3xl" : "max-w-sm",
         )}
       >
@@ -585,10 +608,12 @@ export default function LoginPage() {
 
               <Button
                 className={cn("mt-8 w-full", waitlistSubmitted && "hidden")}
-                loading={isSubmitting}
+                disabled={isSubmitting}
+                onClick={() => void playAtmetSound("tick")}
                 size="lg"
                 type="submit"
               >
+                {isSubmitting && <Spinner className="size-4" />}
                 Join waitlist
                 <span className="grid size-5 place-items-center rounded-md bg-primary-foreground/12 text-sm leading-none">
                   ↵
@@ -758,9 +783,11 @@ export default function LoginPage() {
 
               <Button
                 className="mt-5 w-full"
-                loading={isSubmitting}
+                disabled={isSubmitting}
+                onClick={() => void playAtmetSound("tick")}
                 type="submit"
               >
+                {isSubmitting && <Spinner className="size-4" />}
                 {isForgotMode
                   ? otpVisible
                     ? "Verify OTP"
@@ -793,7 +820,14 @@ export default function LoginPage() {
         {isWaitlistMode ? "Already have access?" : "Don't have an account?"}{" "}
         <button
           className="font-medium text-foreground outline-none transition-[opacity,scale] duration-150 hover:opacity-75 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]"
-          onClick={isWaitlistMode ? backToSignIn : startWaitlist}
+          onClick={() => {
+            void playAtmetSound("tick");
+            if (isWaitlistMode) {
+              backToSignIn();
+            } else {
+              startWaitlist();
+            }
+          }}
           type="button"
         >
           {isWaitlistMode ? "Sign in" : "Join waitlist"}

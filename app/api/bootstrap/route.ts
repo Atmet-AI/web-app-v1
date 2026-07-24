@@ -192,6 +192,14 @@ export async function GET() {
       }
     }
 
+    const notificationsPromise = dataClient
+      .from("notifications")
+      .select("*")
+      .eq("user_id", auth.user.id)
+      .neq("status", "archived")
+      .order("created_at", { ascending: false })
+      .limit(30);
+
     let userPreferences = preferences;
     if (!userPreferences) {
       const { data: insertedPreferences, error: insertedPreferencesError } =
@@ -229,8 +237,10 @@ export async function GET() {
       }
 
       if (pendingInvite) {
+        const { data: notifications } = await notificationsPromise;
         return ok(
           {
+            notifications: notifications ?? [],
             profile,
             setupUrl: "/signup?invite=1&type=invite",
           },
@@ -345,6 +355,7 @@ export async function GET() {
     }
 
     if (!workspaceId) {
+      const { data: notifications } = await notificationsPromise;
       return ok({
         agents: [],
         apps: [],
@@ -354,6 +365,7 @@ export async function GET() {
         connections: [],
         members: [],
         memberships,
+        notifications: notifications ?? [],
         preferences: userPreferences,
         profile,
         skills: [],
@@ -377,6 +389,7 @@ export async function GET() {
       { data: subscription, error: subscriptionError },
       { data: usageEvents, error: usageEventsError },
       { data: userLimits, error: userLimitsError },
+      { data: notifications, error: notificationsError },
     ] = await Promise.all([
       auth.supabase.from("workspace_settings").select("*").eq("workspace_id", workspaceId).maybeSingle(),
       auth.supabase
@@ -420,6 +433,7 @@ export async function GET() {
         .from("user_usage_limits")
         .select("*, profiles(full_name, email, avatar_url)")
         .eq("workspace_id", workspaceId),
+      notificationsPromise,
     ]);
 
     const errors = [
@@ -434,6 +448,7 @@ export async function GET() {
       subscriptionError,
       usageEventsError,
       userLimitsError,
+      notificationsError,
     ].filter(Boolean);
 
     if (errors[0]) {
@@ -457,6 +472,7 @@ export async function GET() {
       connections,
       members: enrichedMembers,
       memberships,
+      notifications,
       preferences: userPreferences,
       profile,
       skills,

@@ -3,6 +3,15 @@ import { isRouteResponse, requireUser } from "@/lib/api/auth";
 import { badRequest, booleanValue, created, jsonObject, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 import { hasSupabaseServiceRoleKey } from "@/lib/supabase/admin";
 
+function nameFromEmail(email: string) {
+  const localPart = email.split("@")[0] ?? "User";
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ") || "User";
+}
+
 export async function POST(request: Request) {
   try {
     const context = await requireUser();
@@ -110,6 +119,64 @@ export async function POST(request: Request) {
       if (inviteUpdateError) {
         throw inviteUpdateError;
       }
+
+      const [{ data: workspaceRecord }, { data: profileRecord }] = await Promise.all([
+        context.admin
+          .from("workspaces")
+          .select("name")
+          .eq("id", invite.workspace_id)
+          .maybeSingle(),
+        context.admin
+          .from("profiles")
+          .select("full_name, email")
+          .eq("id", context.user.id)
+          .maybeSingle(),
+      ]);
+      const workspaceName = stringValue(workspaceRecord?.name, "Atmet Workspace");
+      const actorName = stringValue(
+        profileRecord?.full_name,
+        nameFromEmail(context.user.email ?? ""),
+      );
+      const notificationPayload = {
+        action_status: "accepted",
+        actor_id: context.user.id,
+        body: `${actorName} accepted the invite to ${workspaceName}.`,
+        metadata: {
+          invitedEmail: invite.email,
+          workspaceName,
+        },
+        status: "unread",
+        title: "Invite accepted",
+        type: "workspace_invite_accepted",
+        updated_at: new Date().toISOString(),
+      };
+      const { data: updatedNotification } = await context.admin
+        .from("notifications")
+        .update(notificationPayload)
+        .eq("invite_id", invite.id)
+        .eq("user_id", invite.invited_by)
+        .eq("type", "workspace_invite_sent")
+        .select("id");
+
+      if (!updatedNotification?.length && invite.invited_by) {
+        await context.admin.from("notifications").insert({
+          ...notificationPayload,
+          invite_id: invite.id,
+          user_id: invite.invited_by,
+          workspace_id: invite.workspace_id,
+        });
+      }
+
+      await context.admin
+        .from("notifications")
+        .update({
+          action_status: "accepted",
+          read_at: new Date().toISOString(),
+          status: "read",
+        })
+        .eq("invite_id", invite.id)
+        .eq("user_id", context.user.id)
+        .eq("type", "workspace_invite");
 
       await context.admin.auth.admin.updateUserById(context.user.id, {
         user_metadata: {

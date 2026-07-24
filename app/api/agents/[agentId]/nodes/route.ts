@@ -89,8 +89,18 @@ export async function DELETE(request: Request, context: RouteContext) {
       return auth;
     }
 
-    const id = new URL(request.url).searchParams.get("id");
-    const { error } = await auth.admin.from("workflow_nodes").delete().eq("id", id).eq("agent_id", agentId);
+    const searchParams = new URL(request.url).searchParams;
+    const id = searchParams.get("id");
+    const sourceChatId = searchParams.get("sourceChatId");
+    let query = auth.admin.from("workflow_nodes").delete().eq("agent_id", agentId);
+
+    if (sourceChatId) {
+      query = query.eq("source_chat_id", sourceChatId);
+    } else {
+      query = query.eq("id", id);
+    }
+
+    const { error } = await query;
 
     if (error) {
       throw error;
