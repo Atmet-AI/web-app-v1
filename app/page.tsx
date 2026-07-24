@@ -62,6 +62,7 @@ import {
   TextBoldIcon,
   TextItalicIcon,
   TextNumberSignIcon,
+  Unlink01Icon,
   UserAdd01Icon,
   UserRound,
   Users,
@@ -183,6 +184,12 @@ import {
   playAtmetSound,
   setAtmetSoundEnabled,
 } from "@/lib/sound";
+import {
+  blueCtaButtonClassName,
+  getInitialCtaAccentPreference,
+  saveCtaAccentPreference,
+  type CtaAccentPreference,
+} from "@/lib/cta-accent";
 
 type PageKey =
   | "chat"
@@ -1068,9 +1075,11 @@ function OreoFlareAvatar({
   className,
   seed,
   size = 64,
+  scale = 1.45,
 }: {
   className?: string;
   seed: string;
+  scale?: number;
   size?: number;
 }) {
   const palette =
@@ -1079,15 +1088,27 @@ function OreoFlareAvatar({
     ]?.id ?? "rose-milk";
 
   return (
-    <OreoAvatar
-      background={null}
-      className={className}
-      drift={8}
-      palette={palette}
-      shape="flare"
-      size={size}
-      variantId={seed || palette}
-    />
+    <span
+      className={cn(
+        "pointer-events-none absolute inset-0 overflow-hidden",
+        className,
+      )}
+    >
+      <OreoAvatar
+        background={null}
+        className="absolute left-1/2 top-1/2 [&_svg]:size-full"
+        drift={8}
+        palette={palette}
+        shape="flare"
+        size={size}
+        style={{
+          height: `${scale * 100}%`,
+          transform: "translate(-50%, -50%)",
+          width: `${scale * 100}%`,
+        }}
+        variantId={seed || palette}
+      />
+    </span>
   );
 }
 
@@ -1540,6 +1561,8 @@ export default function Home() {
   const [themePreference, setThemePreference] = useState<ThemePreference>(
     getInitialThemePreference,
   );
+  const [ctaAccentPreference, setCtaAccentPreference] =
+    useState<CtaAccentPreference>(getInitialCtaAccentPreference);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const sidebarChatCounterRef = useRef(initialSidebarChats.length + 1);
   const chatDraftCounterRef = useRef(1);
@@ -1631,6 +1654,11 @@ export default function Home() {
     setThemePreference((current) =>
       current === "default" ? "light" : current === "light" ? "dark" : "default",
     );
+  }
+
+  function updateCtaAccentPreference(preference: CtaAccentPreference) {
+    setCtaAccentPreference(preference);
+    saveCtaAccentPreference(preference);
   }
 
   useEffect(() => {
@@ -2189,6 +2217,36 @@ export default function Home() {
     deleteSidebarChat(chatId);
   }
 
+  function disconnectChatFromAgentWorkflow(agentName: string, chatId: string) {
+    setWorkflowChatNodesByAgent((current) => ({
+      ...current,
+      [agentName]: (current[agentName] ?? []).filter(
+        (node) => node.chatId !== chatId,
+      ),
+    }));
+    setAgentList((current) =>
+      current.map((agent) =>
+        agent.name === agentName
+          ? {
+              ...agent,
+              workflowCards: (agent.workflowCards ?? []).filter(
+                (card) => card.chatId !== chatId,
+              ),
+            }
+          : agent,
+      ),
+    );
+
+    const agent = agentList.find((item) => item.name === agentName);
+    if (agent?.id) {
+      const params = new URLSearchParams();
+      params.set("sourceChatId", chatId);
+      void fetch(`/api/agents/${agent.id}/nodes?${params.toString()}`, {
+        method: "DELETE",
+      }).catch(() => undefined);
+    }
+  }
+
   const commandPaletteGroups: CommandPaletteGroup[] = [
     {
       items: [
@@ -2358,11 +2416,21 @@ export default function Home() {
               onSelectWorkspace={(nextWorkspace) => setWorkspace(nextWorkspace)}
               onAddChatToAgentWorkflow={addChatToAgentWorkflow}
               onCopyChatValue={copyChatValue}
+              onCreateAgent={createAgent}
               onDeleteChat={deleteSidebarChat}
+              onDisconnectChatFromAgentWorkflow={
+                disconnectChatFromAgentWorkflow
+              }
               onRemoveMemberFromChat={removeMemberFromChat}
+              onJumpToAgentWorkflow={openAgentPlayground}
               onRenameChat={renameSidebarChat}
               onTogglePin={toggleSidebarChatPin}
               selectedWorkspace={workspace}
+              workflowChatMeta={
+                activeSidebarChatId
+                  ? workflowSidebarChatMeta.get(activeSidebarChatId)
+                  : undefined
+              }
               workspaces={workspaces}
             />
           </div>
@@ -2497,6 +2565,7 @@ export default function Home() {
                       : []
                   }
                   composerOptions={dynamicComposerOptions}
+                  ctaAccentPreference={ctaAccentPreference}
                   draftRequest={chatDraftRequest}
                   members={members}
                   onAddMemberToChat={addMemberToChat}
@@ -2556,9 +2625,11 @@ export default function Home() {
                   connectorsCount={connectedConnectorKeys.length}
                   members={members}
                   onProfileChange={setProfile}
+                  onCtaAccentPreferenceChange={updateCtaAccentPreference}
                   onWorkspaceChange={setWorkspace}
                   onWorkspaceSettingsChange={setWorkspaceSettings}
                   profile={profile}
+                  ctaAccentPreference={ctaAccentPreference}
                   connectedConnectors={connectorList.filter((connector) =>
                     connectedConnectorKeys.includes(connector.key ?? connector.name),
                   )}
@@ -2585,14 +2656,18 @@ function WorkspaceIdentity({
   members,
   onAddChatToAgentWorkflow,
   onCopyChatValue,
+  onCreateAgent,
   onCreateWorkspace,
   onDeleteChat,
+  onDisconnectChatFromAgentWorkflow,
   onInvitePeople,
+  onJumpToAgentWorkflow,
   onRemoveMemberFromChat,
   onRenameChat,
   onSelectWorkspace,
   onTogglePin,
   selectedWorkspace,
+  workflowChatMeta,
   workspaces,
 }: {
   activeChat: SidebarChat | null;
@@ -2602,14 +2677,18 @@ function WorkspaceIdentity({
   members: WorkspaceUser[];
   onAddChatToAgentWorkflow: (agentName: string, chat: SidebarChat) => void;
   onCopyChatValue: (value: string) => void;
+  onCreateAgent: (name: string) => void | Promise<void>;
   onCreateWorkspace: (workspaceName: string) => void | Promise<void>;
   onDeleteChat: (chatId: string) => void;
+  onDisconnectChatFromAgentWorkflow: (agentName: string, chatId: string) => void;
   onInvitePeople: (email: string) => void | Promise<void>;
+  onJumpToAgentWorkflow: (agentName: string) => void;
   onRemoveMemberFromChat: (chatId: string, memberId: string) => void;
   onRenameChat: (chatId: string) => void;
   onSelectWorkspace: (workspace: WorkspaceSummary) => void;
   onTogglePin: (chatId: string) => void;
   selectedWorkspace: WorkspaceSummary | null;
+  workflowChatMeta?: WorkflowSidebarChatMeta;
   workspaces: WorkspaceSummary[];
 }) {
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
@@ -2620,10 +2699,7 @@ function WorkspaceIdentity({
   return (
     <div className="flex min-w-0 items-center gap-2">
       <AtmetLogo
-        className={cn(
-          "size-5 transition-opacity",
-          collapsed && "opacity-40",
-        )}
+        className="size-5"
         plain
       />
       <div className="h-4 w-px shrink-0 bg-sidebar-border" />
@@ -2703,10 +2779,14 @@ function WorkspaceIdentity({
               members={members}
               onAddChatToAgentWorkflow={onAddChatToAgentWorkflow}
               onCopyChatValue={onCopyChatValue}
+              onCreateAgent={onCreateAgent}
               onDeleteChat={onDeleteChat}
+              onDisconnectChatFromAgentWorkflow={onDisconnectChatFromAgentWorkflow}
+              onJumpToAgentWorkflow={onJumpToAgentWorkflow}
               onRemoveMemberFromChat={onRemoveMemberFromChat}
               onRenameChat={onRenameChat}
               onTogglePin={onTogglePin}
+              workflowChatMeta={workflowChatMeta}
             />
           </div>
         </>
@@ -3013,10 +3093,14 @@ function ChatActionsMenu({
   members,
   onAddChatToAgentWorkflow,
   onCopyChatValue,
+  onCreateAgent,
   onDeleteChat,
+  onDisconnectChatFromAgentWorkflow,
+  onJumpToAgentWorkflow,
   onRemoveMemberFromChat,
   onRenameChat,
   onTogglePin,
+  workflowChatMeta,
 }: {
   agents: Agent[];
   chat: SidebarChat;
@@ -3024,10 +3108,14 @@ function ChatActionsMenu({
   members: WorkspaceUser[];
   onAddChatToAgentWorkflow: (agentName: string, chat: SidebarChat) => void;
   onCopyChatValue: (value: string) => void;
+  onCreateAgent: (name: string) => void | Promise<void>;
   onDeleteChat: (chatId: string) => void;
+  onDisconnectChatFromAgentWorkflow: (agentName: string, chatId: string) => void;
+  onJumpToAgentWorkflow: (agentName: string) => void;
   onRemoveMemberFromChat: (chatId: string, memberId: string) => void;
   onRenameChat: (chatId: string) => void;
   onTogglePin: (chatId: string) => void;
+  workflowChatMeta?: WorkflowSidebarChatMeta;
 }) {
   const [workflowDialogOpen, setWorkflowDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -3087,11 +3175,31 @@ function ChatActionsMenu({
             shortcut={shortcuts.deeplink}
           />
           <MenuSeparator />
-          <ChatActionItem
-            icon={WorkflowSquare01Icon}
-            label="Add in an agent workflow"
-            onClick={() => setWorkflowDialogOpen(true)}
-          />
+          {workflowChatMeta ? (
+            <>
+              <ChatActionItem
+                icon={ArrowRight01Icon}
+                label="Jump to agent"
+                onClick={() => onJumpToAgentWorkflow(workflowChatMeta.agentName)}
+              />
+              <ChatActionItem
+                icon={Unlink01Icon}
+                label="Disconnect from agent"
+                onClick={() =>
+                  onDisconnectChatFromAgentWorkflow(
+                    workflowChatMeta.agentName,
+                    chat.id,
+                  )
+                }
+              />
+            </>
+          ) : (
+            <ChatActionItem
+              icon={WorkflowSquare01Icon}
+              label="Add in an agent workflow"
+              onClick={() => setWorkflowDialogOpen(true)}
+            />
+          )}
           <MenuSeparator />
           <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
             People in this chat
@@ -3143,6 +3251,7 @@ function ChatActionsMenu({
       <AddChatToAgentWorkflowDialog
         agents={agents}
         chat={chat}
+        onCreateAgent={onCreateAgent}
         onOpenChange={setWorkflowDialogOpen}
         onSelectAgent={(agentName) => {
           onAddChatToAgentWorkflow(agentName, chat);
@@ -3183,16 +3292,37 @@ function ChatActionsMenu({
 function AddChatToAgentWorkflowDialog({
   agents,
   chat,
+  onCreateAgent,
   onOpenChange,
   onSelectAgent,
   open,
 }: {
   agents: Agent[];
   chat: SidebarChat;
+  onCreateAgent: (name: string) => void | Promise<void>;
   onOpenChange: (open: boolean) => void;
   onSelectAgent: (agentName: string) => void;
   open: boolean;
 }) {
+  const [agentName, setAgentName] = useState("");
+  const [isCreatingAgent, setIsCreatingAgent] = useState(false);
+  const trimmedAgentName = agentName.trim();
+
+  async function submitAgent(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!trimmedAgentName || isCreatingAgent) {
+      return;
+    }
+
+    setIsCreatingAgent(true);
+    try {
+      await onCreateAgent(trimmedAgentName);
+      setAgentName("");
+    } finally {
+      setIsCreatingAgent(false);
+    }
+  }
+
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogPopup
@@ -3206,14 +3336,43 @@ function AddChatToAgentWorkflowDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="p-2" scrollFade={false}>
-          <div className="grid gap-1 rounded-lg border border-border/70 bg-muted/35 p-1">
-            {agents.map((agent) => (
-              <AgentWorkflowChoice
-                agent={agent}
-                key={agent.name}
-                onSelect={() => onSelectAgent(agent.name)}
+          <div className="grid gap-2">
+            <form
+              className="flex items-center gap-2 rounded-lg border border-border/70 bg-background/70 p-2"
+              onSubmit={submitAgent}
+            >
+              <Input
+                aria-label="New agent name"
+                className="min-w-0 flex-1"
+                onChange={(event) => setAgentName(event.target.value)}
+                placeholder="Create agent..."
+                size="sm"
+                value={agentName}
               />
-            ))}
+              <Button
+                disabled={!trimmedAgentName || isCreatingAgent}
+                size="sm"
+                type="submit"
+              >
+                <Icon icon={PlusSignIcon} />
+                Create
+              </Button>
+            </form>
+            <div className="grid gap-1 rounded-lg border border-border/70 bg-muted/35 p-1">
+              {agents.length > 0 ? (
+                agents.map((agent) => (
+                  <AgentWorkflowChoice
+                    agent={agent}
+                    key={agent.name}
+                    onSelect={() => onSelectAgent(agent.name)}
+                  />
+                ))
+              ) : (
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  Create an agent first, then add this chat as a node.
+                </div>
+              )}
+            </div>
           </div>
         </DialogPanel>
       </DialogPopup>
@@ -3593,7 +3752,10 @@ function NavButton({
       ) : (
         <Icon className="size-4" icon={item.icon} />
       )}
-      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+      <span className="flex min-w-0 flex-1 items-center gap-1.5">
+        <span className="min-w-0 truncate">{item.label}</span>
+        {item.key === "brain" && <Badge variant="destructive">Soon</Badge>}
+      </span>
       {active && <Icon className="size-4 opacity-60" icon={ArrowRight01Icon} />}
     </button>
   );
@@ -3799,6 +3961,7 @@ function ChatPage({
   activeChatId,
   chatParticipantIds,
   composerOptions,
+  ctaAccentPreference,
   draftRequest,
   members,
   onAddMemberToChat,
@@ -3808,6 +3971,7 @@ function ChatPage({
   activeChatId: string | null;
   chatParticipantIds: string[];
   composerOptions: ComposerOption[];
+  ctaAccentPreference: CtaAccentPreference;
   draftRequest: ChatDraftRequest | null;
   members: WorkspaceUser[];
   onAddMemberToChat: (chatId: string, memberId: string) => void;
@@ -3819,6 +3983,7 @@ function ChatPage({
       activeChatId={activeChatId}
       chatParticipantIds={chatParticipantIds}
       composerOptions={composerOptions}
+      ctaAccentPreference={ctaAccentPreference}
       draftRequest={
         draftRequest?.chatId === activeChatId ? draftRequest : null
       }
@@ -3835,6 +4000,7 @@ function ChatExperience({
   chatParticipantIds = [],
   compact = false,
   composerOptions = [],
+  ctaAccentPreference = "current",
   draftRequest = null,
   members = [],
   onAddMemberToChat,
@@ -3845,6 +4011,7 @@ function ChatExperience({
   chatParticipantIds?: string[];
   compact?: boolean;
   composerOptions?: ComposerOption[];
+  ctaAccentPreference?: CtaAccentPreference;
   draftRequest?: ChatDraftRequest | null;
   members?: WorkspaceUser[];
   onAddMemberToChat?: (chatId: string, memberId: string) => void;
@@ -4340,11 +4507,15 @@ function ChatExperience({
 
     if (event.key === "Enter" && !mention) {
       event.preventDefault();
-      document.execCommand("insertLineBreak");
-      requestAnimationFrame(() => {
-        updateComposerState();
-        updateMentionFromEditor();
-      });
+      if (event.shiftKey) {
+        document.execCommand("insertLineBreak");
+        requestAnimationFrame(() => {
+          updateComposerState();
+          updateMentionFromEditor();
+        });
+      } else {
+        sendComposerMessage();
+      }
       return;
     }
 
@@ -4480,7 +4651,7 @@ function ChatExperience({
           >
             <MessageScroller className="min-h-0">
               <MessageScrollerViewport
-                className="px-3 pb-52 sm:px-4 lg:px-6"
+                className="px-3 pb-40 sm:px-4 lg:px-6"
                 ref={messageScrollerViewportRef}
               >
                 <MessageScrollerContent>
@@ -4502,13 +4673,13 @@ function ChatExperience({
 
       <div
         className={cn(
-          "relative mx-auto w-full max-w-none rounded-2xl border border-black/10 bg-white/28 backdrop-blur-2xl backdrop-saturate-150 dark:border-white/10 dark:bg-white/[0.035]",
+          "relative mx-auto w-full max-w-3xl rounded-2xl border border-black/10 bg-white/28 backdrop-blur-2xl backdrop-saturate-150 dark:border-white/10 dark:bg-white/[0.035]",
           hasMessages && "absolute inset-x-0 bottom-1 z-10",
         )}
       >
           <div
             aria-label="Message Atmet"
-            className="relative min-h-[10.5rem] cursor-text px-4 py-4 text-base leading-7 outline-none sm:text-sm"
+            className="relative min-h-[7.25rem] cursor-text px-4 py-3 text-base leading-6 outline-none sm:text-sm"
             onClick={() => editorRef.current?.focus()}
             role="textbox"
           >
@@ -4518,7 +4689,7 @@ function ChatExperience({
               </span>
             )}
             <div
-              className="relative z-10 min-h-[8rem] whitespace-pre-wrap break-words leading-7 outline-none"
+              className="relative z-10 min-h-[5rem] whitespace-pre-wrap break-words leading-6 outline-none"
               contentEditable
               onInput={handleEditorInput}
               onKeyDown={handleComposerKeyDown}
@@ -4713,7 +4884,14 @@ function ChatExperience({
               ref={fileInputRef}
               type="file"
             />
-            <Button disabled={isSending} onClick={sendComposerMessage} size="sm">
+            <Button
+              className={cn(
+                ctaAccentPreference === "blue" && blueCtaButtonClassName,
+              )}
+              disabled={isSending}
+              onClick={sendComposerMessage}
+              size="sm"
+            >
               Send
               {isSending ? (
                 <Spinner className="size-3.5" />
@@ -5795,18 +5973,56 @@ function AtmetLogo({
   );
 }
 
+function getComposerAppLogoSvg(key?: string) {
+  switch (key) {
+    case "chatgpt":
+      return `<svg viewBox="0 0 256 260" aria-hidden="true"><path fill="currentColor" d="M239.2 106.2a64.7 64.7 0 0 0-5.6-53.1C219.5 28.5 191 15.8 163.2 21.7A65.6 65.6 0 0 0 52.1 45.2 64.7 64.7 0 0 0 8.9 76.6c-14.3 24.6-11.1 55.6 8 76.7a64.7 64.7 0 0 0 5.5 53.1c14.2 24.7 42.6 37.3 70.4 31.4a64.7 64.7 0 0 0 48.8 21.7c28.5 0 53.7-18.4 62.4-45.5a64.8 64.8 0 0 0 43.2-31.4c14.2-24.5 10.9-55.4-8-76.4Zm-97.6 136.3a48.4 48.4 0 0 1-31.1-11.2l53.2-30.7a8.6 8.6 0 0 0 4.3-7.4v-72.8l21.8 12.6c.2.1.4.3.4.6v60.3c-.1 26.9-21.8 48.6-48.6 48.6ZM37.2 197.9a48.3 48.3 0 0 1-5.8-32.6l53.3 30.8a8.3 8.3 0 0 0 8.4 0l63.2-36.4v25.2c0 .3-.1.5-.4.7l-52.3 30.1c-23.3 13.4-53 5.5-66.4-17.8ZM23.5 85.4a48.5 48.5 0 0 1 25.6-21.3v61.3a8.3 8.3 0 0 0 4.2 7.3l62.9 36.3-21.9 12.7a.8.8 0 0 1-.8 0l-52.2-30.2C18.1 138.1 10.2 108.4 23.5 85.4Zm179.5 41.7-63.1-36.7 21.8-12.5a.8.8 0 0 1 .8 0l52.2 30.1a48.6 48.6 0 0 1-7.3 87.7v-61.4a8.5 8.5 0 0 0-4.4-7.2Zm21.8-32.7-53.2-31a8.4 8.4 0 0 0-8.5 0L100 99.8V74.6c0-.3.1-.5.3-.7l52.2-30.1a48.7 48.7 0 0 1 72.3 50.6ZM88.1 139.1l-21.9-12.6a.9.9 0 0 1-.4-.6V65.7a48.7 48.7 0 0 1 79.8-37.4L92.4 59a8.6 8.6 0 0 0-4.2 7.4l-.1 72.7Zm11.8-25.6 28.2-16.2 28.2 16.2V146l-28.1 16.2L100 146l-.1-32.5Z"/></svg>`;
+    case "claude":
+      return `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13.8 3.5h3.6L24 20h-3.6L13.8 3.5Zm-7.2 0h3.7L16.9 20h-3.7l-1.3-3.5H5L3.7 20H0L6.6 3.5Zm4.1 10L8.5 7.7l-2.3 5.8h4.5Z"/></svg>`;
+    case "telegram":
+      return `<svg viewBox="0 0 256 256" aria-hidden="true"><defs><linearGradient id="composer-telegram" x1="50%" x2="50%" y1="0%" y2="100%"><stop offset="0%" stop-color="#2AABEE"/><stop offset="100%" stop-color="#229ED9"/></linearGradient></defs><path fill="url(#composer-telegram)" d="M128 0C57.3 0 0 57.3 0 128s57.3 128 128 128 128-57.3 128-128S198.7 0 128 0Z"/><path fill="#fff" d="M57.9 126.6c37.3-16.3 62.2-27 74.6-32.1 35.6-14.8 42.9-17.4 47.8-17.4 1.1 0 3.4.2 5 1.5 1.3 1.1 1.6 2.5 1.8 3.5.2 1 .4 3.3.2 5-1.9 20.2-10.3 69.4-14.5 92-1.8 9.6-5.3 12.8-8.7 13.1-7.4.7-13.1-4.9-20.3-9.6-11.3-7.4-17.6-12-28.6-19.2-12.6-8.3-4.4-12.9 2.8-20.4 1.9-2 34.6-31.7 35.3-34.5.1-.3.2-1.6-.6-2.3-.7-.7-1.8-.4-2.6-.3-1.1.3-19.1 12.2-54 35.7-5.1 3.5-9.7 5.2-13.9 5.1-4.6-.1-13.4-2.6-19.9-4.7-8-2.6-14.4-4-13.8-8.4.3-2.3 3.5-4.7 9.5-7.1Z"/></svg>`;
+    case "gmail":
+    case "email":
+      return `<svg viewBox="0 49.4 512 399.4" aria-hidden="true"><path fill="#4285f4" d="M34.9 448.8h81.5V251L0 163.7v250.2c0 19.3 15.6 34.9 34.9 34.9z"/><path fill="#34a853" d="M395.6 448.8h81.5c19.3 0 34.9-15.6 34.9-34.9V163.7L395.6 251z"/><path fill="#fbbc04" d="M395.6 99.7V251L512 163.7v-46.5c0-43.1-49.3-67.8-83.8-41.9z"/><path fill="#ea4335" d="M116.4 251V99.7L256 204.5 395.6 99.7V251L256 355.7z"/><path fill="#c5221f" d="M0 117.2v46.5L116.4 251V99.7L83.8 75.3C49.3 49.4 0 74 0 117.2z"/></svg>`;
+    case "google-sheets":
+      return `<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#0f9d58" d="M10 4h20l8 8v32H10z"/><path fill="#87d3a2" d="M30 4v8h8z"/><path fill="#fff" d="M16 20h16v16H16zm2 2v4h5v-4zm7 0v4h5v-4zm-7 6v6h5v-6zm7 0v6h5v-6z"/></svg>`;
+    case "calendar":
+      return `<svg viewBox="0 0 48 48" aria-hidden="true"><rect width="36" height="36" x="6" y="8" fill="#fff" rx="5"/><path fill="#4285f4" d="M6 16h36v-3a5 5 0 0 0-5-5H11a5 5 0 0 0-5 5z"/><path fill="#34a853" d="M6 16h9v28h-4a5 5 0 0 1-5-5z"/><path fill="#fbbc04" d="M33 16h9v23a5 5 0 0 1-5 5h-4z"/><path fill="#ea4335" d="M15 8h18v8H15z"/><text x="24" y="34" text-anchor="middle" font-size="16" font-family="Arial" font-weight="700" fill="#444">31</text></svg>`;
+    case "instagram":
+      return `<svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="composer-instagram" x1="0" x2="1" y1="1" y2="0"><stop stop-color="#feda75"/><stop offset=".35" stop-color="#fa7e1e"/><stop offset=".65" stop-color="#d62976"/><stop offset="1" stop-color="#4f5bd5"/></linearGradient></defs><rect width="40" height="40" x="4" y="4" fill="url(#composer-instagram)" rx="12"/><circle cx="24" cy="24" r="9" fill="none" stroke="#fff" stroke-width="4"/><circle cx="35" cy="13" r="3" fill="#fff"/></svg>`;
+    case "slack":
+      return `<svg viewBox="0 0 48 48" aria-hidden="true"><rect x="20" y="4" width="8" height="20" fill="#36c5f0" rx="4"/><rect x="20" y="24" width="8" height="20" fill="#2eb67d" rx="4"/><rect x="4" y="20" width="20" height="8" fill="#e01e5a" rx="4"/><rect x="24" y="20" width="20" height="8" fill="#ecb22e" rx="4"/></svg>`;
+    case "github":
+      return `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#111" d="M12 .8a11.2 11.2 0 0 0-3.5 21.8c.6.1.8-.2.8-.6v-2.1c-3.4.7-4.1-1.4-4.1-1.4-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 .1.8 2.1 3.5 1.5.1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.3 1.2-3.2-.1-.3-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.3 11.3 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.9.1 3.2.8.9 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2V22c0 .4.2.7.8.6A11.2 11.2 0 0 0 12 .8Z"/></svg>`;
+    default:
+      return "";
+  }
+}
+
 function createComposerBadge(option: ComposerOption) {
   const badge = document.createElement("span");
-  badge.className =
-    "mx-0.5 inline-flex h-5 translate-y-[2px] items-center gap-1 rounded-md bg-secondary px-1.5 align-baseline text-[0.75em] font-medium leading-none text-secondary-foreground";
+  const isApp = option.kind === "apps";
+  badge.className = isApp
+    ? "mx-0.5 inline-flex h-5 items-center gap-1 rounded-md bg-info/16 px-1.5 align-middle text-[0.78em] font-medium leading-none text-info-foreground"
+    : "mx-0.5 inline-flex h-5 items-center gap-1 rounded-md bg-pink-500/16 px-1.5 align-middle text-[0.78em] font-medium leading-none text-pink-700 dark:text-pink-200";
   badge.contentEditable = "false";
   badge.dataset.composerToken = "true";
   badge.dataset.composerLabel = option.name;
+  badge.dataset.composerKind = option.kind;
 
   const icon = document.createElement("span");
-  icon.className =
-    "grid size-4 shrink-0 place-items-center rounded-md bg-primary text-[0.55rem] font-semibold text-primary-foreground";
-  icon.textContent = option.logo ?? getOptionInitials(option.name);
+  icon.className = isApp
+    ? "grid size-3.5 shrink-0 place-items-center overflow-hidden rounded-sm text-info-foreground"
+    : "grid size-3.5 shrink-0 place-items-center rounded-sm text-pink-700 dark:text-pink-200";
+  const appLogoSvg = isApp ? getComposerAppLogoSvg(option.connectorKey) : "";
+  if (appLogoSvg) {
+    icon.innerHTML = appLogoSvg;
+    icon.firstElementChild?.classList.add("size-full");
+  } else {
+    icon.textContent = isApp
+      ? option.logo ?? getOptionInitials(option.name)
+      : "/";
+  }
 
   const label = document.createElement("span");
   label.textContent = option.name;
@@ -6037,10 +6253,15 @@ function AgentsPage({
               <CardPanel
                 className={cn(
                   "relative grid min-h-36 place-items-center overflow-hidden rounded-t-2xl bg-linear-to-br p-5 transition-transform group-hover:scale-[1.01]",
-                  "before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_center,currentColor_1px,transparent_1px)] before:bg-[length:10px_10px] before:text-black/[0.045] dark:before:text-white/[0.055]",
                   agent.gradient,
                 )}
               >
+                <OreoFlareAvatar
+                  className="absolute inset-0"
+                  scale={2.8}
+                  seed={`agent-card-${agent.name}`}
+                />
+                <div className="absolute inset-0 bg-white/10 dark:bg-black/16" />
                 <AgentLogoStack logos={agent.appLogos} />
               </CardPanel>
               <CardPanel className="border-t border-border p-4">
@@ -6161,13 +6382,13 @@ function NewAgentDialog({ onCreate }: { onCreate: (name: string) => void }) {
 
 function AgentLogoStack({ logos }: { logos: readonly string[] }) {
   return (
-    <div className="relative z-10 my-2 grid h-16 w-28 place-items-center">
+    <div className="relative z-10 my-2 grid h-20 w-32 place-items-center">
       <AgentAppLogo
-        className="absolute left-3 top-4 size-10 rotate-[-8deg] opacity-80"
+        className="absolute left-4 top-5 size-10 rotate-[-8deg] opacity-80"
         logo={logos[1]}
       />
       <AgentAppLogo
-        className="absolute right-3 top-4 size-10 rotate-[8deg] opacity-80"
+        className="absolute right-4 top-5 size-10 rotate-[8deg] opacity-80"
         logo={logos[2]}
       />
       <AgentAppLogo
@@ -6188,15 +6409,11 @@ function AgentAppLogo({
   return (
     <div
       className={cn(
-        "relative grid place-items-center overflow-hidden rounded-xl text-xs font-semibold text-stone-900 ring-1 ring-black/8 dark:ring-white/10",
+        "relative grid place-items-center overflow-hidden rounded-xl bg-white/88 text-xs font-semibold text-stone-900 shadow-xs/5 ring-1 ring-black/8 backdrop-blur-[1px] dark:bg-stone-950/76 dark:text-stone-100 dark:ring-white/10",
         className,
       )}
     >
-      <OreoFlareAvatar
-        className="absolute inset-0 size-full"
-        seed={`agent-app-${logo}`}
-      />
-      <span className="relative z-10 grid min-h-5 min-w-5 place-items-center rounded-md bg-white/72 px-1 text-stone-900 shadow-xs/5 backdrop-blur-[1px] dark:bg-stone-950/62 dark:text-stone-100">
+      <span className="relative z-10 grid min-h-5 min-w-5 place-items-center rounded-md px-1">
         {logo}
       </span>
     </div>
@@ -6849,7 +7066,7 @@ function AgentPlaygroundWires({
           refY="4"
           viewBox="0 0 8 8"
         >
-          <path className="fill-border" d="M 0 0 L 8 4 L 0 8 z" />
+          <path className="fill-foreground" d="M 0 0 L 8 4 L 0 8 z" />
         </marker>
         <marker
           id="workflow-wire-arrow-active"
@@ -6861,7 +7078,7 @@ function AgentPlaygroundWires({
           refY="4"
           viewBox="0 0 8 8"
         >
-          <path className="fill-foreground/45" d="M 0 0 L 8 4 L 0 8 z" />
+          <path className="fill-success" d="M 0 0 L 8 4 L 0 8 z" />
         </marker>
       </defs>
       {connections.map((connection) => {
@@ -6876,7 +7093,7 @@ function AgentPlaygroundWires({
 
         return (
           <path
-            className="stroke-border"
+            className="stroke-foreground"
             d={getWirePath(start.x, start.y, end.x, end.y)}
             fill="none"
             key={`${connection.from}-${connection.to}`}
@@ -6887,7 +7104,7 @@ function AgentPlaygroundWires({
       })}
       {activeCard && drag && (
         <path
-          className="stroke-foreground/45"
+          className="stroke-success"
           d={getWirePath(activeCard.x + 240, activeCard.y + 64, drag.x, drag.y)}
           fill="none"
           markerEnd="url(#workflow-wire-arrow-active)"
@@ -7331,8 +7548,12 @@ function SkillIconTile({
         className,
       )}
     >
-      <OreoFlareAvatar className="absolute inset-0 size-full" seed={seed} />
-      <span className="relative z-10 grid size-7 place-items-center rounded-md bg-white/72 text-stone-800 shadow-xs/5 backdrop-blur-[1px] dark:bg-stone-950/62 dark:text-stone-100">
+      <OreoFlareAvatar
+        className="absolute inset-[2px] rounded-md"
+        scale={1.25}
+        seed={seed}
+      />
+      <span className="relative z-10 grid size-7 place-items-center rounded-md bg-white/82 text-stone-800 shadow-xs/5 backdrop-blur-[1px] dark:bg-stone-950/70 dark:text-stone-100">
         <Icon className="size-4" icon={icon} />
       </span>
     </div>
@@ -8397,6 +8618,14 @@ function BuildKnowledgeBaseDialog({
 type UsagePeriod = "month" | "quarter" | "week";
 type UsageScope = "my" | "workspace";
 
+const usageChartBarClasses = [
+  "border border-emerald-400/60 bg-emerald-400/20",
+  "bg-sky-500",
+  "bg-violet-500",
+  "bg-amber-500",
+  "bg-rose-500",
+] as const;
+
 function UsagePage({ usage }: { usage: UsageData | null }) {
   const [period, setPeriod] = useState<UsagePeriod>("month");
   const [scope, setScope] = useState<UsageScope>("my");
@@ -8436,21 +8665,21 @@ function UsagePage({ usage }: { usage: UsageData | null }) {
   const chartGroups = [
     {
       bars: [
-        { className: "border-emerald-400/60 bg-emerald-400/20", striped: true, value: Math.max(1, tokenPercent) },
-        { className: "bg-sky-500", value: Math.max(1, tokenPercent) },
+        { className: usageChartBarClasses[0], striped: true, value: Math.max(1, tokenPercent) },
+        { className: usageChartBarClasses[1], value: Math.max(1, tokenPercent) },
       ],
       label: "Tokens",
     },
     {
-      bars: [{ className: "bg-violet-500", value: Math.max(1, usage?.files ?? 0) }],
+      bars: [{ className: usageChartBarClasses[2], value: Math.max(1, usage?.files ?? 0) }],
       label: "Files",
     },
     {
-      bars: [{ className: "bg-amber-500", value: Math.max(1, usage?.automations ?? 0) }],
+      bars: [{ className: usageChartBarClasses[3], value: Math.max(1, usage?.automations ?? 0) }],
       label: "Automations",
     },
     {
-      bars: [{ className: "bg-rose-500", value: Math.max(1, usage?.chats ?? 0) }],
+      bars: [{ className: usageChartBarClasses[4], value: Math.max(1, usage?.chats ?? 0) }],
       label: "Chats",
     },
   ];
@@ -9206,7 +9435,9 @@ function SettingsPage({
   agentsCount,
   connectorsCount,
   connectedConnectors,
+  ctaAccentPreference,
   members,
+  onCtaAccentPreferenceChange,
   onProfileChange,
   onWorkspaceChange,
   onWorkspaceSettingsChange,
@@ -9218,7 +9449,9 @@ function SettingsPage({
   agentsCount: number;
   connectorsCount: number;
   connectedConnectors: ConnectorItem[];
+  ctaAccentPreference: CtaAccentPreference;
   members: WorkspaceUser[];
+  onCtaAccentPreferenceChange: (preference: CtaAccentPreference) => void;
   onProfileChange: (profile: DatabaseRecord | null) => void;
   onWorkspaceChange: (workspace: WorkspaceSummary | null) => void;
   onWorkspaceSettingsChange: (settings: DatabaseRecord | null) => void;
@@ -9287,6 +9520,8 @@ function SettingsPage({
         </TabsContent>
         <TabsContent value="general">
           <SettingsGeneralTab
+            ctaAccentPreference={ctaAccentPreference}
+            onCtaAccentPreferenceChange={onCtaAccentPreferenceChange}
             onWorkspaceSettingsChange={onWorkspaceSettingsChange}
             workspaceId={workspace?.id ?? null}
             workspaceSettings={workspaceSettings}
@@ -10133,10 +10368,14 @@ function SettingsWorkspaceField({
 }
 
 function SettingsGeneralTab({
+  ctaAccentPreference,
+  onCtaAccentPreferenceChange,
   onWorkspaceSettingsChange,
   workspaceId,
   workspaceSettings,
 }: {
+  ctaAccentPreference: CtaAccentPreference;
+  onCtaAccentPreferenceChange: (preference: CtaAccentPreference) => void;
   onWorkspaceSettingsChange: (settings: DatabaseRecord | null) => void;
   workspaceId: string | null;
   workspaceSettings: DatabaseRecord | null;
@@ -10211,6 +10450,31 @@ function SettingsGeneralTab({
           onCheckedChange={updateSoundEnabled}
           title="Sound"
         />
+        <SettingsRow
+          description="Only affects the main login/waitlist buttons and chat send button."
+          title="Button color"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() => onCtaAccentPreferenceChange("current")}
+              size="sm"
+              variant={ctaAccentPreference === "current" ? "default" : "outline"}
+            >
+              Current
+            </Button>
+            <Button
+              className={cn(
+                ctaAccentPreference === "blue" && blueCtaButtonClassName,
+              )}
+              onClick={() => onCtaAccentPreferenceChange("blue")}
+              size="sm"
+              variant={ctaAccentPreference === "blue" ? "default" : "outline"}
+            >
+              <span className="size-2 rounded-full bg-[#1e90ff]" />
+              Blue #1e90ff
+            </Button>
+          </div>
+        </SettingsRow>
         <SettingsRow
           description="Choose where Atmet opens by default."
           title="Startup page"
@@ -11409,15 +11673,7 @@ function AdminSparklineCard({
           <span
             className={cn(
               "flex-1 rounded-t-md",
-              [
-                "bg-emerald-500/50 dark:bg-emerald-400/45",
-                "bg-sky-500/50 dark:bg-sky-400/45",
-                "bg-violet-500/50 dark:bg-violet-400/45",
-                "bg-amber-500/55 dark:bg-amber-400/45",
-                "bg-rose-500/50 dark:bg-rose-400/45",
-                "bg-cyan-500/50 dark:bg-cyan-400/45",
-                "bg-lime-500/50 dark:bg-lime-400/45",
-              ][index],
+              usageChartBarClasses[index % usageChartBarClasses.length],
             )}
             key={`${label}-${index}`}
             style={{ height: `${height}%` }}
@@ -11453,15 +11709,7 @@ function AdminBarChart({
               <div
                 className={cn(
                   "w-full rounded-md",
-                  [
-                    "bg-emerald-500/55 dark:bg-emerald-400/45",
-                    "bg-sky-500/55 dark:bg-sky-400/45",
-                    "bg-violet-500/55 dark:bg-violet-400/45",
-                    "bg-amber-500/60 dark:bg-amber-400/45",
-                    "bg-rose-500/55 dark:bg-rose-400/45",
-                    "bg-cyan-500/55 dark:bg-cyan-400/45",
-                    "bg-lime-500/55 dark:bg-lime-400/45",
-                  ][index],
+                  usageChartBarClasses[index % usageChartBarClasses.length],
                 )}
                 style={{ height: `${value}%` }}
               />
@@ -11481,12 +11729,7 @@ function AdminPlanMix({ workspaces }: { workspaces: AdminWorkspaceRow[] }) {
     return acc;
   }, {});
   const total = Math.max(1, workspaces.length);
-  const colors = [
-    "bg-emerald-500/60 dark:bg-emerald-400/45",
-    "bg-sky-500/60 dark:bg-sky-400/45",
-    "bg-violet-500/60 dark:bg-violet-400/45",
-    "bg-amber-500/60 dark:bg-amber-400/45",
-  ];
+  const colors = usageChartBarClasses;
   const plans = Object.entries(planCounts).map(([label, count], index) => [
     label,
     Math.round((count / total) * 100),

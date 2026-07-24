@@ -26,6 +26,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { bindAtmetSounds, playAtmetSound } from "@/lib/sound";
+import {
+  blueCtaButtonClassName,
+  getInitialCtaAccentPreference,
+  type CtaAccentPreference,
+} from "@/lib/cta-accent";
 
 const workTypeOptions = [
   "Founder",
@@ -86,6 +91,9 @@ export default function LoginPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [ctaAccentPreference, setCtaAccentPreference] = useState<CtaAccentPreference>(
+    getInitialCtaAccentPreference,
+  );
   const formRef = useRef<HTMLFormElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
   const newPasswordInputRef = useRef<HTMLInputElement>(null);
@@ -128,6 +136,22 @@ export default function LoginPage() {
       void playAtmetSound("error");
     }
   }, [errorMessage]);
+
+  useEffect(() => {
+    function syncCtaAccentPreference() {
+      setCtaAccentPreference(getInitialCtaAccentPreference());
+    }
+
+    window.addEventListener("focus", syncCtaAccentPreference);
+    window.addEventListener("pageshow", syncCtaAccentPreference);
+    window.addEventListener("storage", syncCtaAccentPreference);
+
+    return () => {
+      window.removeEventListener("focus", syncCtaAccentPreference);
+      window.removeEventListener("pageshow", syncCtaAccentPreference);
+      window.removeEventListener("storage", syncCtaAccentPreference);
+    };
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -479,7 +503,7 @@ export default function LoginPage() {
                     : "mt-0 grid-rows-[0fr] -translate-y-1 opacity-0",
                 )}
               >
-                <div className="min-h-0">
+                <div className="min-h-0 px-1 pb-1">
                   <div className="grid gap-5 md:grid-cols-2 md:gap-x-6">
                     <div className="grid gap-1.5">
                       <Label
@@ -607,7 +631,11 @@ export default function LoginPage() {
               </div>
 
               <Button
-                className={cn("mt-8 w-full", waitlistSubmitted && "hidden")}
+                className={cn(
+                  "mt-8 w-full",
+                  waitlistSubmitted && "hidden",
+                  ctaAccentPreference === "blue" && blueCtaButtonClassName,
+                )}
                 disabled={isSubmitting}
                 onClick={() => void playAtmetSound("tick")}
                 size="lg"
@@ -630,7 +658,7 @@ export default function LoginPage() {
                     : "grid-rows-[1fr] translate-y-0 opacity-100",
                 )}
               >
-                <div className="min-h-0">
+                <div className="min-h-0 px-1 pb-1">
                   <div className="grid gap-1.5">
                     <Label className="text-muted-foreground" htmlFor="email">
                       Email
@@ -656,7 +684,7 @@ export default function LoginPage() {
                     : "mt-0 grid-rows-[0fr] -translate-y-1 opacity-0",
                 )}
               >
-                <div className="min-h-0">
+                <div className="min-h-0 px-1 pb-1">
                   <div className="grid gap-1.5">
                     <Label
                       className="text-muted-foreground"
@@ -688,7 +716,7 @@ export default function LoginPage() {
                     : "mt-0 grid-rows-[0fr] -translate-y-1 opacity-0",
                 )}
               >
-                <div className="min-h-0">
+                <div className="min-h-0 px-1 pb-1">
                   <div className="grid gap-2">
                     <Label
                       className="text-muted-foreground"
@@ -726,7 +754,7 @@ export default function LoginPage() {
                     : "mt-0 grid-rows-[0fr] -translate-y-1 opacity-0",
                 )}
               >
-                <div className="grid min-h-0 gap-5">
+                <div className="grid min-h-0 gap-5 px-1 pb-1">
                   <div className="grid gap-1.5">
                     <Label
                       className="text-muted-foreground"
@@ -782,7 +810,10 @@ export default function LoginPage() {
               )}
 
               <Button
-                className="mt-5 w-full"
+                className={cn(
+                  "mt-5 w-full",
+                  ctaAccentPreference === "blue" && blueCtaButtonClassName,
+                )}
                 disabled={isSubmitting}
                 onClick={() => void playAtmetSound("tick")}
                 type="submit"
@@ -819,7 +850,10 @@ export default function LoginPage() {
       <p className="absolute bottom-8 left-1/2 w-full -translate-x-1/2 px-5 text-center text-muted-foreground text-sm">
         {isWaitlistMode ? "Already have access?" : "Don't have an account?"}{" "}
         <button
-          className="font-medium text-foreground outline-none transition-[opacity,scale] duration-150 hover:opacity-75 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]"
+          className={cn(
+            "font-medium text-foreground outline-none transition-[color,opacity,scale] duration-150 hover:opacity-75 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]",
+            ctaAccentPreference === "blue" && "text-[#1e90ff]",
+          )}
           onClick={() => {
             void playAtmetSound("tick");
             if (isWaitlistMode) {
