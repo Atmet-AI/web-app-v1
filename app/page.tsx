@@ -2603,7 +2603,9 @@ export default function Home() {
               )}
               {activePage === "chat" && (
                 <ChatPage
+                  activeChat={activeSidebarChat}
                   activeChatId={activeSidebarChatId}
+                  agents={agentList}
                   chatParticipantIds={
                     activeSidebarChatId
                       ? chatParticipantIdsByChat[activeSidebarChatId] ?? []
@@ -2613,7 +2615,9 @@ export default function Home() {
                   ctaAccentPreference={ctaAccentPreference}
                   draftRequest={chatDraftRequest}
                   members={members}
+                  onAddChatToAgentWorkflow={addChatToAgentWorkflow}
                   onAddMemberToChat={addMemberToChat}
+                  onCreateAgent={createAgent}
                   onCreateChat={createSidebarChat}
                   onUpdateChatTitle={(chatId, title) => {
                     setSidebarChats((current) =>
@@ -4010,31 +4014,41 @@ function PageHeader({
 }
 
 function ChatPage({
+  activeChat,
   activeChatId,
+  agents,
   chatParticipantIds,
   composerOptions,
   ctaAccentPreference,
   draftRequest,
   members,
+  onAddChatToAgentWorkflow,
   onAddMemberToChat,
+  onCreateAgent,
   onCreateChat,
   onUpdateChatTitle,
   workspaceId,
 }: {
+  activeChat: SidebarChat | null;
   activeChatId: string | null;
+  agents: Agent[];
   chatParticipantIds: string[];
   composerOptions: ComposerOption[];
   ctaAccentPreference: CtaAccentPreference;
   draftRequest: ChatDraftRequest | null;
   members: WorkspaceUser[];
+  onAddChatToAgentWorkflow: (agentName: string, chat: SidebarChat) => void;
   onAddMemberToChat: (chatId: string, memberId: string) => void;
+  onCreateAgent: (name: string) => void | Promise<void>;
   onCreateChat: (title: string) => Promise<string>;
   onUpdateChatTitle: (chatId: string, title: string) => void;
   workspaceId: string | null;
 }) {
   return (
     <ChatExperience
+      activeChat={activeChat}
       activeChatId={activeChatId}
+      agents={agents}
       chatParticipantIds={chatParticipantIds}
       composerOptions={composerOptions}
       ctaAccentPreference={ctaAccentPreference}
@@ -4042,7 +4056,9 @@ function ChatPage({
         draftRequest?.chatId === activeChatId ? draftRequest : null
       }
       members={members}
+      onAddChatToAgentWorkflow={onAddChatToAgentWorkflow}
       onAddMemberToChat={onAddMemberToChat}
+      onCreateAgent={onCreateAgent}
       onCreateChat={onCreateChat}
       onUpdateChatTitle={onUpdateChatTitle}
       workspaceId={workspaceId}
@@ -4051,26 +4067,34 @@ function ChatPage({
 }
 
 function ChatExperience({
+  activeChat = null,
   activeChatId = null,
+  agents = [],
   chatParticipantIds = [],
   compact = false,
   composerOptions = [],
   ctaAccentPreference = "current",
   draftRequest = null,
   members = [],
+  onAddChatToAgentWorkflow,
   onAddMemberToChat,
+  onCreateAgent,
   onCreateChat,
   onUpdateChatTitle,
   workspaceId = null,
 }: {
+  activeChat?: SidebarChat | null;
   activeChatId?: string | null;
+  agents?: Agent[];
   chatParticipantIds?: string[];
   compact?: boolean;
   composerOptions?: ComposerOption[];
   ctaAccentPreference?: CtaAccentPreference;
   draftRequest?: ChatDraftRequest | null;
   members?: WorkspaceUser[];
+  onAddChatToAgentWorkflow?: (agentName: string, chat: SidebarChat) => void;
   onAddMemberToChat?: (chatId: string, memberId: string) => void;
+  onCreateAgent?: (name: string) => void | Promise<void>;
   onCreateChat?: (title: string) => Promise<string>;
   onUpdateChatTitle?: (chatId: string, title: string) => void;
   workspaceId?: string | null;
@@ -4082,6 +4106,8 @@ function ChatExperience({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [composerIsEmpty, setComposerIsEmpty] = useState(true);
+  const [lastResponseUsedApp, setLastResponseUsedApp] = useState(false);
+  const [createAgentDialogOpen, setCreateAgentDialogOpen] = useState(false);
   const [composerAttachments, setComposerAttachments] = useState<
     ComposerAttachment[]
   >([]);
@@ -4281,6 +4307,8 @@ function ChatExperience({
     async function loadMessages() {
       if (!activeChatId) {
         setMessages([]);
+        setLastResponseUsedApp(false);
+        setCreateAgentDialogOpen(false);
         return;
       }
 
@@ -4483,6 +4511,8 @@ function ChatExperience({
 
     const selectedAppKeys = getSelectedComposerAppKeys(editor);
     const selectedMentions = getSelectedComposerMentions(editor);
+    setLastResponseUsedApp(false);
+    setCreateAgentDialogOpen(false);
 
     const optimisticMessage = {
       content,
@@ -4572,6 +4602,7 @@ function ChatExperience({
       const savedChatTitle = asString(payload.chatTitle);
 
       if (savedAssistantMessage) {
+        setLastResponseUsedApp(selectedAppKeys.length > 0);
         void playAtmetSuccessSound({ fallback: createdChatForMessage });
       }
 
@@ -4726,6 +4757,7 @@ function ChatExperience({
       if (spacerBeforeBadge && isComposerBadgeNode(possibleBadge)) {
         possibleBadge.remove();
         textNode.textContent = textAfterCaret;
+        requestAnimationFrame(updateComposerState);
 
         const nextRange = document.createRange();
         nextRange.setStart(textNode, 0);
@@ -4753,8 +4785,16 @@ function ChatExperience({
     }
 
     previousNode.remove();
+    requestAnimationFrame(updateComposerState);
     return true;
   }
+
+  const showCreateAgentFrame =
+    !compact &&
+    lastResponseUsedApp &&
+    Boolean(activeChat) &&
+    Boolean(onAddChatToAgentWorkflow) &&
+    Boolean(onCreateAgent);
 
   return (
     <div
@@ -4820,6 +4860,16 @@ function ChatExperience({
           hasMessages && "absolute inset-x-0 bottom-1 z-10",
         )}
       >
+          {showCreateAgentFrame && (
+            <button
+              className="absolute -top-8 left-5 z-10 inline-flex h-8 items-center gap-1.5 rounded-t-xl border border-b-0 border-black/10 bg-white/28 px-3 text-xs font-medium text-foreground backdrop-blur-2xl backdrop-saturate-150 transition-[background-color,color] hover:bg-white/45 dark:border-white/10 dark:bg-white/[0.035] dark:hover:bg-white/[0.07]"
+              onClick={() => setCreateAgentDialogOpen(true)}
+              type="button"
+            >
+              <Icon className="size-3.5" icon={WorkflowSquare01Icon} />
+              Create Agent
+            </button>
+          )}
           <div
             aria-label="Message Atmet"
             className="relative min-h-[7.25rem] cursor-text px-4 py-3 text-base leading-6 outline-none sm:text-sm"
@@ -5072,6 +5122,19 @@ function ChatExperience({
             </Button>
           </div>
       </div>
+      {activeChat && onAddChatToAgentWorkflow && onCreateAgent ? (
+        <AddChatToAgentWorkflowDialog
+          agents={agents}
+          chat={activeChat}
+          onCreateAgent={onCreateAgent}
+          onOpenChange={setCreateAgentDialogOpen}
+          onSelectAgent={(agentName) => {
+            onAddChatToAgentWorkflow(agentName, activeChat);
+            setCreateAgentDialogOpen(false);
+          }}
+          open={createAgentDialogOpen}
+        />
+      ) : null}
     </div>
   );
 }
