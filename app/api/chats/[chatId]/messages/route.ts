@@ -63,7 +63,11 @@ export async function POST(request: Request, context: RouteContext) {
       throw error;
     }
 
-    await auth.admin.from("chats").update({ last_message_at: new Date().toISOString() }).eq("id", chatId);
+    await auth.admin
+      .from("chats")
+      .update({ last_message_at: new Date().toISOString() })
+      .eq("id", chatId)
+      .eq("user_id", auth.user.id);
 
     return created({ message: data });
   } catch (error) {

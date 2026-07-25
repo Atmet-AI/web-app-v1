@@ -18,6 +18,7 @@ export async function GET(_request: Request, context: RouteContext) {
       .from("chats")
       .select("*, chat_messages(id, role, content, created_at)")
       .eq("workspace_id", workspaceId)
+      .eq("user_id", auth.user.id)
       .is("deleted_at", null)
       .order("pinned", { ascending: false })
       .order("updated_at", { ascending: false });

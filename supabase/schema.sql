@@ -511,6 +511,7 @@ create table if not exists public.session_logs (
 
 create index if not exists workspace_members_user_id_idx on public.workspace_members(user_id);
 create index if not exists chats_workspace_id_idx on public.chats(workspace_id);
+create index if not exists chats_user_id_idx on public.chats(user_id);
 create index if not exists skills_workspace_id_idx on public.skills(workspace_id);
 create index if not exists skills_created_by_idx on public.skills(created_by);
 create index if not exists workflow_agents_workspace_id_idx on public.workflow_agents(workspace_id);
@@ -1116,23 +1117,59 @@ for insert with check (
 );
 
 create policy "chats read" on public.chats
-for select using (public.is_workspace_member(workspace_id) or public.is_super_admin());
+for select using (user_id = auth.uid());
 
 create policy "chats manage" on public.chats
-for all using (public.has_workspace_permission(workspace_id, 'chats.manage'))
-with check (public.has_workspace_permission(workspace_id, 'chats.manage'));
+for all using (
+  user_id = auth.uid()
+  and public.has_workspace_permission(workspace_id, 'chats.manage')
+)
+with check (
+  user_id = auth.uid()
+  and public.has_workspace_permission(workspace_id, 'chats.manage')
+);
 
 create policy "messages read" on public.chat_messages
-for select using (public.is_workspace_member(public.workspace_id_for_chat(chat_id)) or public.is_super_admin());
+for select using (
+  exists (
+    select 1 from public.chats c
+    where c.id = chat_messages.chat_id
+      and c.user_id = auth.uid()
+      and c.deleted_at is null
+  )
+);
 
 create policy "messages create" on public.chat_messages
-for insert with check (public.has_workspace_permission(public.workspace_id_for_chat(chat_id), 'chats.manage'));
+for insert with check (
+  exists (
+    select 1 from public.chats c
+    where c.id = chat_messages.chat_id
+      and c.user_id = auth.uid()
+      and c.deleted_at is null
+      and public.has_workspace_permission(c.workspace_id, 'chats.manage')
+  )
+);
 
 create policy "mentions read" on public.chat_mentions
-for select using (public.is_workspace_member(public.workspace_id_for_chat(chat_id)) or public.is_super_admin());
+for select using (
+  exists (
+    select 1 from public.chats c
+    where c.id = chat_mentions.chat_id
+      and c.user_id = auth.uid()
+      and c.deleted_at is null
+  )
+);
 
 create policy "mentions create" on public.chat_mentions
-for insert with check (public.has_workspace_permission(public.workspace_id_for_chat(chat_id), 'chats.manage'));
+for insert with check (
+  exists (
+    select 1 from public.chats c
+    where c.id = chat_mentions.chat_id
+      and c.user_id = auth.uid()
+      and c.deleted_at is null
+      and public.has_workspace_permission(c.workspace_id, 'chats.manage')
+  )
+);
 
 create policy "ai providers read" on public.ai_providers
 for select using (enabled = true or public.is_super_admin());

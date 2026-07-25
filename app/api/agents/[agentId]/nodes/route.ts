@@ -1,5 +1,5 @@
 import { isRouteResponse } from "@/lib/api/auth";
-import { requireAgentPermission } from "@/lib/api/permissions";
+import { requireAgentPermission, requireChatPermission } from "@/lib/api/permissions";
 import { created, ok, readJson, serverError, stringValue, numberValue } from "@/lib/api/http";
 
 type RouteContext = {
@@ -16,6 +16,14 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     const body = await readJson(request);
+    const sourceChatId = stringValue(body.sourceChatId);
+    if (sourceChatId) {
+      const chatAuth = await requireChatPermission(sourceChatId, "chats.manage");
+      if (isRouteResponse(chatAuth)) {
+        return chatAuth;
+      }
+    }
+
     const { data, error } = await auth.admin
       .from("workflow_nodes")
       .insert({
@@ -23,7 +31,7 @@ export async function POST(request: Request, context: RouteContext) {
         title: stringValue(body.title, "Empty chat"),
         runtime_state: stringValue(body.runtimeState, "paused"),
         status: stringValue(body.status, "ready"),
-        source_chat_id: stringValue(body.sourceChatId) || null,
+        source_chat_id: sourceChatId || null,
         app_keys: Array.isArray(body.appKeys) ? body.appKeys : [],
         position_x: numberValue(body.x, 120),
         position_y: numberValue(body.y, 120),

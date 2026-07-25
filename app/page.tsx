@@ -169,6 +169,7 @@ import { GoogleCalendar } from "@/components/ui/svgs/googleCalendar";
 import { GoogleSheets } from "@/components/ui/svgs/googleSheets";
 import { Instagram } from "@/components/ui/svgs/instagram";
 import { Openai } from "@/components/ui/svgs/openai";
+import { Outlook } from "@/components/ui/svgs/outlook";
 import { Slack } from "@/components/ui/svgs/slack";
 import { Telegram } from "@/components/ui/svgs/telegram";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -190,6 +191,10 @@ import {
   saveCtaAccentPreference,
   type CtaAccentPreference,
 } from "@/lib/cta-accent";
+import {
+  connectorCatalog,
+  connectorCatalogKeys,
+} from "@/lib/connectors/catalog";
 
 type PageKey =
   | "chat"
@@ -343,94 +348,9 @@ type ConnectorItem = {
   paragraph: string;
 };
 
-const connectorCatalogKeys = [
-  "chatgpt",
-  "claude",
-  "gmail",
-  "email",
-  "drive",
-  "google-sheets",
-  "instagram",
-  "calendar",
-  "telegram",
-  "slack",
-  "github",
-] as const;
-
 const connectorCatalogKeySet = new Set<string>(connectorCatalogKeys);
 
-const defaultConnectorCatalog = [
-  {
-    description: "Use OpenAI chat models inside Atmet workflows.",
-    gradient: "from-emerald-400/20 via-stone-100/10 to-stone-500/10",
-    key: "chatgpt",
-    logo: "AI",
-    name: "ChatGPT",
-  },
-  {
-    description: "Use Anthropic Claude for writing, analysis, and reasoning.",
-    gradient: "from-orange-300/20 via-stone-100/10 to-stone-500/10",
-    key: "claude",
-    logo: "CL",
-    name: "Claude",
-  },
-  {
-    description: "Read, draft, and send Gmail messages with workspace context.",
-    gradient: "from-red-300/20 via-stone-100/10 to-blue-300/10",
-    key: "gmail",
-    logo: "GM",
-    name: "Gmail",
-  },
-  {
-    description: "Search, read, and organize shared workspace files.",
-    gradient: "from-sky-300/20 via-stone-100/10 to-lime-300/10",
-    key: "drive",
-    logo: "DR",
-    name: "Drive",
-  },
-  {
-    description: "Read spreadsheet data and create structured updates.",
-    gradient: "from-green-300/20 via-stone-100/10 to-emerald-300/10",
-    key: "google-sheets",
-    logo: "GS",
-    name: "Google Sheets",
-  },
-  {
-    description: "Track Instagram content, comments, and social workflow context.",
-    gradient: "from-pink-400/20 via-stone-100/10 to-orange-300/10",
-    key: "instagram",
-    logo: "IG",
-    name: "Instagram",
-  },
-  {
-    description: "Use meetings, availability, and follow-ups in Atmet.",
-    gradient: "from-blue-300/20 via-stone-100/10 to-amber-300/10",
-    key: "calendar",
-    logo: "CA",
-    name: "Calendar",
-  },
-  {
-    description: "Route Telegram messages and workflow updates through Atmet.",
-    gradient: "from-sky-400/20 via-stone-100/10 to-cyan-300/10",
-    key: "telegram",
-    logo: "TG",
-    name: "Telegram",
-  },
-  {
-    description: "Summarize channels and turn decisions into tasks.",
-    gradient: "from-violet-400/20 via-stone-100/10 to-amber-300/10",
-    key: "slack",
-    logo: "SL",
-    name: "Slack",
-  },
-  {
-    description: "Track pull requests, issues, reviews, and releases.",
-    gradient: "from-stone-500/20 via-stone-100/10 to-blue-400/10",
-    key: "github",
-    logo: "GH",
-    name: "GitHub",
-  },
-] satisfies DatabaseRecord[];
+const defaultConnectorCatalog = connectorCatalog satisfies DatabaseRecord[];
 
 const settingsTabs = [
   { value: "profile", label: "Profile", icon: UserRound },
@@ -927,9 +847,17 @@ type AiOutputVariant =
 type ChatMessage = {
   content: string;
   id: string;
+  mentions?: ChatMessageMention[];
   role: "assistant" | "user";
   state?: "complete" | "thinking";
   variant?: AiOutputVariant;
+};
+
+type ChatMessageMention = {
+  key?: string;
+  kind: "apps" | "skills";
+  logo?: string;
+  name: string;
 };
 
 type AiTextSegment =
@@ -1043,6 +971,20 @@ function asNumber(value: unknown, fallback = 0) {
 
 function asBoolean(value: unknown, fallback = false) {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function getCurrentUserConnectorStatus(connection: DatabaseRecord, userId: string) {
+  const settings = asRecord(connection.settings);
+  const provider = asString(settings.provider);
+  const users = asRecord(settings.users);
+  const userConnection = userId ? asRecord(users[userId]) : {};
+  const userStatus = asString(userConnection.status).toLowerCase();
+
+  if (userStatus) {
+    return userStatus;
+  }
+
+  return provider === "composio" ? "" : asString(connection.status).toLowerCase();
 }
 
 function getRecordByKey(record: DatabaseRecord, key: string) {
@@ -1220,8 +1162,28 @@ function mapChatMessage(row: unknown): ChatMessage | null {
   return {
     content: asString(record.content),
     id,
+    mentions: asRecordArray(asRecord(record.metadata).mentions)
+      .map(mapChatMessageMention)
+      .filter((mention): mention is ChatMessageMention => Boolean(mention)),
     role,
     state: "complete",
+  };
+}
+
+function mapChatMessageMention(row: unknown): ChatMessageMention | null {
+  const record = asRecord(row);
+  const kind = asString(record.kind);
+  const name = asString(record.name);
+
+  if (!name || (kind !== "apps" && kind !== "skills")) {
+    return null;
+  }
+
+  return {
+    key: asString(record.key),
+    kind,
+    logo: asString(record.logo),
+    name,
   };
 }
 
@@ -1453,7 +1415,7 @@ function mergeNotifications(
   );
 }
 
-const dashboardCacheKey = "atmet.dashboard.shell.v3";
+const dashboardCacheKey = "atmet.dashboard.shell.v5";
 const dashboardCacheMaxAgeMs = 1000 * 60 * 10;
 
 function getCacheableDashboardPayload(payload: DashboardData): DashboardData {
@@ -1485,6 +1447,7 @@ function getCacheableDashboardPayload(payload: DashboardData): DashboardData {
       const record = asRecord(connection);
       return {
         app_key: record.app_key,
+        settings: record.settings,
         status: record.status,
       };
     }),
@@ -1758,13 +1721,19 @@ export default function Home() {
   }, []);
 
   function applyDashboardPayload(payload: DashboardData) {
+    const profileRecord = asRecord(payload.profile);
     const mappedWorkspaces = asRecordArray(payload.workspaces)
       .map(mapWorkspace)
       .filter((item): item is WorkspaceSummary => Boolean(item));
     const mappedWorkspace = mapWorkspace(payload.workspace);
     const connectionRows = asRecordArray(payload.connections);
+    const currentUserId = asString(profileRecord.id);
     const connectedKeys = connectionRows
-      .filter((connection) => asString(connection.status) === "connected")
+      .filter(
+        (connection) =>
+          getCurrentUserConnectorStatus(connection, currentUserId) ===
+          "connected",
+      )
       .map((connection) => asString(connection.app_key))
       .filter(Boolean);
     const connectionKeySet = new Set(connectedKeys);
@@ -1790,7 +1759,7 @@ export default function Home() {
 
     setWorkspace(mappedWorkspace);
     setWorkspaces(mappedWorkspaces);
-    setProfile(asRecord(payload.profile));
+    setProfile(profileRecord);
     setMembers(mappedMembers);
     setNotifications(mappedNotifications);
     setSidebarChats(mappedChats);
@@ -4369,10 +4338,13 @@ function ChatExperience({
       editor.focus();
       return;
     }
+    const selectedAppKeys = getSelectedComposerAppKeys(editor);
+    const selectedMentions = getSelectedComposerMentions(editor);
 
     const optimisticMessage = {
       content,
       id: `pending-${Date.now()}`,
+      mentions: selectedMentions,
       role: "user" as const,
     };
     const assistantPendingId = `thinking-${Date.now()}`;
@@ -4424,8 +4396,10 @@ function ChatExperience({
     try {
       const response = await fetch("/api/ai/chat", {
         body: JSON.stringify({
+          appKeys: selectedAppKeys,
           chatId: targetChatId,
           content,
+          mentions: selectedMentions,
           modelKey: selectedModel.id,
           workspaceId,
         }),
@@ -4933,6 +4907,10 @@ function ConnectorLogo({
     return <Gmail className={logoClassName} />;
   }
 
+  if (key === "outlook") {
+    return <Outlook className={logoClassName} />;
+  }
+
   if (key === "drive") {
     return <Drive className={logoClassName} />;
   }
@@ -5084,8 +5062,18 @@ function ChatMessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end px-1 sm:px-2 lg:px-3">
-        <div className="max-w-[80%] whitespace-pre-wrap rounded-xl bg-secondary px-3 py-2 text-sm leading-6 text-secondary-foreground">
-          {message.content}
+        <div className="max-w-[80%] rounded-xl bg-secondary px-3 py-2 text-sm leading-6 text-secondary-foreground">
+          {message.mentions && message.mentions.length > 0 ? (
+            <div className="mb-1.5 flex flex-wrap items-center gap-1">
+              {message.mentions.map((mention, index) => (
+                <ChatMentionBadge
+                  key={`${mention.kind}-${mention.key}-${mention.name}-${index}`}
+                  mention={mention}
+                />
+              ))}
+            </div>
+          ) : null}
+          <div className="whitespace-pre-wrap">{message.content}</div>
         </div>
       </div>
     );
@@ -5101,6 +5089,44 @@ function ChatMessageBubble({ message }: { message: ChatMessage }) {
         )}
       </div>
     </div>
+  );
+}
+
+function ChatMentionBadge({ mention }: { mention: ChatMessageMention }) {
+  const isApp = mention.kind === "apps";
+
+  return (
+    <span
+      className={cn(
+        "inline-flex h-5 items-center gap-1 rounded-md px-1.5 align-middle text-[0.78em] font-medium leading-none",
+        isApp
+          ? "bg-info/16 text-info-foreground"
+          : "bg-pink-500/16 text-pink-700 dark:text-pink-200",
+      )}
+    >
+      <span
+        className={cn(
+          "grid size-3.5 shrink-0 place-items-center overflow-hidden rounded-sm",
+          isApp
+            ? "text-info-foreground"
+            : "text-pink-700 dark:text-pink-200",
+        )}
+      >
+        {isApp ? (
+          <ConnectorLogo
+            className="size-full"
+            connector={{
+              key: mention.key,
+              logo: mention.logo || getOptionInitials(mention.name),
+              name: mention.name,
+            }}
+          />
+        ) : (
+          "/"
+        )}
+      </span>
+      <span>{mention.name}</span>
+    </span>
   );
 }
 
@@ -5984,6 +6010,8 @@ function getComposerAppLogoSvg(key?: string) {
     case "gmail":
     case "email":
       return `<svg viewBox="0 49.4 512 399.4" aria-hidden="true"><path fill="#4285f4" d="M34.9 448.8h81.5V251L0 163.7v250.2c0 19.3 15.6 34.9 34.9 34.9z"/><path fill="#34a853" d="M395.6 448.8h81.5c19.3 0 34.9-15.6 34.9-34.9V163.7L395.6 251z"/><path fill="#fbbc04" d="M395.6 99.7V251L512 163.7v-46.5c0-43.1-49.3-67.8-83.8-41.9z"/><path fill="#ea4335" d="M116.4 251V99.7L256 204.5 395.6 99.7V251L256 355.7z"/><path fill="#c5221f" d="M0 117.2v46.5L116.4 251V99.7L83.8 75.3C49.3 49.4 0 74 0 117.2z"/></svg>`;
+    case "outlook":
+      return `<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#0a5eb8" d="M4 12.5 21 9v30L4 35.5z"/><path fill="#0078d4" d="M20 12h20a4 4 0 0 1 4 4v18a4 4 0 0 1-4 4H20z"/><path fill="#28a8ea" d="M27 17h16v7H27z"/><path fill="#50d9ff" d="M27 24h16v7H27z"/><path fill="#0a5eb8" d="M27 31h16v3a4 4 0 0 1-4 4H27z"/><path fill="#fff" opacity=".92" d="M43.3 17.6 33.9 25l9.4 7.4V17.6z"/><path fill="#fff" opacity=".7" d="m27 18 8.9 7L27 32z"/><rect width="22" height="22" x="4" y="13" fill="#106ebe" rx="2.5"/><path fill="#fff" d="M15.2 30.5c-3.5 0-5.9-2.6-5.9-6.1 0-3.6 2.4-6.2 6-6.2s5.9 2.6 5.9 6.1c0 3.6-2.4 6.2-6 6.2Zm.1-2.4c1.8 0 2.9-1.5 2.9-3.7 0-2.3-1.1-3.8-2.9-3.8s-3 1.5-3 3.8c0 2.2 1.2 3.7 3 3.7Z"/></svg>`;
     case "google-sheets":
       return `<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#0f9d58" d="M10 4h20l8 8v32H10z"/><path fill="#87d3a2" d="M30 4v8h8z"/><path fill="#fff" d="M16 20h16v16H16zm2 2v4h5v-4zm7 0v4h5v-4zm-7 6v6h5v-6zm7 0v6h5v-6z"/></svg>`;
     case "calendar":
@@ -6009,6 +6037,12 @@ function createComposerBadge(option: ComposerOption) {
   badge.dataset.composerToken = "true";
   badge.dataset.composerLabel = option.name;
   badge.dataset.composerKind = option.kind;
+  if (option.logo) {
+    badge.dataset.composerLogo = option.logo;
+  }
+  if (isApp && option.connectorKey) {
+    badge.dataset.composerAppKey = option.connectorKey;
+  }
 
   const icon = document.createElement("span");
   icon.className = isApp
@@ -6061,6 +6095,38 @@ function getComposerPlainText(root: HTMLElement) {
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
+}
+
+function getSelectedComposerAppKeys(root: HTMLElement) {
+  return Array.from(
+    root.querySelectorAll<HTMLElement>('[data-composer-kind="apps"]'),
+  )
+    .map((node) => node.dataset.composerAppKey ?? "")
+    .filter(Boolean);
+}
+
+function getSelectedComposerMentions(root: HTMLElement): ChatMessageMention[] {
+  const mentions = Array.from(
+    root.querySelectorAll<HTMLElement>("[data-composer-token='true']"),
+  )
+    .map((node): ChatMessageMention | null => {
+      const kind = node.dataset.composerKind;
+      const name = node.dataset.composerLabel ?? "";
+
+      if (!name || (kind !== "apps" && kind !== "skills")) {
+        return null;
+      }
+
+      return {
+        key: node.dataset.composerAppKey ?? "",
+        kind,
+        logo: node.dataset.composerLogo ?? "",
+        name,
+      };
+    })
+    .filter((mention): mention is ChatMessageMention => Boolean(mention));
+
+  return mentions;
 }
 
 function getOptionInitials(name: string) {
@@ -9053,6 +9119,9 @@ function ConnectorsPage({
   const [connectorFilter, setConnectorFilter] =
     useState<ConnectorFilter>("all");
   const [connectorSearch, setConnectorSearch] = useState("");
+  const [connectorActionKey, setConnectorActionKey] = useState<string | null>(
+    null,
+  );
   const [selectedConnectorName, setSelectedConnectorName] = useState<
     string | null
   >(null);
@@ -9078,15 +9147,12 @@ function ConnectorsPage({
   async function toggleConnector(connector: ConnectorItem) {
     const connectorKey = connector.key ?? connector.name;
     const currentlyConnected = connectedConnectorKeys.includes(connectorKey);
-    onConnectedConnectorKeysChange((current) =>
-      currentlyConnected
-        ? current.filter((key) => key !== connectorKey)
-        : [...current, connectorKey],
-    );
 
     if (!workspaceId) {
       return;
     }
+
+    setConnectorActionKey(connectorKey);
 
     try {
       const response = await fetch(`/api/workspaces/${workspaceId}/connectors`, {
@@ -9099,15 +9165,31 @@ function ConnectorsPage({
       });
 
       if (!response.ok) {
-        throw new Error("Connector update failed");
+        throw new Error(await getResponseError(response, "Connector update failed"));
       }
-    } catch (error) {
-      console.error(error);
+
+      const payload = asRecord(await response.json());
+      const redirectUrl = asString(payload.redirectUrl);
+
+      if (!currentlyConnected && redirectUrl) {
+        window.location.assign(redirectUrl);
+        return;
+      }
+
       onConnectedConnectorKeysChange((current) =>
         currentlyConnected
-          ? [...current, connectorKey]
-          : current.filter((key) => key !== connectorKey),
+          ? current.filter((key) => key !== connectorKey)
+          : current.includes(connectorKey)
+            ? current
+            : [...current, connectorKey],
       );
+    } catch (error) {
+      console.error(error);
+      window.alert(
+        error instanceof Error ? error.message : "Connector update failed",
+      );
+    } finally {
+      setConnectorActionKey(null);
     }
   }
 
@@ -9118,6 +9200,7 @@ function ConnectorsPage({
           selectedConnector.key ?? selectedConnector.name,
         )}
         connector={selectedConnector}
+        busy={connectorActionKey === (selectedConnector.key ?? selectedConnector.name)}
         onBack={() => setSelectedConnectorName(null)}
         onToggleConnect={() => toggleConnector(selectedConnector)}
       />
@@ -9231,11 +9314,13 @@ function ConnectorFilterMenu({
 }
 
 function ConnectorProfilePage({
+  busy,
   connected,
   connector,
   onBack,
   onToggleConnect,
 }: {
+  busy: boolean;
   connected: boolean;
   connector: ConnectorItem;
   onBack: () => void;
@@ -9274,12 +9359,13 @@ function ConnectorProfilePage({
             </div>
             <Button
               className="active:scale-[0.96]"
+              disabled={busy}
               onClick={onToggleConnect}
               size="sm"
               variant={connected ? "secondary" : "default"}
             >
               <Icon icon={PlugIcon} />
-              {connected ? "Disconnect" : "Connect"}
+              {busy ? "Working..." : connected ? "Disconnect" : "Connect"}
             </Button>
           </div>
         </div>

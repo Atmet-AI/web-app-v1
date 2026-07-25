@@ -400,6 +400,7 @@ export async function GET() {
         .from("chats")
         .select("*")
         .eq("workspace_id", workspaceId)
+        .eq("user_id", auth.user.id)
         .is("deleted_at", null)
         .order("pinned", { ascending: false })
         .order("updated_at", { ascending: false }),

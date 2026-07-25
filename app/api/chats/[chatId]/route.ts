@@ -19,6 +19,7 @@ export async function GET(_request: Request, context: RouteContext) {
       .from("chats")
       .select("*, chat_messages(*), chat_mentions(*)")
       .eq("id", chatId)
+      .eq("user_id", auth.user.id)
       .single();
 
     if (error) {
@@ -49,6 +50,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         archived: typeof body.archived === "boolean" ? body.archived : undefined,
       })
       .eq("id", chatId)
+      .eq("user_id", auth.user.id)
       .select("*")
       .single();
 
@@ -74,7 +76,8 @@ export async function DELETE(_request: Request, context: RouteContext) {
     const { error } = await auth.admin
       .from("chats")
       .update({ deleted_at: new Date().toISOString() })
-      .eq("id", chatId);
+      .eq("id", chatId)
+      .eq("user_id", auth.user.id);
 
     if (error) {
       throw error;

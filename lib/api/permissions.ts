@@ -13,7 +13,32 @@ export async function requireAgentPermission(agentId: string, permissionKey: str
 }
 
 export async function requireChatPermission(chatId: string, permissionKey: string) {
-  return requireWorkspacePermissionForRelatedRecord("chats", chatId, "workspace_id", permissionKey);
+  const userContext = await requireUser();
+
+  if (isRouteResponse(userContext)) {
+    return userContext;
+  }
+
+  const { data, error } = await userContext.admin
+    .from("chats")
+    .select("workspace_id, user_id")
+    .eq("id", chatId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  const chat = data as Record<string, unknown> | null;
+  const workspaceId = chat?.workspace_id as string | undefined;
+  const ownerId = chat?.user_id as string | undefined;
+
+  if (!workspaceId || ownerId !== userContext.user.id) {
+    return notFound();
+  }
+
+  return requireWorkspacePermission(workspaceId, permissionKey);
 }
 
 async function requireWorkspacePermissionForRelatedRecord(
