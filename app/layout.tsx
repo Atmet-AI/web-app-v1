@@ -10,10 +10,11 @@ const interMono = Inter({ subsets: ["latin"], variable: "--font-mono" });
 const appUrl = "https://app.atmetai.com";
 const faviconUrl = "/Atmet%20Favicon.png";
 const previewImageUrl = "/Preview%20Image%20Link.png";
+const appDescription = "Your AI workspace for chats, agents, apps, and automations.";
 
 export const metadata: Metadata = {
   title: "Atmet Platform",
-  description: "Dashboard for Atmet agents, skills, connectors, and admin tools.",
+  description: appDescription,
   metadataBase: new URL(appUrl),
   alternates: {
     canonical: appUrl,
@@ -25,7 +26,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "Atmet Platform",
-    description: "Dashboard for Atmet agents, skills, connectors, and admin tools.",
+    description: appDescription,
     url: appUrl,
     siteName: "Atmet",
     images: [
@@ -41,7 +42,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Atmet Platform",
-    description: "Dashboard for Atmet agents, skills, connectors, and admin tools.",
+    description: appDescription,
     images: [previewImageUrl],
   },
 };

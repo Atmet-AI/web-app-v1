@@ -247,6 +247,9 @@ export default function LoginPage() {
     if (isSubmitting) {
       return;
     }
+    if (mode === "login" || mode === "waitlist") {
+      void playAtmetSound("tick");
+    }
     setErrorMessage("");
     setSuccessMessage("");
 
@@ -528,10 +531,10 @@ export default function LoginPage() {
 
                     <WaitlistSelectField
                       disabled={waitlistSubmitted}
-                      label="Work type"
+                      label="Industry"
                       onValueChange={setWaitlistWorkType}
                       options={workTypeOptions}
-                      placeholder="Select work type"
+                      placeholder="Select industry"
                       value={waitlistWorkType}
                     />
 
@@ -637,7 +640,6 @@ export default function LoginPage() {
                   ctaAccentPreference === "blue" && blueCtaButtonClassName,
                 )}
                 disabled={isSubmitting}
-                onClick={() => void playAtmetSound("tick")}
                 size="lg"
                 type="submit"
               >
@@ -815,7 +817,6 @@ export default function LoginPage() {
                   ctaAccentPreference === "blue" && blueCtaButtonClassName,
                 )}
                 disabled={isSubmitting}
-                onClick={() => void playAtmetSound("tick")}
                 type="submit"
               >
                 {isSubmitting && <Spinner className="size-4" />}

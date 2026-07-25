@@ -13809,7 +13809,7 @@ function AdminRequestsTable({
   );
   const requestWorkTypeOptions = getTableFilterOptions(
     rows.map((row) => row.workType || row.useCase),
-    "All work types",
+    "All industries",
   );
   const requestCountryOptions = getTableFilterOptions(
     rows.map((row) => row.country),
@@ -13855,7 +13855,7 @@ function AdminRequestsTable({
           filterValue={requestFilter}
           filters={[
             {
-              label: "Filter work type",
+              label: "Filter industry",
               onChange: setRequestWorkTypeFilter,
               options: requestWorkTypeOptions,
               value: requestWorkTypeFilter,
@@ -13881,7 +13881,7 @@ function AdminRequestsTable({
               <TableHead>Email</TableHead>
               <TableHead>Company</TableHead>
               <TableHead>Company size</TableHead>
-              <TableHead>Work type</TableHead>
+              <TableHead>Industry</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Source</TableHead>
               <TableHead>Country</TableHead>
