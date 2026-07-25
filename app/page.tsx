@@ -180,10 +180,13 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { summarizeChatTitle } from "@/lib/chats/title";
 import {
   bindAtmetSounds,
   playAtmetSound,
+  playAtmetSuccessSound,
   setAtmetSoundEnabled,
+  warmAtmetAudio,
 } from "@/lib/sound";
 import {
   blueCtaButtonClassName,
@@ -736,6 +739,28 @@ type ChatDraftRequest = {
 };
 
 const lastSelectedChatModelKey = "atmet.chat.selected-model";
+const chatAttachmentAccept = [
+  "image/*",
+  ".csv",
+  ".docx",
+  ".epub",
+  ".html",
+  ".json",
+  ".md",
+  ".odp",
+  ".ods",
+  ".odt",
+  ".pdf",
+  ".pptx",
+  ".rtf",
+  ".txt",
+  ".xlsx",
+  ".xml",
+  ".yaml",
+  ".yml",
+].join(",");
+const maxComposerAttachments = 6;
+const maxComposerAttachmentBytes = 8 * 1024 * 1024;
 const initialSidebarChats: SidebarChat[] = [];
 
 type ChatModelLogo = "anthropic" | "atmet" | "openai";
@@ -849,7 +874,7 @@ type ChatMessage = {
   id: string;
   mentions?: ChatMessageMention[];
   role: "assistant" | "user";
-  state?: "complete" | "thinking";
+  state?: "complete" | "thinking" | "typing";
   variant?: AiOutputVariant;
 };
 
@@ -858,6 +883,14 @@ type ChatMessageMention = {
   kind: "apps" | "skills";
   logo?: string;
   name: string;
+};
+
+type ComposerAttachment = {
+  data: string;
+  id: string;
+  name: string;
+  size: number;
+  type: string;
 };
 
 type AiTextSegment =
@@ -971,6 +1004,49 @@ function asNumber(value: unknown, fallback = 0) {
 
 function asBoolean(value: unknown, fallback = false) {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB"];
+  let size = bytes;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${size >= 10 || unitIndex === 0 ? Math.round(size) : size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+
+  return window.btoa(binary);
+}
+
+async function fileToComposerAttachment(file: File): Promise<ComposerAttachment> {
+  if (file.size > maxComposerAttachmentBytes) {
+    throw new Error(`${file.name} is larger than 8 MB.`);
+  }
+
+  return {
+    data: arrayBufferToBase64(await file.arrayBuffer()),
+    id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+    name: file.name,
+    size: file.size,
+    type: file.type || "application/octet-stream",
+  };
 }
 
 function getCurrentUserConnectorStatus(connection: DatabaseRecord, userId: string) {
@@ -2539,6 +2615,13 @@ export default function Home() {
                   members={members}
                   onAddMemberToChat={addMemberToChat}
                   onCreateChat={createSidebarChat}
+                  onUpdateChatTitle={(chatId, title) => {
+                    setSidebarChats((current) =>
+                      current.map((chat) =>
+                        chat.id === chatId ? { ...chat, title } : chat,
+                      ),
+                    );
+                  }}
                   workspaceId={activeWorkspaceId}
                 />
               )}
@@ -3842,7 +3925,7 @@ function SidebarChatHistory({
               return (
                 <div
                   className={cn(
-                    "group flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-[background-color,color]",
+                    "group flex h-7 items-center gap-1 overflow-hidden rounded-md px-2 text-xs transition-[background-color,color]",
                     activeChatId === chat.id
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -3850,7 +3933,7 @@ function SidebarChatHistory({
                   key={chat.id}
                 >
                   <button
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none"
+                    className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden pr-1 text-left outline-none"
                     onClick={() => onOpenChat(chat.id)}
                     type="button"
                   >
@@ -3868,7 +3951,7 @@ function SidebarChatHistory({
                   </button>
                   <Menu>
                     <MenuTrigger
-                      className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 outline-none transition-[background-color,color,opacity] hover:bg-background/70 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover:opacity-100"
+                      className="relative z-10 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 outline-none transition-[background-color,color,opacity] hover:bg-background/70 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover:opacity-100"
                       onClick={(event) => event.stopPropagation()}
                     >
                       <Icon className="size-3.5" icon={MoreHorizontalIcon} />
@@ -3935,6 +4018,7 @@ function ChatPage({
   members,
   onAddMemberToChat,
   onCreateChat,
+  onUpdateChatTitle,
   workspaceId,
 }: {
   activeChatId: string | null;
@@ -3945,6 +4029,7 @@ function ChatPage({
   members: WorkspaceUser[];
   onAddMemberToChat: (chatId: string, memberId: string) => void;
   onCreateChat: (title: string) => Promise<string>;
+  onUpdateChatTitle: (chatId: string, title: string) => void;
   workspaceId: string | null;
 }) {
   return (
@@ -3959,6 +4044,7 @@ function ChatPage({
       members={members}
       onAddMemberToChat={onAddMemberToChat}
       onCreateChat={onCreateChat}
+      onUpdateChatTitle={onUpdateChatTitle}
       workspaceId={workspaceId}
     />
   );
@@ -3974,6 +4060,7 @@ function ChatExperience({
   members = [],
   onAddMemberToChat,
   onCreateChat,
+  onUpdateChatTitle,
   workspaceId = null,
 }: {
   activeChatId?: string | null;
@@ -3985,6 +4072,7 @@ function ChatExperience({
   members?: WorkspaceUser[];
   onAddMemberToChat?: (chatId: string, memberId: string) => void;
   onCreateChat?: (title: string) => Promise<string>;
+  onUpdateChatTitle?: (chatId: string, title: string) => void;
   workspaceId?: string | null;
 }) {
   const [selectedModel, setSelectedModel] = useState<ChatModelOption>(
@@ -3994,6 +4082,9 @@ function ChatExperience({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [composerIsEmpty, setComposerIsEmpty] = useState(true);
+  const [composerAttachments, setComposerAttachments] = useState<
+    ComposerAttachment[]
+  >([]);
   const [mention, setMention] = useState<{
     kind: ComposerOption["kind"];
     query: string;
@@ -4005,6 +4096,7 @@ function ChatExperience({
   const mentionPopupRef = useRef<HTMLDivElement>(null);
   const mentionRangeRef = useRef<Range | null>(null);
   const keepChatAtEndRef = useRef(false);
+  const keepChatAtEndFrameRef = useRef<number | null>(null);
   const skipNextMessageLoadRef = useRef(false);
   const skipNextMessageLoadForChatIdRef = useRef<string | null>(null);
   const hasMessages = messages.length > 0;
@@ -4039,6 +4131,17 @@ function ChatExperience({
 
   function keepChatAtEndOnNextPaint() {
     keepChatAtEndRef.current = true;
+    if (keepChatAtEndFrameRef.current !== null) {
+      return;
+    }
+
+    keepChatAtEndFrameRef.current = requestAnimationFrame(() => {
+      keepChatAtEndFrameRef.current = null;
+      const viewport = messageScrollerViewportRef.current;
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight;
+      }
+    });
   }
 
   useEffect(() => {
@@ -4327,17 +4430,57 @@ function ChatExperience({
     updateComposerState();
   }
 
+  async function handleComposerFileChange(
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+
+    if (files.length === 0) {
+      return;
+    }
+
+    try {
+      const openSlots = Math.max(0, maxComposerAttachments - composerAttachments.length);
+      const nextFiles = files.slice(0, openSlots);
+
+      if (nextFiles.length === 0) {
+        throw new Error(`You can attach up to ${maxComposerAttachments} files.`);
+      }
+
+      const attachments = await Promise.all(
+        nextFiles.map(fileToComposerAttachment),
+      );
+      setComposerAttachments((current) => [
+        ...current,
+        ...attachments,
+      ].slice(0, maxComposerAttachments));
+    } catch (error) {
+      void playAtmetSound("error");
+      window.alert(
+        error instanceof Error ? error.message : "Could not attach that file.",
+      );
+    }
+  }
+
   async function sendComposerMessage() {
     const editor = editorRef.current;
     if (!editor || isSending) {
       return;
     }
 
-    const content = getComposerPlainText(editor);
+    const typedContent = getComposerPlainText(editor);
+    const selectedAttachments = composerAttachments;
+    const content =
+      typedContent ||
+      (selectedAttachments.length > 0 ? "Please read the attached file(s)." : "");
     if (!content) {
       editor.focus();
       return;
     }
+
+    warmAtmetAudio();
+
     const selectedAppKeys = getSelectedComposerAppKeys(editor);
     const selectedMentions = getSelectedComposerMentions(editor);
 
@@ -4359,15 +4502,17 @@ function ChatExperience({
 
     editor.innerHTML = "";
     setComposerIsEmpty(true);
+    setComposerAttachments([]);
     setMention(null);
     mentionRangeRef.current = null;
 
     setIsSending(true);
     let targetChatId = activeChatId ?? "";
+    const createdChatForMessage = !targetChatId;
 
     if (!targetChatId && workspaceId && onCreateChat) {
       skipNextMessageLoadRef.current = true;
-      targetChatId = await onCreateChat(content);
+      targetChatId = await onCreateChat(summarizeChatTitle(content));
       skipNextMessageLoadForChatIdRef.current = targetChatId || null;
     }
 
@@ -4399,6 +4544,12 @@ function ChatExperience({
           appKeys: selectedAppKeys,
           chatId: targetChatId,
           content,
+          attachments: selectedAttachments.map((attachment) => ({
+            data: attachment.data,
+            name: attachment.name,
+            size: attachment.size,
+            type: attachment.type,
+          })),
           mentions: selectedMentions,
           modelKey: selectedModel.id,
           workspaceId,
@@ -4418,9 +4569,14 @@ function ChatExperience({
 
       const savedUserMessage = mapChatMessage(payload.userMessage);
       const savedAssistantMessage = mapChatMessage(payload.assistantMessage);
+      const savedChatTitle = asString(payload.chatTitle);
 
       if (savedAssistantMessage) {
-        void playAtmetSound("success");
+        void playAtmetSuccessSound({ fallback: createdChatForMessage });
+      }
+
+      if (savedChatTitle && targetChatId) {
+        onUpdateChatTitle?.(targetChatId, savedChatTitle);
       }
 
       keepChatAtEndOnNextPaint();
@@ -4433,7 +4589,7 @@ function ChatExperience({
           if (message.id === assistantPendingId && savedAssistantMessage) {
             return {
               ...savedAssistantMessage,
-              state: "complete" as const,
+              state: "typing" as const,
             };
           }
 
@@ -4634,7 +4790,20 @@ function ChatExperience({
                       key={message.id}
                       messageId={message.id}
                     >
-                      <ChatMessageBubble message={message} />
+                      <ChatMessageBubble
+                        message={message}
+                        onTypingFrame={keepChatAtEndOnNextPaint}
+                        onTypingComplete={(messageId) => {
+                          setMessages((current) =>
+                            current.map((currentMessage) =>
+                              currentMessage.id === messageId &&
+                              currentMessage.state === "typing"
+                                ? { ...currentMessage, state: "complete" }
+                                : currentMessage,
+                            ),
+                          );
+                        }}
+                      />
                     </MessageScrollerItem>
                   ))}
                 </MessageScrollerContent>
@@ -4711,6 +4880,34 @@ function ChatExperience({
               </div>
             </div>
           )}
+          {composerAttachments.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1.5 px-3 pb-1">
+              {composerAttachments.map((attachment) => (
+                <span
+                  className="inline-flex h-7 max-w-64 items-center gap-1.5 rounded-md bg-muted px-2 text-xs text-muted-foreground"
+                  key={attachment.id}
+                >
+                  <Icon className="size-3.5 shrink-0" icon={File01Icon} />
+                  <span className="min-w-0 truncate text-foreground">
+                    {attachment.name}
+                  </span>
+                  <span className="shrink-0">{formatFileSize(attachment.size)}</span>
+                  <button
+                    aria-label={`Remove ${attachment.name}`}
+                    className="grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-background hover:text-foreground"
+                    onClick={() =>
+                      setComposerAttachments((current) =>
+                        current.filter((item) => item.id !== attachment.id),
+                      )
+                    }
+                    type="button"
+                  >
+                    <Icon className="size-3" icon={Delete02Icon} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2 px-3 pb-2 pt-2">
             <Menu>
               <MenuTrigger className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-sm font-medium text-muted-foreground outline-none transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
@@ -4851,10 +5048,10 @@ function ChatExperience({
               </MenuPopup>
             </Menu>
             <input
+              accept={chatAttachmentAccept}
               className="hidden"
-              onChange={(event) => {
-                event.currentTarget.value = "";
-              }}
+              multiple
+              onChange={handleComposerFileChange}
               ref={fileInputRef}
               type="file"
             />
@@ -5058,7 +5255,15 @@ function ChatModelMark({
   return <Icon className={logoClassName} icon={model.icon ?? AiChatIcon} />;
 }
 
-function ChatMessageBubble({ message }: { message: ChatMessage }) {
+function ChatMessageBubble({
+  message,
+  onTypingFrame,
+  onTypingComplete,
+}: {
+  message: ChatMessage;
+  onTypingFrame?: () => void;
+  onTypingComplete?: (messageId: string) => void;
+}) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end px-1 sm:px-2 lg:px-3">
@@ -5084,12 +5289,80 @@ function ChatMessageBubble({ message }: { message: ChatMessage }) {
       <div className="grid w-full max-w-full gap-3">
         {message.state === "thinking" ? (
           <AiThinkingState />
+        ) : message.state === "typing" ? (
+          <AiTypingTextResponse
+            messageId={message.id}
+            onFrame={onTypingFrame}
+            onComplete={onTypingComplete}
+            text={message.content}
+          />
         ) : (
           <AiTextResponse text={message.content} />
         )}
       </div>
     </div>
   );
+}
+
+function AiTypingTextResponse({
+  messageId,
+  onComplete,
+  onFrame,
+  text,
+}: {
+  messageId: string;
+  onComplete?: (messageId: string) => void;
+  onFrame?: () => void;
+  text: string;
+}) {
+  const [visibleLength, setVisibleLength] = useState(0);
+  const [isComplete, setIsComplete] = useState(false);
+  const onCompleteRef = useRef(onComplete);
+  const onFrameRef = useRef(onFrame);
+
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+    onFrameRef.current = onFrame;
+  }, [onComplete, onFrame]);
+
+  useEffect(() => {
+    setVisibleLength(0);
+    setIsComplete(false);
+
+    if (!text) {
+      setIsComplete(true);
+      onCompleteRef.current?.(messageId);
+      return;
+    }
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setVisibleLength(text.length);
+      setIsComplete(true);
+      onCompleteRef.current?.(messageId);
+      return;
+    }
+
+    const chunkSize = Math.max(4, Math.ceil(text.length / 90));
+    const intervalId = window.setInterval(() => {
+      setVisibleLength((current) => {
+        const next = Math.min(text.length, current + chunkSize);
+        if (next >= text.length) {
+          window.clearInterval(intervalId);
+          setIsComplete(true);
+          onCompleteRef.current?.(messageId);
+        }
+
+        return next;
+      });
+      onFrameRef.current?.();
+    }, 12);
+
+    return () => window.clearInterval(intervalId);
+  }, [messageId, text]);
+
+  const visibleText = isComplete ? text : text.slice(0, visibleLength);
+
+  return <AiTextResponse text={visibleText} />;
 }
 
 function ChatMentionBadge({ mention }: { mention: ChatMessageMention }) {
@@ -6011,7 +6284,7 @@ function getComposerAppLogoSvg(key?: string) {
     case "email":
       return `<svg viewBox="0 49.4 512 399.4" aria-hidden="true"><path fill="#4285f4" d="M34.9 448.8h81.5V251L0 163.7v250.2c0 19.3 15.6 34.9 34.9 34.9z"/><path fill="#34a853" d="M395.6 448.8h81.5c19.3 0 34.9-15.6 34.9-34.9V163.7L395.6 251z"/><path fill="#fbbc04" d="M395.6 99.7V251L512 163.7v-46.5c0-43.1-49.3-67.8-83.8-41.9z"/><path fill="#ea4335" d="M116.4 251V99.7L256 204.5 395.6 99.7V251L256 355.7z"/><path fill="#c5221f" d="M0 117.2v46.5L116.4 251V99.7L83.8 75.3C49.3 49.4 0 74 0 117.2z"/></svg>`;
     case "outlook":
-      return `<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#0a5eb8" d="M4 12.5 21 9v30L4 35.5z"/><path fill="#0078d4" d="M20 12h20a4 4 0 0 1 4 4v18a4 4 0 0 1-4 4H20z"/><path fill="#28a8ea" d="M27 17h16v7H27z"/><path fill="#50d9ff" d="M27 24h16v7H27z"/><path fill="#0a5eb8" d="M27 31h16v3a4 4 0 0 1-4 4H27z"/><path fill="#fff" opacity=".92" d="M43.3 17.6 33.9 25l9.4 7.4V17.6z"/><path fill="#fff" opacity=".7" d="m27 18 8.9 7L27 32z"/><rect width="22" height="22" x="4" y="13" fill="#106ebe" rx="2.5"/><path fill="#fff" d="M15.2 30.5c-3.5 0-5.9-2.6-5.9-6.1 0-3.6 2.4-6.2 6-6.2s5.9 2.6 5.9 6.1c0 3.6-2.4 6.2-6 6.2Zm.1-2.4c1.8 0 2.9-1.5 2.9-3.7 0-2.3-1.1-3.8-2.9-3.8s-3 1.5-3 3.8c0 2.2 1.2 3.7 3 3.7Z"/></svg>`;
+      return `<svg viewBox="0 0 256 256" aria-hidden="true"><defs><linearGradient id="composer-outlook-back" x1="112" x2="216" y1="36" y2="216"><stop stop-color="#35B8F1"/><stop offset="1" stop-color="#0078D4"/></linearGradient><linearGradient id="composer-outlook-front" x1="31" x2="132" y1="68" y2="187"><stop stop-color="#0A86D9"/><stop offset="1" stop-color="#064E9E"/></linearGradient></defs><rect width="148" height="148" x="86" y="50" fill="url(#composer-outlook-back)" rx="18"/><path fill="#50D9FF" d="M112 76h96v38h-96z"/><path fill="#0078D4" d="M112 114h96v42h-96z"/><path fill="#005A9E" d="M112 156h96v22c0 11-9 20-20 20h-76z"/><path fill="#fff" opacity=".95" d="m208 86-54 48 54 44z"/><path fill="#fff" opacity=".72" d="m112 88 54 46-54 44z"/><path fill="#004B8D" opacity=".35" d="M36 68 126 50v156l-90-18z"/><rect width="112" height="112" x="24" y="72" fill="url(#composer-outlook-front)" rx="16"/><path fill="#fff" d="M80 154c-23 0-38-17-38-42 0-26 16-43 39-43s38 17 38 42c0 26-16 43-39 43Zm1-18c13 0 20-10 20-25s-8-25-20-25c-13 0-20 10-20 25s8 25 20 25Z"/></svg>`;
     case "google-sheets":
       return `<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#0f9d58" d="M10 4h20l8 8v32H10z"/><path fill="#87d3a2" d="M30 4v8h8z"/><path fill="#fff" d="M16 20h16v16H16zm2 2v4h5v-4zm7 0v4h5v-4zm-7 6v6h5v-6zm7 0v6h5v-6z"/></svg>`;
     case "calendar":

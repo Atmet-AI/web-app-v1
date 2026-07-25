@@ -1,4 +1,5 @@
 import type {
+  AtmetChatContent,
   AtmetChatMessage,
   AtmetModelConfig,
   AtmetModelResult,
@@ -30,6 +31,73 @@ function stringFromSetting(
 
 function joinBaseUrl(baseUrl: string, path: string) {
   return `${baseUrl.replace(/\/$/, "")}${path}`;
+}
+
+function contentAsText(content: AtmetChatContent) {
+  return typeof content === "string"
+    ? content
+    : content
+        .map((part) => (part.type === "text" ? part.text : "[Image attachment]"))
+        .join("\n");
+}
+
+function toOpenAiContent(content: AtmetChatContent) {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  return content.map((part) =>
+    part.type === "image"
+      ? {
+          image_url: {
+            url: `data:${part.mediaType};base64,${part.data}`,
+          },
+          type: "image_url",
+        }
+      : {
+          text: part.text,
+          type: "text",
+        },
+  );
+}
+
+function toAnthropicContent(content: AtmetChatContent) {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  return content.map((part) =>
+    part.type === "image"
+      ? {
+          source: {
+            data: part.data,
+            media_type: part.mediaType,
+            type: "base64",
+          },
+          type: "image",
+        }
+      : {
+          text: part.text,
+          type: "text",
+        },
+  );
+}
+
+function toGoogleParts(content: AtmetChatContent) {
+  if (typeof content === "string") {
+    return [{ text: content }];
+  }
+
+  return content.map((part) =>
+    part.type === "image"
+      ? {
+          inlineData: {
+            data: part.data,
+            mimeType: part.mediaType,
+          },
+        }
+      : { text: part.text },
+  );
 }
 
 function missingProviderResult(
@@ -212,7 +280,13 @@ async function runOpenAiCompatible({
 }) {
   const response = await fetch(joinBaseUrl(baseUrl, "/chat/completions"), {
     body: JSON.stringify({
-      messages: [{ role: "system", content: systemPrompt }, ...messages],
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...messages.map((message) => ({
+          content: toOpenAiContent(message.content),
+          role: message.role,
+        })),
+      ],
       model: modelId,
     }),
     headers: {
@@ -273,7 +347,7 @@ async function runAnthropic({
     body: JSON.stringify({
       max_tokens: 1200,
       messages: messages.map((message) => ({
-        content: message.content,
+        content: toAnthropicContent(message.content),
         role: message.role === "assistant" ? "assistant" : "user",
       })),
       model: modelId,
@@ -340,7 +414,7 @@ async function runGoogle({
     {
       body: JSON.stringify({
         contents: messages.map((message) => ({
-          parts: [{ text: message.content }],
+          parts: toGoogleParts(message.content),
           role: message.role === "assistant" ? "model" : "user",
         })),
         systemInstruction: {

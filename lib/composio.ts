@@ -51,12 +51,45 @@ type ComposioTool = JsonRecord & {
 };
 
 const fallbackComposioTools = {
-  gmail: ["GMAIL_FETCH_EMAILS", "GMAIL_LIST_MESSAGES", "GMAIL_LIST_THREADS"],
+  gmail: [
+    "GMAIL_FETCH_EMAILS",
+    "GMAIL_LIST_MESSAGES",
+    "GMAIL_LIST_THREADS",
+    "GMAIL_GET_MESSAGE",
+    "GMAIL_GET_THREAD",
+    "GMAIL_SEND_EMAIL",
+    "GMAIL_CREATE_EMAIL_DRAFT",
+    "GMAIL_REPLY_TO_THREAD",
+    "GMAIL_FORWARD_EMAIL",
+    "GMAIL_MODIFY_MESSAGE",
+    "GMAIL_TRASH_MESSAGE",
+    "GMAIL_DELETE_MESSAGE",
+    "GMAIL_MARK_MESSAGE_AS_READ",
+    "GMAIL_MARK_MESSAGE_AS_UNREAD",
+  ],
   googlecalendar: ["GOOGLECALENDAR_FIND_EVENT", "GOOGLECALENDAR_LIST_EVENTS"],
   googledrive: ["GOOGLEDRIVE_FIND_FILE", "GOOGLEDRIVE_GET_FILE"],
   googlesheets: ["GOOGLESHEETS_LOOKUP_SPREADSHEET_ROW", "GOOGLESHEETS_GET_SPREADSHEET_INFO"],
-  github: ["GITHUB_GET_ISSUE", "GITHUB_GET_PULL_REQUEST", "GITHUB_SEARCH_REPOSITORIES"],
-  outlook: ["OUTLOOK_QUERY_EMAILS", "OUTLOOK_SEARCH_MESSAGES", "OUTLOOK_GET_MESSAGE"],
+  github: [
+    "GITHUB_GET_VIEWER_GRAPHQL",
+    "GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER",
+    "GITHUB_LIST_REPOSITORIES",
+    "GITHUB_SEARCH_REPOSITORIES",
+    "GITHUB_GET_A_COMMIT",
+  ],
+  outlook: [
+    "OUTLOOK_QUERY_EMAILS",
+    "OUTLOOK_SEARCH_MESSAGES",
+    "OUTLOOK_GET_MESSAGE",
+    "OUTLOOK_SEND_EMAIL",
+    "OUTLOOK_CREATE_DRAFT",
+    "OUTLOOK_REPLY_EMAIL",
+    "OUTLOOK_FORWARD_EMAIL",
+    "OUTLOOK_MOVE_EMAIL",
+    "OUTLOOK_DELETE_EMAIL",
+    "OUTLOOK_UPDATE_EMAIL",
+    "OUTLOOK_LIST_MAIL_FOLDERS",
+  ],
   slack: ["SLACK_SEARCH_MESSAGES", "SLACK_LIST_CHANNELS"],
 } as const satisfies Record<string, readonly string[]>;
 
@@ -353,6 +386,27 @@ export async function listComposioTools({
     .sort((a, b) => scoreComposioTool(b) - scoreComposioTool(a));
 }
 
+export async function listComposioToolkitTools(toolkitSlug: string) {
+  if (!isComposioConfigured()) {
+    return [];
+  }
+
+  const params = new URLSearchParams({
+    include_deprecated: "false",
+    limit: "100",
+    toolkit_slug: toolkitSlug,
+    toolkit_versions: "latest",
+  });
+  const payload = await composioRequest<{ items?: ComposioTool[] }>(
+    `/tools?${params.toString()}`,
+  );
+  const tools = Array.isArray(payload.items) ? payload.items : [];
+
+  return tools
+    .filter((tool) => tool.slug)
+    .sort((a, b) => scoreComposioTool(b) - scoreComposioTool(a));
+}
+
 export function getFallbackComposioTools(toolkitSlug: string) {
   const slugs =
     fallbackComposioTools[
@@ -387,6 +441,35 @@ export async function executeComposioToolWithText({
       method: "POST",
     },
   );
+}
+
+export async function executeComposioProxy({
+  body,
+  connectedAccountId,
+  endpoint,
+  method = "GET",
+  parameters = [],
+}: {
+  body?: JsonRecord;
+  connectedAccountId?: string;
+  endpoint: string;
+  method?: "DELETE" | "GET" | "HEAD" | "PATCH" | "POST" | "PUT";
+  parameters?: Array<{
+    in: "header" | "path" | "query";
+    name: string;
+    value: string;
+  }>;
+}) {
+  return composioRequest<JsonRecord>("/tools/execute/proxy", {
+    body: JSON.stringify({
+      ...(body ? { body } : {}),
+      ...(connectedAccountId ? { connected_account_id: connectedAccountId } : {}),
+      endpoint,
+      method,
+      parameters,
+    }),
+    method: "POST",
+  });
 }
 
 export async function deleteComposioConnectedAccount(accountId: string) {

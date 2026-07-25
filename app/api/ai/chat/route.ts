@@ -1,6 +1,12 @@
 import { buildAtmetSystemPrompt } from "@/lib/ai/system";
 import { normalizeModelConfig, runAtmetChat } from "@/lib/ai/providers";
 import type { AtmetChatMessage } from "@/lib/ai/types";
+import {
+  buildAttachmentContext,
+  parseChatAttachments,
+  serializeAttachmentMetadata,
+  type ParsedChatAttachment,
+} from "@/lib/ai/attachments";
 import { isRouteResponse } from "@/lib/api/auth";
 import {
   badRequest,
@@ -12,15 +18,20 @@ import {
   stringValue,
 } from "@/lib/api/http";
 import { requireChatPermission } from "@/lib/api/permissions";
+import { isAutoChatTitle, summarizeChatTitle } from "@/lib/chats/title";
 import {
+  executeComposioProxy,
   executeComposioToolWithText,
   getFallbackComposioTools,
   getComposioToolkitSlug,
   getComposioUserId,
   getComposioUserConnection,
   listComposioTools,
+  listComposioToolkitTools,
 } from "@/lib/composio";
 import { connectorCatalog } from "@/lib/connectors/catalog";
+
+export const runtime = "nodejs";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -38,6 +49,29 @@ function mapProviderMessage(row: unknown): AtmetChatMessage | null {
   }
 
   return { content, role };
+}
+
+function buildUserContentWithAttachments(
+  content: string,
+  attachments: ParsedChatAttachment[],
+): AtmetChatMessage["content"] {
+  const images = attachments
+    .map((attachment) => attachment.image)
+    .filter((image): image is NonNullable<typeof image> => Boolean(image))
+    .slice(0, 4);
+
+  if (images.length === 0) {
+    return content;
+  }
+
+  return [
+    { text: content, type: "text" },
+    ...images.map((image) => ({
+      data: image.data,
+      mediaType: image.mediaType,
+      type: "image" as const,
+    })),
+  ];
 }
 
 function userConnectionIdFromModelKey(modelKey: string) {
@@ -108,6 +142,56 @@ function truncateJson(value: unknown, maxLength = 6000) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}\n...[truncated]` : text;
 }
 
+function getDeepRecord(value: unknown, key: string): Record<string, unknown> {
+  const record = asRecord(value);
+  return asRecord(record[key]);
+}
+
+function getDeepArray(value: unknown, key: string): unknown[] {
+  const record = asRecord(value);
+  return Array.isArray(record[key]) ? record[key] : [];
+}
+
+function getToolResultError(value: unknown) {
+  const record = asRecord(value);
+  const error = asRecord(record.error);
+  const data = asRecord(record.data);
+  const dataError = asRecord(data.error);
+  const nestedError = asRecord(getDeepRecord(record, "result").error);
+
+  return (
+    stringValue(error.message) ||
+    stringValue(error.suggested_fix) ||
+    stringValue(dataError.message) ||
+    stringValue(dataError.suggested_fix) ||
+    stringValue(nestedError.message) ||
+    stringValue(record.error) ||
+    ""
+  );
+}
+
+function isSuccessfulToolResult(value: unknown) {
+  const record = asRecord(value);
+  const data = asRecord(record.data);
+  const result = asRecord(record.result);
+  const successful =
+    typeof record.successful === "boolean"
+      ? record.successful
+      : typeof record.success === "boolean"
+        ? record.success
+        : typeof data.successful === "boolean"
+          ? data.successful
+          : typeof result.successful === "boolean"
+            ? result.successful
+            : undefined;
+
+  if (successful === false) {
+    return false;
+  }
+
+  return !getToolResultError(value);
+}
+
 function getMentionedAppKeys(content: string) {
   const normalizedContent = content.toLowerCase();
   return connectorCatalog
@@ -131,6 +215,19 @@ function getConnectionUserStatus(connection: Record<string, unknown>, userId: st
 }
 
 function getToolSearchQuery(appKey: string, content: string) {
+  if (appKey === "github") {
+    const normalized = content.toLowerCase();
+    if (/\b(push|commit|commits|last push|latest push)\b/.test(normalized)) {
+      return "authenticated user repositories latest pushed repository commits";
+    }
+
+    if (/\b(repo|repository|repositories)\b/.test(normalized)) {
+      return "list repositories authenticated user";
+    }
+
+    return "github authenticated user repositories activity commits";
+  }
+
   if (appKey === "gmail" || appKey === "email" || appKey === "outlook") {
     const normalized = content.toLowerCase();
     const provider = appKey === "outlook" ? "outlook" : "gmail";
@@ -166,6 +263,27 @@ function getToolSearchQuery(appKey: string, content: string) {
 
 function getIntentComposioTools(appKey: string, content: string) {
   const normalized = content.toLowerCase();
+
+  if (appKey === "github") {
+    if (/\b(push|commit|commits|last push|latest push)\b/.test(normalized)) {
+      return [
+        {
+          slug: "GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER",
+          version: "latest",
+        },
+        { slug: "GITHUB_GET_VIEWER_GRAPHQL", version: "latest" },
+        { slug: "GITHUB_LIST_REPOSITORIES", version: "latest" },
+      ];
+    }
+
+    return [
+      {
+        slug: "GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER",
+        version: "latest",
+      },
+      { slug: "GITHUB_GET_VIEWER_GRAPHQL", version: "latest" },
+    ];
+  }
 
   if (appKey === "gmail" || appKey === "email") {
     if (/\bsend\b/.test(normalized)) {
@@ -232,6 +350,421 @@ function getIntentComposioTools(appKey: string, content: string) {
   return [];
 }
 
+function getRepoFullName(repo: unknown) {
+  const record = asRecord(repo);
+  const owner = asRecord(record.owner);
+  return (
+    stringValue(record.full_name) ||
+    [stringValue(owner.login), stringValue(record.name)].filter(Boolean).join("/")
+  );
+}
+
+function getProxyData(value: unknown) {
+  const record = asRecord(value);
+  return record.data ?? record;
+}
+
+function getRequestedEmailLimit(content: string) {
+  const normalized = content.toLowerCase();
+  const explicitCount =
+    /\b(?:last|latest|recent|first|top|show|get|read|see|check)\s+(\d{1,3})\b/i.exec(
+      content,
+    )?.[1] ?? /\b(\d{1,3})\s+(?:emails?|messages?|threads?)\b/i.exec(content)?.[1];
+  const parsedCount = explicitCount ? Number.parseInt(explicitCount, 10) : NaN;
+
+  if (Number.isFinite(parsedCount) && parsedCount > 0) {
+    return Math.min(parsedCount, 100);
+  }
+
+  if (/\blast\s+(?:email|message)\b/.test(normalized)) {
+    return 1;
+  }
+
+  return /\b(emails|messages|threads|inbox|unread|recent|latest)\b/.test(normalized)
+    ? 10
+    : 5;
+}
+
+function getGmailSearchQuery(content: string) {
+  const normalized = content.toLowerCase();
+  const queryParts: string[] = [];
+  const fromMatch = /\bfrom[:\s]+([^\s,;]+)/i.exec(content);
+  const toMatch = /\bto[:\s]+([^\s,;]+)/i.exec(content);
+  const subjectMatch = /\bsubject[:\s]+(["']?)([^"'\n]+)\1/i.exec(content);
+
+  if (/\b(sent|sent mail|i sent)\b/.test(normalized)) {
+    queryParts.push("in:sent");
+  } else if (/\b(draft|drafts)\b/.test(normalized)) {
+    queryParts.push("in:drafts");
+  } else if (/\b(spam|junk)\b/.test(normalized)) {
+    queryParts.push("in:spam");
+  } else if (/\btrash\b/.test(normalized)) {
+    queryParts.push("in:trash");
+  } else if (!/\ball mail\b/.test(normalized)) {
+    queryParts.push("in:inbox");
+  }
+
+  if (/\bunread\b/.test(normalized)) {
+    queryParts.push("is:unread");
+  }
+
+  if (/\bstarred\b/.test(normalized)) {
+    queryParts.push("is:starred");
+  }
+
+  if (/\battachment|attachments|has file\b/.test(normalized)) {
+    queryParts.push("has:attachment");
+  }
+
+  if (fromMatch?.[1]) {
+    queryParts.push(`from:${fromMatch[1]}`);
+  }
+
+  if (toMatch?.[1]) {
+    queryParts.push(`to:${toMatch[1]}`);
+  }
+
+  if (subjectMatch?.[2]) {
+    queryParts.push(`subject:${subjectMatch[2].trim()}`);
+  }
+
+  return queryParts.join(" ");
+}
+
+function shouldUseGmailReader(content: string) {
+  const normalized = content.toLowerCase();
+
+  if (/\b(send|draft|reply|forward|archive|delete|trash|label|mark as|move)\b/.test(normalized)) {
+    return false;
+  }
+
+  return /\b(email|emails|gmail|inbox|message|messages|thread|threads|unread|received|latest|recent|last|from:|subject:|attachment)\b/.test(
+    normalized,
+  );
+}
+
+function shouldUseOutlookReader(content: string) {
+  const normalized = content.toLowerCase();
+
+  if (/\b(send|draft|reply|forward|archive|delete|trash|move|mark as)\b/.test(normalized)) {
+    return false;
+  }
+
+  return /\b(email|emails|outlook|inbox|mail|message|messages|thread|threads|unread|received|latest|recent|last|from:|subject:|attachment)\b/.test(
+    normalized,
+  );
+}
+
+function decodeGmailBody(value: string) {
+  try {
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+    return Buffer.from(normalized, "base64").toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+function getGmailHeaders(message: unknown) {
+  const payload = asRecord(asRecord(message).payload);
+  const headers = Array.isArray(payload.headers) ? payload.headers : [];
+  const output: Record<string, string> = {};
+
+  for (const header of headers) {
+    const record = asRecord(header);
+    const name = stringValue(record.name);
+    const value = stringValue(record.value);
+    if (name && value && ["From", "To", "Subject", "Date"].includes(name)) {
+      output[name.toLowerCase()] = value;
+    }
+  }
+
+  return output;
+}
+
+function extractGmailBodyPart(part: unknown): string {
+  const record = asRecord(part);
+  const body = asRecord(record.body);
+  const mimeType = stringValue(record.mimeType);
+  const data = stringValue(body.data);
+
+  if (data && (mimeType === "text/plain" || mimeType === "text/html")) {
+    return decodeGmailBody(data).replace(/<[^>]+>/g, " ");
+  }
+
+  const parts = Array.isArray(record.parts) ? record.parts : [];
+  return parts.map(extractGmailBodyPart).filter(Boolean).join("\n");
+}
+
+function summarizeGmailMessage(message: unknown) {
+  const record = asRecord(message);
+  const headers = getGmailHeaders(message);
+  const body = extractGmailBodyPart(record.payload).replace(/\s+/g, " ").trim();
+
+  return {
+    body: body ? truncateJson(body, 1600) : "",
+    date: headers.date ?? "",
+    from: headers.from ?? "",
+    id: stringValue(record.id),
+    labels: Array.isArray(record.labelIds) ? record.labelIds : [],
+    snippet: stringValue(record.snippet),
+    subject: headers.subject ?? "",
+    threadId: stringValue(record.threadId),
+    to: headers.to ?? "",
+  };
+}
+
+function getOutlookFolderEndpoint(content: string) {
+  const normalized = content.toLowerCase();
+
+  if (/\b(sent|sent mail|i sent)\b/.test(normalized)) {
+    return "/me/mailFolders/sentitems/messages";
+  }
+
+  if (/\b(draft|drafts)\b/.test(normalized)) {
+    return "/me/mailFolders/drafts/messages";
+  }
+
+  if (/\b(spam|junk)\b/.test(normalized)) {
+    return "/me/mailFolders/junkemail/messages";
+  }
+
+  if (/\btrash|deleted\b/.test(normalized)) {
+    return "/me/mailFolders/deleteditems/messages";
+  }
+
+  if (/\ball mail|all messages|mailbox\b/.test(normalized)) {
+    return "/me/messages";
+  }
+
+  return "/me/mailFolders/inbox/messages";
+}
+
+function getOutlookSearchText(content: string) {
+  const subjectMatch = /\bsubject[:\s]+(["']?)([^"'\n]+)\1/i.exec(content);
+  const fromMatch = /\bfrom[:\s]+([^\s,;]+)/i.exec(content);
+  const toMatch = /\bto[:\s]+([^\s,;]+)/i.exec(content);
+
+  return [subjectMatch?.[2], fromMatch?.[1], toMatch?.[1]]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function getOutlookFilters(content: string) {
+  const normalized = content.toLowerCase();
+  const filters: string[] = [];
+
+  if (/\bunread\b/.test(normalized)) {
+    filters.push("isRead eq false");
+  }
+
+  if (/\battachment|attachments|has file\b/.test(normalized)) {
+    filters.push("hasAttachments eq true");
+  }
+
+  return filters.join(" and ");
+}
+
+function summarizeOutlookMessage(message: unknown) {
+  const record = asRecord(message);
+  const from = asRecord(asRecord(record.from).emailAddress);
+  const sender = asRecord(asRecord(record.sender).emailAddress);
+  const toRecipients = Array.isArray(record.toRecipients)
+    ? record.toRecipients
+        .map((recipient) => {
+          const email = asRecord(asRecord(recipient).emailAddress);
+          return stringValue(email.address) || stringValue(email.name);
+        })
+        .filter(Boolean)
+    : [];
+  const body = stringValue(asRecord(record.body).content)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return {
+    body: body ? truncateJson(body, 1600) : "",
+    date: stringValue(record.receivedDateTime) || stringValue(record.sentDateTime),
+    from: stringValue(from.address) || stringValue(from.name),
+    hasAttachments: Boolean(record.hasAttachments),
+    id: stringValue(record.id),
+    isRead: typeof record.isRead === "boolean" ? record.isRead : null,
+    sender: stringValue(sender.address) || stringValue(sender.name),
+    subject: stringValue(record.subject),
+    to: toRecipients,
+    webLink: stringValue(record.webLink),
+  };
+}
+
+async function loadOutlookMessagesContext({
+  connectedAccountId,
+  content,
+}: {
+  connectedAccountId?: string;
+  content: string;
+}) {
+  const limit = getRequestedEmailLimit(content);
+  const searchText = getOutlookSearchText(content);
+  const filter = getOutlookFilters(content);
+  const endpoint = searchText ? "/me/messages" : getOutlookFolderEndpoint(content);
+  const parameters = [
+    { in: "query" as const, name: "$top", value: String(limit) },
+    {
+      in: "query" as const,
+      name: "$select",
+      value:
+        "id,subject,from,sender,toRecipients,receivedDateTime,sentDateTime,bodyPreview,body,hasAttachments,isRead,webLink",
+    },
+    ...(searchText
+      ? [{ in: "query" as const, name: "$search", value: `"${searchText}"` }]
+      : [
+          { in: "query" as const, name: "$orderby", value: "receivedDateTime desc" },
+          ...(filter ? [{ in: "query" as const, name: "$filter", value: filter }] : []),
+        ]),
+    ...(searchText
+      ? [{ in: "header" as const, name: "ConsistencyLevel", value: "eventual" }]
+      : []),
+  ];
+  const result = await executeComposioProxy({
+    connectedAccountId,
+    endpoint,
+    parameters,
+  }).catch(() =>
+    executeComposioProxy({
+      connectedAccountId,
+      endpoint: `/v1.0${endpoint}`,
+      parameters,
+    }),
+  );
+  const data = getProxyData(result);
+  const messages: unknown[] = Array.isArray(asRecord(data).value)
+    ? (asRecord(data).value as unknown[])
+    : Array.isArray(asRecord(data).messages)
+      ? (asRecord(data).messages as unknown[])
+      : getDeepArray(result, "value");
+
+  return {
+    endpoint,
+    filter,
+    limit,
+    messages: messages.slice(0, limit).map(summarizeOutlookMessage),
+    searchText,
+  };
+}
+
+async function loadGmailMessagesContext({
+  connectedAccountId,
+  content,
+}: {
+  connectedAccountId?: string;
+  content: string;
+}) {
+  const limit = getRequestedEmailLimit(content);
+  const query = getGmailSearchQuery(content);
+  const executeGmailProxy = async (endpoint: string) =>
+    executeComposioProxy({
+      connectedAccountId,
+      endpoint,
+      parameters: [
+        { in: "query", name: "maxResults", value: String(limit) },
+        ...(query ? [{ in: "query" as const, name: "q", value: query }] : []),
+      ],
+    });
+  const listResult = await executeGmailProxy("/users/me/messages").catch(() =>
+    executeGmailProxy("/gmail/v1/users/me/messages"),
+  );
+  const listData = getProxyData(listResult);
+  const messages: unknown[] = Array.isArray(asRecord(listData).messages)
+    ? (asRecord(listData).messages as unknown[])
+    : getDeepArray(listResult, "messages");
+
+  if (messages.length === 0) {
+    return {
+      limit,
+      messages: [],
+      query,
+    };
+  }
+
+  const detailedMessages = await Promise.all(
+    messages.slice(0, limit).map(async (message) => {
+      const id = stringValue(asRecord(message).id);
+      if (!id) {
+        return null;
+      }
+
+      const detailParameters = [
+        { in: "query" as const, name: "format", value: "full" },
+        { in: "query" as const, name: "metadataHeaders", value: "From" },
+        { in: "query" as const, name: "metadataHeaders", value: "To" },
+        { in: "query" as const, name: "metadataHeaders", value: "Subject" },
+        { in: "query" as const, name: "metadataHeaders", value: "Date" },
+      ];
+      const detail = await executeComposioProxy({
+        connectedAccountId,
+        endpoint: `/users/me/messages/${encodeURIComponent(id)}`,
+        parameters: detailParameters,
+      }).catch(() =>
+        executeComposioProxy({
+          connectedAccountId,
+          endpoint: `/gmail/v1/users/me/messages/${encodeURIComponent(id)}`,
+          parameters: detailParameters,
+        }),
+      );
+
+      return summarizeGmailMessage(getProxyData(detail));
+    }),
+  );
+
+  return {
+    limit,
+    messages: detailedMessages.filter(Boolean),
+    query,
+  };
+}
+
+async function loadGitHubLatestPushContext({
+  connectedAccountId,
+}: {
+  connectedAccountId?: string;
+}) {
+  const repoList = await executeComposioProxy({
+    connectedAccountId,
+    endpoint: "/user/repos",
+    parameters: [
+      { in: "query", name: "sort", value: "pushed" },
+      { in: "query", name: "direction", value: "desc" },
+      { in: "query", name: "per_page", value: "5" },
+      { in: "header", name: "Accept", value: "application/vnd.github+json" },
+    ],
+  });
+  const repoData = getProxyData(repoList);
+  const repositories = Array.isArray(repoData)
+    ? repoData
+    : getDeepArray(repoList, "data");
+  const latestRepo = repositories[0];
+  const latestRepoFullName = getRepoFullName(latestRepo);
+
+  if (!latestRepoFullName) {
+    throw new Error("GitHub returned no accessible repositories for this account.");
+  }
+
+  const commits = await executeComposioProxy({
+    connectedAccountId,
+    endpoint: `/repos/${latestRepoFullName}/commits`,
+    parameters: [
+      { in: "query", name: "per_page", value: "1" },
+      { in: "header", name: "Accept", value: "application/vnd.github+json" },
+    ],
+  });
+
+  return {
+    commits: getProxyData(commits),
+    latestRepository: latestRepo,
+    repositories,
+  };
+}
+
 function buildToolPrompt({
   appKey,
   content,
@@ -249,10 +782,10 @@ function buildToolPrompt({
     return [
       ...base,
       "Use the authenticated Gmail account. user_id is me.",
-      "If the user asks to read/check emails, fetch the relevant inbox email data with sender, subject, date, snippet, and body/content when available.",
-      "If the user asks to send, use the send email action. Do not draft instead unless sending fails.",
-      "If the user asks for a random email body, write a short harmless friendly message yourself.",
-      "If the user asks to draft/reply/forward, use that matching Gmail action and return the result.",
+      "Use the Gmail action that best matches the request, including read, search, list, thread, draft, send, reply, forward, labels, archive, trash, unread/read, or other Gmail actions exposed by Composio.",
+      "Honor counts and filters in the request, such as last 5, last 100, unread, sent, from, to, subject, attachments, and threads.",
+      "If the user asks to send, use the send email action. Do not draft instead unless the user explicitly asks for a draft or sending fails.",
+      "If the user asks for a random email body, write a short harmless friendly message yourself and send it when send access is available.",
     ].join("\n");
   }
 
@@ -260,10 +793,19 @@ function buildToolPrompt({
     return [
       ...base,
       "Use the authenticated Microsoft Outlook account.",
-      "If the user asks to read/check email, fetch the relevant Outlook email data with sender, subject, date, snippet, and body/content when available.",
-      "If the user asks to send, use the send email action. Do not draft instead unless sending fails.",
+      "Use the Outlook action that best matches the request, including read, search, list, folders, threads, draft, send, reply, forward, move, delete, read/unread, or other Outlook actions exposed by Composio.",
+      "Honor counts and filters in the request, such as last 5, last 100, unread, sent, drafts, from, to, subject, attachments, and threads.",
+      "If the user asks to send, use the send email action. Do not draft instead unless the user explicitly asks for a draft or sending fails.",
       "If the user asks for a random email body, write a short harmless friendly message yourself.",
-      "If the user asks to draft/reply/forward, use that matching Outlook action and return the result.",
+    ].join("\n");
+  }
+
+  if (appKey === "github") {
+    return [
+      ...base,
+      "Use the authenticated GitHub account.",
+      "If the user asks about their latest push and does not provide a repository, inspect repositories accessible to the authenticated account sorted by latest push, then inspect the latest commit for the newest pushed repository.",
+      "If repository access is denied, return the exact permission/scope problem.",
     ].join("\n");
   }
 
@@ -319,13 +861,128 @@ async function loadConnectedAppToolContext({
     const composioUserId = getComposioUserId(workspaceId, userId);
 
     try {
-      const searchedTools = await listComposioTools({
-        query: getToolSearchQuery(appKey, content),
-        toolkitSlug,
-      });
+      if (
+        (appKey === "gmail" || appKey === "email") &&
+        shouldUseGmailReader(content)
+      ) {
+        try {
+          const result = await loadGmailMessagesContext({
+            connectedAccountId,
+            content,
+          });
+
+          contextItems.push(
+            [
+              `### ${connector.name}`,
+              `Tool: Gmail proxy /users/me/messages (limit ${result.limit})`,
+              result.query ? `Query: ${result.query}` : "Query: default inbox",
+              "Result:",
+              truncateJson(result, 20000),
+            ].join("\n"),
+          );
+          metadata.push({
+            appKey,
+            status: "used",
+            toolSlug: "gmail_proxy_messages",
+          });
+          continue;
+        } catch (gmailProxyError) {
+          metadata.push({
+            appKey,
+            error:
+              gmailProxyError instanceof Error
+                ? gmailProxyError.message
+                : "Gmail proxy lookup failed",
+            status: "proxy_fallback",
+          });
+        }
+      }
+
+      if (appKey === "outlook" && shouldUseOutlookReader(content)) {
+        try {
+          const result = await loadOutlookMessagesContext({
+            connectedAccountId,
+            content,
+          });
+
+          contextItems.push(
+            [
+              `### ${connector.name}`,
+              `Tool: Outlook proxy ${result.endpoint} (limit ${result.limit})`,
+              result.searchText ? `Search: ${result.searchText}` : "",
+              result.filter ? `Filter: ${result.filter}` : "",
+              "Result:",
+              truncateJson(result, 20000),
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          );
+          metadata.push({
+            appKey,
+            status: "used",
+            toolSlug: "outlook_proxy_messages",
+          });
+          continue;
+        } catch (outlookProxyError) {
+          metadata.push({
+            appKey,
+            error:
+              outlookProxyError instanceof Error
+                ? outlookProxyError.message
+                : "Outlook proxy lookup failed",
+            status: "proxy_fallback",
+          });
+        }
+      }
+
+      if (
+        appKey === "github" &&
+        /\b(push|commit|commits|last push|latest push)\b/i.test(content)
+      ) {
+        try {
+          const result = await loadGitHubLatestPushContext({
+            connectedAccountId,
+          });
+
+          contextItems.push(
+            [
+              `### ${connector.name}`,
+              "Tool: GitHub proxy /user/repos + latest commit",
+              "Result:",
+              truncateJson(result),
+            ].join("\n"),
+          );
+          metadata.push({
+            appKey,
+            status: "used",
+            toolSlug: "github_proxy_latest_push",
+          });
+          continue;
+        } catch (githubProxyError) {
+          metadata.push({
+            appKey,
+            error:
+              githubProxyError instanceof Error
+                ? githubProxyError.message
+                : "GitHub proxy lookup failed",
+            status: "proxy_fallback",
+          });
+        }
+      }
+
+      const [searchedTools, allToolkitTools] = await Promise.all([
+        listComposioTools({
+          query: getToolSearchQuery(appKey, content),
+          toolkitSlug,
+        }),
+        appKey === "gmail" || appKey === "email" || appKey === "outlook"
+          ? listComposioToolkitTools(toolkitSlug)
+          : Promise.resolve([]),
+      ]);
       const tools = uniqueToolsBySlug([
         ...getIntentComposioTools(appKey, content),
         ...searchedTools,
+        ...allToolkitTools,
         ...getFallbackComposioTools(toolkitSlug),
       ]);
 
@@ -340,7 +997,12 @@ async function loadConnectedAppToolContext({
       let lastToolError = "";
       let toolWasUsed = false;
 
-      for (const tool of tools.slice(0, 8)) {
+      const maxToolAttempts =
+        appKey === "gmail" || appKey === "email" || appKey === "outlook"
+          ? 18
+          : 8;
+
+      for (const tool of tools.slice(0, maxToolAttempts)) {
         const toolSlug = stringValue(tool.slug);
         if (!toolSlug) {
           continue;
@@ -354,6 +1016,13 @@ async function loadConnectedAppToolContext({
             userId: composioUserId,
             version: stringValue(tool.version, "latest"),
           });
+
+          if (!isSuccessfulToolResult(result)) {
+            lastToolError =
+              getToolResultError(result) ||
+              `${toolSlug} returned an unsuccessful result`;
+            continue;
+          }
 
           contextItems.push(
             [
@@ -411,6 +1080,9 @@ export async function POST(request: Request) {
     const content = stringValue(body.content);
     const selectedAppKeys = stringArray(body.appKeys);
     const mentions = getChatMessageMentions(body.mentions);
+    const parsedAttachments = await parseChatAttachments(body.attachments);
+    const attachmentMetadata = serializeAttachmentMetadata(parsedAttachments);
+    const attachmentContext = buildAttachmentContext(parsedAttachments);
 
     if (!chatId || !workspaceId || !content) {
       return badRequest("Missing chat, workspace, or message content.");
@@ -524,10 +1196,10 @@ export async function POST(request: Request) {
       .insert({
         chat_id: chatId,
         content,
-        metadata: { mentions, modelKey },
+        metadata: { attachments: attachmentMetadata, mentions, modelKey },
         role: "user",
       })
-      .select("id, role, content, created_at")
+      .select("id, role, content, created_at, metadata")
       .single();
 
     if (userMessageError) {
@@ -558,8 +1230,14 @@ export async function POST(request: Request) {
         ...(appContext.context
           ? [{ content: appContext.context, role: "system" as const }]
           : []),
+        ...(attachmentContext
+          ? [{ content: attachmentContext, role: "system" as const }]
+          : []),
         ...providerMessages,
-        { content, role: "user" },
+        {
+          content: buildUserContentWithAttachments(content, parsedAttachments),
+          role: "user",
+        },
       ],
       model,
       systemPrompt: buildAtmetSystemPrompt({
@@ -597,9 +1275,21 @@ export async function POST(request: Request) {
       throw assistantMessageError;
     }
 
+    const nextChatTitle = isAutoChatTitle(stringValue(chatRecord.title), content)
+      ? summarizeChatTitle(content)
+      : "";
+
+    const chatUpdate: Record<string, unknown> = {
+      last_message_at: new Date().toISOString(),
+    };
+
+    if (nextChatTitle) {
+      chatUpdate.title = nextChatTitle;
+    }
+
     await auth.admin
       .from("chats")
-      .update({ last_message_at: new Date().toISOString() })
+      .update(chatUpdate)
       .eq("id", chatId)
       .eq("user_id", auth.user.id);
 
@@ -620,6 +1310,7 @@ export async function POST(request: Request) {
 
     return ok({
       assistantMessage,
+      chatTitle: nextChatTitle || stringValue(chatRecord.title),
       model: {
         configured: aiResult.configured,
         displayName: model.displayName,

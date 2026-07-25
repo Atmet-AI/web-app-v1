@@ -1,5 +1,18 @@
+export type AtmetImageContentPart = {
+  data: string;
+  mediaType: string;
+  type: "image";
+};
+
+export type AtmetTextContentPart = {
+  text: string;
+  type: "text";
+};
+
+export type AtmetChatContent = string | Array<AtmetTextContentPart | AtmetImageContentPart>;
+
 export type AtmetChatMessage = {
-  content: string;
+  content: AtmetChatContent;
   role: "assistant" | "system" | "user";
 };
 
