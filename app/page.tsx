@@ -254,6 +254,7 @@ type Agent = {
   gradient: string;
   name: string;
   runtime: "paused" | "running";
+  schedule?: string | null;
   status: string;
   tone: "info" | "outline" | "success" | "warning";
   workflowCards?: PlaygroundCard[];
@@ -658,21 +659,35 @@ function mapAdminLog(row: unknown, source: "Activity" | "Session"): AdminLogRow 
   const record = asRecord(row);
   const profile = getRecordByKey(record, "profiles");
   const createdAt = asString(record.created_at);
+  const metadata = asRecord(record.metadata);
 
   if (source === "Session") {
     return {
-      detail: asString(record.ip_address, "Unknown location"),
+      detail: formatAdminLogDetail({
+        fallback: asString(record.ip_address, "Unknown location"),
+        metadata,
+        primary: asString(record.ip_address),
+      }),
       event: asString(record.event, "Session"),
       sortTime: createdAt,
       source,
       status: formatStatusLabel(asString(record.event, "Active")),
       time: formatDateTimeLabel(createdAt) || "",
-      user: asString(profile.full_name, asString(profile.email, "Unknown user")),
+      user: asString(
+        profile.full_name,
+        asString(profile.email, asString(metadata.email, "Unknown user")),
+      ),
     };
   }
 
   return {
-    detail: asString(record.target_type, asString(record.target_id)),
+    detail: formatAdminLogDetail({
+      fallback: asString(record.target_type, asString(record.target_id)),
+      metadata,
+      primary: [asString(record.target_type), asString(record.target_id)]
+        .filter(Boolean)
+        .join(" "),
+    }),
     event: asString(record.action, "Activity"),
     sortTime: createdAt,
     source,
@@ -680,6 +695,35 @@ function mapAdminLog(row: unknown, source: "Activity" | "Session"): AdminLogRow 
     time: formatDateTimeLabel(createdAt) || "",
     user: asString(profile.full_name, asString(profile.email, "System")),
   };
+}
+
+function formatAdminLogDetail({
+  fallback,
+  metadata,
+  primary,
+}: {
+  fallback: string;
+  metadata: Record<string, unknown>;
+  primary: string;
+}) {
+  const details = [
+    primary,
+    asString(metadata.workspaceName),
+    asString(metadata.chatTitle),
+    asString(metadata.agentName),
+    asString(metadata.appKey),
+    asString(metadata.model),
+    asString(metadata.email),
+    asString(metadata.ipAddress),
+    asString(metadata.path),
+  ].filter(Boolean);
+  const uniqueDetails = Array.from(new Set(details));
+
+  if (uniqueDetails.length > 0) {
+    return uniqueDetails.slice(0, 5).join(" / ");
+  }
+
+  return fallback || "No extra details";
 }
 
 function mapAdminRole(row: unknown): AdminRoleRow | null {
@@ -723,6 +767,7 @@ type SidebarChat = {
 
 type WorkflowChatNode = {
   chatId: string;
+  nodeId?: string;
   title: string;
 };
 
@@ -1392,6 +1437,7 @@ function mapAgent(row: unknown, index: number): Agent | null {
     id,
     name,
     runtime: mapRuntime(record.runtime_state ?? record.runtime),
+    schedule: asString(record.schedule) || null,
     status,
     tone: mapTone(status),
     workflowCards,
@@ -2011,6 +2057,7 @@ export default function Home() {
           "from-stone-100 via-stone-50 to-emerald-100 dark:from-stone-900 dark:via-stone-950 dark:to-emerald-950/40",
         name,
         runtime: "paused",
+        schedule: null,
         status: "Draft",
         tone: "warning",
       },
@@ -2123,6 +2170,30 @@ export default function Home() {
         agent.name === agentName ? { ...agent, runtime } : agent,
       ),
     );
+    const agentId = agentList.find((agent) => agent.name === agentName)?.id;
+    if (agentId) {
+      void fetch(`/api/agents/${agentId}`, {
+        body: JSON.stringify({ runtimeState: runtime }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      }).catch(() => undefined);
+    }
+  }
+
+  function updateAgentSchedule(agentName: string, schedule: string | null) {
+    setAgentList((current) =>
+      current.map((agent) =>
+        agent.name === agentName ? { ...agent, schedule } : agent,
+      ),
+    );
+    const agentId = agentList.find((agent) => agent.name === agentName)?.id;
+    if (agentId) {
+      void fetch(`/api/agents/${agentId}`, {
+        body: JSON.stringify({ schedule: schedule ?? "manual" }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      }).catch(() => undefined);
+    }
   }
 
   function copyChatValue(value: string) {
@@ -2636,6 +2707,7 @@ export default function Home() {
                   onCreateWorkflowChatNode={createWorkflowChatNode}
                   onDeleteWorkflowChatNode={deleteWorkflowChatNode}
                   onAgentRuntimeChange={updateAgentRuntime}
+                  onAgentScheduleChange={updateAgentSchedule}
                   onPlaygroundChange={setAgentsPlaygroundOpen}
                   onSelectAgentName={openAgentPlayground}
                   selectedAgentName={selectedAgentName}
@@ -4821,7 +4893,10 @@ function ChatExperience({
           >
             <MessageScroller className="min-h-0">
               <MessageScrollerViewport
-                className="px-3 pb-40 sm:px-4 lg:px-6"
+                className={cn(
+                  "px-3 sm:px-4 lg:px-6",
+                  showCreateAgentFrame ? "pb-52" : "pb-40",
+                )}
                 ref={messageScrollerViewportRef}
               >
                 <MessageScrollerContent>
@@ -4862,7 +4937,7 @@ function ChatExperience({
       >
           {showCreateAgentFrame && (
             <button
-              className="absolute -top-8 left-5 z-10 inline-flex h-8 items-center gap-1.5 rounded-t-xl border border-b-0 border-black/10 bg-white/28 px-3 text-xs font-medium text-foreground backdrop-blur-2xl backdrop-saturate-150 transition-[background-color,color] hover:bg-white/45 dark:border-white/10 dark:bg-white/[0.035] dark:hover:bg-white/[0.07]"
+              className="absolute -top-7 left-5 z-10 inline-flex h-7 items-center gap-1.5 rounded-t-xl border border-b-0 border-black/10 bg-background/82 px-3 text-xs font-medium text-foreground backdrop-blur-2xl backdrop-saturate-150 transition-[background-color,color] hover:bg-background/95 dark:border-white/10 dark:bg-background/75 dark:hover:bg-background/90"
               onClick={() => setCreateAgentDialogOpen(true)}
               type="button"
             >
@@ -5331,17 +5406,10 @@ function ChatMessageBubble({
     return (
       <div className="flex justify-end px-1 sm:px-2 lg:px-3">
         <div className="max-w-[80%] rounded-xl bg-secondary px-3 py-2 text-sm leading-6 text-secondary-foreground">
-          {message.mentions && message.mentions.length > 0 ? (
-            <div className="mb-1.5 flex flex-wrap items-center gap-1">
-              {message.mentions.map((mention, index) => (
-                <ChatMentionBadge
-                  key={`${mention.kind}-${mention.key}-${mention.name}-${index}`}
-                  mention={mention}
-                />
-              ))}
-            </div>
-          ) : null}
-          <div className="whitespace-pre-wrap">{message.content}</div>
+          <UserMessageContent
+            content={message.content}
+            mentions={message.mentions ?? []}
+          />
         </div>
       </div>
     );
@@ -5428,23 +5496,110 @@ function AiTypingTextResponse({
   return <AiTextResponse text={visibleText} />;
 }
 
+function UserMessageContent({
+  content,
+  mentions,
+}: {
+  content: string;
+  mentions: ChatMessageMention[];
+}) {
+  const nodes: React.ReactNode[] = [content];
+
+  mentions.forEach((mention, mentionIndex) => {
+    const mentionName = mention.name.trim();
+    if (!mentionName) {
+      return;
+    }
+
+    const nextNodes: React.ReactNode[] = [];
+    let replaced = false;
+
+    nodes.forEach((node, nodeIndex) => {
+      if (typeof node !== "string" || replaced) {
+        nextNodes.push(node);
+        return;
+      }
+
+      const match = findStandaloneMentionMatch(node, mentionName);
+      if (!match) {
+        nextNodes.push(node);
+        return;
+      }
+
+      const before = node.slice(0, match.index);
+      const after = node.slice(match.index + match.length);
+      if (before) {
+        nextNodes.push(before);
+      }
+      nextNodes.push(
+        <ChatMentionBadge
+          key={`${mention.kind}-${mention.key}-${mention.name}-${mentionIndex}-${nodeIndex}`}
+          mention={mention}
+        />,
+      );
+      if (after) {
+        nextNodes.push(after);
+      }
+      replaced = true;
+    });
+
+    if (!replaced && mention.kind !== "apps") {
+      nextNodes.unshift(
+        <ChatMentionBadge
+          key={`${mention.kind}-${mention.key}-${mention.name}-${mentionIndex}-prefix`}
+          mention={mention}
+        />,
+        " ",
+      );
+    }
+
+    nodes.splice(0, nodes.length, ...nextNodes);
+  });
+
+  return <div className="whitespace-pre-wrap">{nodes}</div>;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function findStandaloneMentionMatch(text: string, label: string) {
+  const pattern = new RegExp(
+    `(^|\\s)(${escapeRegExp(label)})(?=$|\\s|[,;:!?\\)\\]])`,
+    "i",
+  );
+  const match = pattern.exec(text);
+
+  if (!match || typeof match.index !== "number") {
+    return null;
+  }
+
+  const prefixLength = match[1]?.length ?? 0;
+  const mentionText = match[2] ?? label;
+
+  return {
+    index: match.index + prefixLength,
+    length: mentionText.length,
+  };
+}
+
 function ChatMentionBadge({ mention }: { mention: ChatMessageMention }) {
   const isApp = mention.kind === "apps";
 
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center gap-1 rounded-md px-1.5 align-middle text-[0.78em] font-medium leading-none",
+        "mx-0.5 inline-flex h-[1.35em] translate-y-[-0.08em] items-center gap-1 rounded-md px-1.5 align-baseline text-[0.82em] font-medium leading-none",
         isApp
-          ? "bg-info/16 text-info-foreground"
+          ? "bg-[#ddf4ff] text-[#0969da] dark:bg-[#1f6feb]/24 dark:text-[#0969da]"
           : "bg-pink-500/16 text-pink-700 dark:text-pink-200",
       )}
     >
       <span
         className={cn(
-          "grid size-3.5 shrink-0 place-items-center overflow-hidden rounded-sm",
+          "grid size-[1em] shrink-0 place-items-center overflow-hidden rounded-sm",
           isApp
-            ? "text-info-foreground"
+            ? "text-[#0969da] dark:text-[#0969da]"
             : "text-pink-700 dark:text-pink-200",
         )}
       >
@@ -6347,13 +6502,13 @@ function getComposerAppLogoSvg(key?: string) {
     case "email":
       return `<svg viewBox="0 49.4 512 399.4" aria-hidden="true"><path fill="#4285f4" d="M34.9 448.8h81.5V251L0 163.7v250.2c0 19.3 15.6 34.9 34.9 34.9z"/><path fill="#34a853" d="M395.6 448.8h81.5c19.3 0 34.9-15.6 34.9-34.9V163.7L395.6 251z"/><path fill="#fbbc04" d="M395.6 99.7V251L512 163.7v-46.5c0-43.1-49.3-67.8-83.8-41.9z"/><path fill="#ea4335" d="M116.4 251V99.7L256 204.5 395.6 99.7V251L256 355.7z"/><path fill="#c5221f" d="M0 117.2v46.5L116.4 251V99.7L83.8 75.3C49.3 49.4 0 74 0 117.2z"/></svg>`;
     case "outlook":
-      return `<svg viewBox="0 0 256 256" aria-hidden="true"><defs><linearGradient id="composer-outlook-back" x1="112" x2="216" y1="36" y2="216"><stop stop-color="#35B8F1"/><stop offset="1" stop-color="#0078D4"/></linearGradient><linearGradient id="composer-outlook-front" x1="31" x2="132" y1="68" y2="187"><stop stop-color="#0A86D9"/><stop offset="1" stop-color="#064E9E"/></linearGradient></defs><rect width="148" height="148" x="86" y="50" fill="url(#composer-outlook-back)" rx="18"/><path fill="#50D9FF" d="M112 76h96v38h-96z"/><path fill="#0078D4" d="M112 114h96v42h-96z"/><path fill="#005A9E" d="M112 156h96v22c0 11-9 20-20 20h-76z"/><path fill="#fff" opacity=".95" d="m208 86-54 48 54 44z"/><path fill="#fff" opacity=".72" d="m112 88 54 46-54 44z"/><path fill="#004B8D" opacity=".35" d="M36 68 126 50v156l-90-18z"/><rect width="112" height="112" x="24" y="72" fill="url(#composer-outlook-front)" rx="16"/><path fill="#fff" d="M80 154c-23 0-38-17-38-42 0-26 16-43 39-43s38 17 38 42c0 26-16 43-39 43Zm1-18c13 0 20-10 20-25s-8-25-20-25c-13 0-20 10-20 25s8 25 20 25Z"/></svg>`;
+      return `<svg viewBox="0 0 256 256" aria-hidden="true"><defs><linearGradient id="composer-outlook-mail" x1="134" x2="224" y1="40" y2="214"><stop stop-color="#28A8EA"/><stop offset="1" stop-color="#0078D4"/></linearGradient><linearGradient id="composer-outlook-o" x1="24" x2="136" y1="72" y2="184"><stop stop-color="#0F78D4"/><stop offset="1" stop-color="#106EBE"/></linearGradient></defs><rect width="142" height="142" x="92" y="56" fill="url(#composer-outlook-mail)" rx="16"/><path fill="#50D9FF" d="M116 78h94v40h-94z"/><path fill="#0078D4" d="M116 118h94v38h-94z"/><path fill="#005A9E" d="M116 156h94v21c0 12-9 21-21 21h-73z"/><path fill="#fff" opacity=".96" d="m210 86-55 48 55 44z"/><path fill="#fff" opacity=".72" d="m116 88 55 46-55 44z"/><path fill="#064E9E" opacity=".36" d="M36 72 130 54v148L36 184z"/><rect width="112" height="112" x="24" y="72" fill="url(#composer-outlook-o)" rx="14"/><path fill="#fff" d="M80 154c-23 0-38-17-38-42s15-42 38-42 38 17 38 42-15 42-38 42Zm0-18c13 0 21-10 21-24s-8-24-21-24-21 10-21 24 8 24 21 24Z"/></svg>`;
     case "google-sheets":
       return `<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#0f9d58" d="M10 4h20l8 8v32H10z"/><path fill="#87d3a2" d="M30 4v8h8z"/><path fill="#fff" d="M16 20h16v16H16zm2 2v4h5v-4zm7 0v4h5v-4zm-7 6v6h5v-6zm7 0v6h5v-6z"/></svg>`;
     case "calendar":
-      return `<svg viewBox="0 0 48 48" aria-hidden="true"><rect width="36" height="36" x="6" y="8" fill="#fff" rx="5"/><path fill="#4285f4" d="M6 16h36v-3a5 5 0 0 0-5-5H11a5 5 0 0 0-5 5z"/><path fill="#34a853" d="M6 16h9v28h-4a5 5 0 0 1-5-5z"/><path fill="#fbbc04" d="M33 16h9v23a5 5 0 0 1-5 5h-4z"/><path fill="#ea4335" d="M15 8h18v8H15z"/><text x="24" y="34" text-anchor="middle" font-size="16" font-family="Arial" font-weight="700" fill="#444">31</text></svg>`;
+      return `<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#fff" d="M13 6h22l7 7v27a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4h3Z"/><path fill="#4285F4" d="M6 17h36v-4l-7-7H10a4 4 0 0 0-4 4v7Z"/><path fill="#34A853" d="M6 17h9v27h-5a4 4 0 0 1-4-4V17Z"/><path fill="#FBBC04" d="M33 17h9v23a4 4 0 0 1-4 4h-5V17Z"/><path fill="#EA4335" d="M15 6h20v11H15V6Z"/><path fill="#fff" d="M15 17h18v27H15V17Z"/><path fill="#3C4043" d="M21.2 34.8h2.9V22.6h-2.5l-3.5 2.5 1.3 2.1 1.8-1.2v8.8Zm8.6.3c3.4 0 5.6-1.9 5.6-4.7 0-2.6-1.9-4.3-4.7-4.3-.5 0-1 .1-1.4.2l.2-1.4h5.2v-2.5h-7.5l-.7 6 1.8.9c.6-.4 1.2-.6 2-.6 1.3 0 2.2.7 2.2 1.8 0 1.2-.9 1.9-2.3 1.9-1.2 0-2.3-.4-3.2-1.2l-1.5 2c1.1 1.2 2.6 1.9 4.3 1.9Z"/><path fill="#185ABC" d="m35 6 7 7h-7V6Z"/></svg>`;
     case "instagram":
-      return `<svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="composer-instagram" x1="0" x2="1" y1="1" y2="0"><stop stop-color="#feda75"/><stop offset=".35" stop-color="#fa7e1e"/><stop offset=".65" stop-color="#d62976"/><stop offset="1" stop-color="#4f5bd5"/></linearGradient></defs><rect width="40" height="40" x="4" y="4" fill="url(#composer-instagram)" rx="12"/><circle cx="24" cy="24" r="9" fill="none" stroke="#fff" stroke-width="4"/><circle cx="35" cy="13" r="3" fill="#fff"/></svg>`;
+      return `<svg viewBox="0 0 64 64" aria-hidden="true"><defs><radialGradient id="composer-instagram-glow" cx="0" cy="0" r="1" gradientTransform="matrix(5.5 -25 28 6.2 16 58)" gradientUnits="userSpaceOnUse"><stop stop-color="#FFD600"/><stop offset=".48" stop-color="#FF7A00"/><stop offset="1" stop-color="#FF0169" stop-opacity="0"/></radialGradient><radialGradient id="composer-instagram-blue" cx="0" cy="0" r="1" gradientTransform="matrix(-18 -8 8 -18 56 10)" gradientUnits="userSpaceOnUse"><stop stop-color="#7638FA"/><stop offset="1" stop-color="#7638FA" stop-opacity="0"/></radialGradient><linearGradient id="composer-instagram-base" x1="8" x2="56" y1="56" y2="8" gradientUnits="userSpaceOnUse"><stop stop-color="#FFD600"/><stop offset=".28" stop-color="#FF7A00"/><stop offset=".48" stop-color="#FF0169"/><stop offset=".75" stop-color="#D300C5"/><stop offset="1" stop-color="#7638FA"/></linearGradient></defs><rect width="56" height="56" x="4" y="4" fill="url(#composer-instagram-base)" rx="16"/><rect width="56" height="56" x="4" y="4" fill="url(#composer-instagram-glow)" rx="16"/><rect width="56" height="56" x="4" y="4" fill="url(#composer-instagram-blue)" rx="16"/><path fill="none" stroke="#fff" stroke-width="4" d="M19.5 12h25C48.6 12 52 15.4 52 19.5v25c0 4.1-3.4 7.5-7.5 7.5h-25c-4.1 0-7.5-3.4-7.5-7.5v-25c0-4.1 3.4-7.5 7.5-7.5Z"/><circle cx="32" cy="32" r="10" fill="none" stroke="#fff" stroke-width="4"/><circle cx="43" cy="21" r="3.2" fill="#fff"/></svg>`;
     case "slack":
       return `<svg viewBox="0 0 48 48" aria-hidden="true"><rect x="20" y="4" width="8" height="20" fill="#36c5f0" rx="4"/><rect x="20" y="24" width="8" height="20" fill="#2eb67d" rx="4"/><rect x="4" y="20" width="20" height="8" fill="#e01e5a" rx="4"/><rect x="24" y="20" width="20" height="8" fill="#ecb22e" rx="4"/></svg>`;
     case "github":
@@ -6367,8 +6522,8 @@ function createComposerBadge(option: ComposerOption) {
   const badge = document.createElement("span");
   const isApp = option.kind === "apps";
   badge.className = isApp
-    ? "mx-0.5 inline-flex h-5 items-center gap-1 rounded-md bg-info/16 px-1.5 align-middle text-[0.78em] font-medium leading-none text-info-foreground"
-    : "mx-0.5 inline-flex h-5 items-center gap-1 rounded-md bg-pink-500/16 px-1.5 align-middle text-[0.78em] font-medium leading-none text-pink-700 dark:text-pink-200";
+    ? "mx-0.5 inline-flex h-[1.35em] translate-y-[-0.08em] items-center gap-1 rounded-md bg-[#ddf4ff] px-1.5 align-baseline text-[0.82em] font-medium leading-none text-[#0969da] dark:bg-[#1f6feb]/24 dark:text-[#0969da]"
+    : "mx-0.5 inline-flex h-[1.35em] translate-y-[-0.08em] items-center gap-1 rounded-md bg-pink-500/16 px-1.5 align-baseline text-[0.82em] font-medium leading-none text-pink-700 dark:text-pink-200";
   badge.contentEditable = "false";
   badge.dataset.composerToken = "true";
   badge.dataset.composerLabel = option.name;
@@ -6382,8 +6537,8 @@ function createComposerBadge(option: ComposerOption) {
 
   const icon = document.createElement("span");
   icon.className = isApp
-    ? "grid size-3.5 shrink-0 place-items-center overflow-hidden rounded-sm text-info-foreground"
-    : "grid size-3.5 shrink-0 place-items-center rounded-sm text-pink-700 dark:text-pink-200";
+    ? "grid size-[1em] shrink-0 place-items-center overflow-hidden rounded-sm text-[#0969da] dark:text-[#0969da]"
+    : "grid size-[1em] shrink-0 place-items-center rounded-sm text-pink-700 dark:text-pink-200";
   const appLogoSvg = isApp ? getComposerAppLogoSvg(option.connectorKey) : "";
   if (appLogoSvg) {
     icon.innerHTML = appLogoSvg;
@@ -6551,6 +6706,7 @@ type AgentFilter = "active" | "all" | "beta" | "draft" | "paused" | "running";
 function AgentsPage({
   agents,
   onAgentRuntimeChange,
+  onAgentScheduleChange,
   onCreateAgent,
   onCreateWorkflowChatNode,
   onDeleteWorkflowChatNode,
@@ -6562,6 +6718,7 @@ function AgentsPage({
 }: {
   agents: Agent[];
   onAgentRuntimeChange: (agentName: string, runtime: "paused" | "running") => void;
+  onAgentScheduleChange: (agentName: string, schedule: string | null) => void;
   onCreateAgent: (name: string) => void;
   onCreateWorkflowChatNode: (
     agentName: string,
@@ -6603,6 +6760,7 @@ function AgentsPage({
           workflowChatNodesByAgent[selectedAgent.name]?.length ?? 0
         }`}
         onAgentRuntimeChange={onAgentRuntimeChange}
+        onAgentScheduleChange={onAgentScheduleChange}
         onCreateWorkflowChatNode={onCreateWorkflowChatNode}
         onDeleteWorkflowChatNode={onDeleteWorkflowChatNode}
         onBack={() => {
@@ -6927,6 +7085,7 @@ function getWorkflowRunOrder(
 function AgentPlayground({
   agent,
   onAgentRuntimeChange,
+  onAgentScheduleChange,
   onBack,
   onCreateWorkflowChatNode,
   onDeleteWorkflowChatNode,
@@ -6935,6 +7094,7 @@ function AgentPlayground({
 }: {
   agent: Agent;
   onAgentRuntimeChange: (agentName: string, runtime: "paused" | "running") => void;
+  onAgentScheduleChange: (agentName: string, schedule: string | null) => void;
   onBack: () => void;
   onCreateWorkflowChatNode: (
     agentName: string,
@@ -6972,6 +7132,7 @@ function AgentPlayground({
   );
   const [openNodeChatId, setOpenNodeChatId] = useState<string | null>(null);
   const [runningCardId, setRunningCardId] = useState<string | null>(null);
+  const [isWorkflowRunPending, setIsWorkflowRunPending] = useState(false);
   const openNodeChat = cards.find((card) => card.id === openNodeChatId);
   const nodeToDelete = cards.find((card) => card.id === deleteNodeId) ?? null;
 
@@ -7145,15 +7306,24 @@ function AgentPlayground({
       return;
     }
 
+    const sourceNodeId = drag.from;
+    const targetNodeId = targetId;
     setConnections((current) => {
       const exists = current.some(
         (connection) =>
-          (connection.from === drag.from && connection.to === targetId) ||
-          (connection.from === targetId && connection.to === drag.from),
+          (connection.from === sourceNodeId && connection.to === targetNodeId) ||
+          (connection.from === targetNodeId && connection.to === sourceNodeId),
       );
 
-      return exists ? current : [...current, { from: drag.from, to: targetId }];
+      return exists ? current : [...current, { from: sourceNodeId, to: targetNodeId }];
     });
+    if (agent.id) {
+      void fetch(`/api/agents/${agent.id}/edges`, {
+        body: JSON.stringify({ sourceNodeId, targetNodeId }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }).catch(() => undefined);
+    }
     setDrag(null);
   }
 
@@ -7167,10 +7337,28 @@ function AgentPlayground({
     const point = contextMenu ?? { x: 160, y: 120 };
     const title = "Empty chat";
     const workflowNode = await onCreateWorkflowChatNode(agent.name, title);
-    const id = workflowNode
-      ? getWorkflowChatCardId(workflowNode.chatId)
-      : `node-${Date.now()}`;
     const position = clampCardPosition(point.x - 120, point.y - 64);
+    let id = workflowNode?.nodeId ?? `node-${Date.now()}`;
+
+    if (agent.id && workflowNode) {
+      try {
+        const response = await fetch(`/api/agents/${agent.id}/nodes`, {
+          body: JSON.stringify({
+            sourceChatId: workflowNode.chatId,
+            title: workflowNode.title,
+            x: position.x,
+            y: position.y,
+          }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+        const payload = asRecord(await response.json().catch(() => ({})));
+        const node = asRecord(payload.node);
+        id = asString(node.id, id);
+      } catch (error) {
+        console.error(error);
+      }
+    }
 
     setCards((current) => [
       ...current,
@@ -7185,19 +7373,6 @@ function AgentPlayground({
     ]);
     setOpenNodeChatId(id);
     setContextMenu(null);
-
-    if (agent.id && workflowNode) {
-      void fetch(`/api/agents/${agent.id}/nodes`, {
-        body: JSON.stringify({
-          sourceChatId: workflowNode.chatId,
-          title: workflowNode.title,
-          x: position.x,
-          y: position.y,
-        }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      }).catch(() => undefined);
-    }
   }
 
   function setAgentRunningState(running: boolean) {
@@ -7246,28 +7421,53 @@ function AgentPlayground({
     setContextMenu(null);
   }
 
-  function runNode(cardId: string | null) {
+  async function runNode(cardId: string | null) {
     if (!cardId) {
       return;
     }
 
-    setCards((current) =>
-      current.map((card) =>
-        card.id === cardId ? { ...card, runtime: "running" } : card,
-      ),
-    );
     setContextMenu(null);
+    if (!agent.id) {
+      return;
+    }
+
+    clearRunTimeouts(runTimeoutsRef);
+    setCompletedRunCardIds([]);
+    setRunningCardId(cardId);
+    setIsWorkflowRunPending(true);
+    setAgentRunningState(true);
+
+    try {
+      const response = await fetch(`/api/agents/${agent.id}/run`, {
+        body: JSON.stringify({ nodeId: cardId }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      if (!response.ok) {
+        const payload = asRecord(await response.json().catch(() => ({})));
+        throw new Error(asString(payload.error, "Could not run node."));
+      }
+
+      setCompletedRunCardIds([cardId]);
+    } catch (error) {
+      void playAtmetSound("error");
+      window.alert(error instanceof Error ? error.message : "Could not run node.");
+    } finally {
+      setRunningCardId(null);
+      setIsWorkflowRunPending(false);
+    }
   }
 
-  function runAgentWorkflow() {
+  async function runAgentWorkflow() {
     const orderedCardIds = getWorkflowRunOrder(cards, connections);
-    if (orderedCardIds.length === 0) {
+    if (orderedCardIds.length === 0 || !agent.id) {
       return;
     }
 
     clearRunTimeouts(runTimeoutsRef);
     setAgentRunningState(true);
     setCompletedRunCardIds([]);
+    setIsWorkflowRunPending(true);
 
     orderedCardIds.forEach((cardId, index) => {
       const timeoutId = window.setTimeout(() => {
@@ -7292,6 +7492,32 @@ function AgentPlayground({
     }, orderedCardIds.length * WORKFLOW_NODE_STEP_MS);
 
     runTimeoutsRef.current.push(completionTimeoutId);
+
+    try {
+      const response = await fetch(`/api/agents/${agent.id}/run`, {
+        body: JSON.stringify({}),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      if (!response.ok) {
+        const payload = asRecord(await response.json().catch(() => ({})));
+        throw new Error(asString(payload.error, "Could not run workflow."));
+      }
+
+      clearRunTimeouts(runTimeoutsRef);
+      setRunningCardId(null);
+      setCompletedRunCardIds(orderedCardIds);
+    } catch (error) {
+      clearRunTimeouts(runTimeoutsRef);
+      setRunningCardId(null);
+      setCompletedRunCardIds([]);
+      void playAtmetSound("error");
+      window.alert(
+        error instanceof Error ? error.message : "Could not run workflow.",
+      );
+    } finally {
+      setIsWorkflowRunPending(false);
+    }
   }
 
   function pauseAgentWorkflow() {
@@ -7323,24 +7549,32 @@ function AgentPlayground({
           <Badge variant={agent.tone}>{agent.status}</Badge>
           <AgentRuntimeStatus runtime={agentRunning ? "running" : "paused"} />
           <Button
+            disabled={isWorkflowRunPending}
             onClick={() => {
-              if (agentRunning || runningCardId) {
+              if (agentRunning && !isWorkflowRunPending) {
                 pauseAgentWorkflow();
                 return;
               }
 
-              runAgentWorkflow();
+              void runAgentWorkflow();
             }}
             size="sm"
             variant={agentRunning ? "outline" : "default"}
           >
-            <Icon icon={agentRunning ? PauseCircleIcon : PlayIcon} />
-            {agentRunning ? "Pause" : "Run"}
+            {isWorkflowRunPending ? (
+              <Spinner className="size-3.5" />
+            ) : (
+              <Icon icon={agentRunning ? PauseCircleIcon : PlayIcon} />
+            )}
+            {isWorkflowRunPending ? "Running" : agentRunning ? "Pause" : "Run"}
           </Button>
           <AgentSettingsSheet
             agent={agent}
             agentRunning={agentRunning}
             onAgentRunningChange={setAgentRunningState}
+            onAgentScheduleChange={(schedule) =>
+              onAgentScheduleChange(agent.name, schedule)
+            }
           />
         </div>
       </div>
@@ -7610,10 +7844,12 @@ function AgentSettingsSheet({
   agent,
   agentRunning,
   onAgentRunningChange,
+  onAgentScheduleChange,
 }: {
   agent: Agent;
   agentRunning: boolean;
   onAgentRunningChange: (running: boolean) => void;
+  onAgentScheduleChange: (schedule: string | null) => void;
 }) {
   const agentUrl = `https://app.atmetai.com/agents/${agent.name
     .toLowerCase()
@@ -7656,8 +7892,35 @@ function AgentSettingsSheet({
 
           <AgentSheetSection icon={CalendarClockIcon} title="Run scheduling">
             <div className="grid gap-2">
-              <AgentSettingRow label="Mode" value="Every weekday" />
-              <AgentSettingRow label="Window" value="09:00 - 17:00" />
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
+                <div>
+                  <p className="text-sm font-medium">Schedule</p>
+                  <p className="text-xs text-muted-foreground">
+                    Runs only while the agent is enabled.
+                  </p>
+                </div>
+                <Select
+                  onValueChange={(value) =>
+                    onAgentScheduleChange(value === "manual" ? null : value)
+                  }
+                  value={agent.schedule ?? "manual"}
+                >
+                  <SelectTrigger className="w-40" size="sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectPopup>
+                    <SelectItem value="manual">Manual</SelectItem>
+                    <SelectItem value="hourly">Hourly</SelectItem>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="weekdays">Weekdays</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                  </SelectPopup>
+                </Select>
+              </div>
+              <AgentSettingRow
+                label="Status"
+                value={agentRunning ? "Enabled" : "Paused"}
+              />
               <AgentSettingRow label="Timezone" value="Asia/Amman" />
             </div>
           </AgentSheetSection>

@@ -1,4 +1,5 @@
 import { isRouteResponse, requireWorkspacePermission } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { created, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
 type RouteContext = {
@@ -57,6 +58,19 @@ export async function POST(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "chat.created",
+      actorId: auth.user.id,
+      metadata: {
+        chatTitle: data.title,
+        source: data.source,
+      },
+      request,
+      targetId: data.id,
+      targetType: "chat",
+      workspaceId,
+    });
 
     return created({ chat: data });
   } catch (error) {

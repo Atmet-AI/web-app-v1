@@ -1,4 +1,5 @@
 import { isRouteResponse, requireUser } from "@/lib/api/auth";
+import { recordActivityLog, recordSessionLog } from "@/lib/api/audit";
 import { ok, readJson, serverError, stringValue } from "@/lib/api/http";
 import { hasSupabaseServiceRoleKey } from "@/lib/supabase/admin";
 
@@ -237,6 +238,18 @@ export async function PATCH(request: Request) {
       }
     }
 
+    await recordActivityLog(auth.admin, {
+      action: "profile.updated",
+      actorId: auth.user.id,
+      metadata: {
+        preferenceFields: Object.keys(preferencesPatch).filter((key) => key !== "user_id"),
+        profileFields: Object.keys(profilePatch).filter((key) => key !== "id" && key !== "email"),
+      },
+      request,
+      targetId: auth.user.id,
+      targetType: "profile",
+    });
+
     return ok(
       { profile: nextProfile, preferences: nextPreferences },
       { headers: noStoreHeaders },
@@ -246,13 +259,27 @@ export async function PATCH(request: Request) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
   try {
     const auth = await requireUser();
 
     if (isRouteResponse(auth)) {
       return auth;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "profile.deleted",
+      actorId: auth.user.id,
+      request,
+      targetId: auth.user.id,
+      targetType: "profile",
+    });
+    await recordSessionLog(auth.admin, {
+      event: "auth.sign_out",
+      metadata: { reason: "profile_deleted" },
+      request,
+      user: auth.user,
+    });
 
     const { error } = await auth.admin.auth.admin.deleteUser(auth.user.id);
 

@@ -1,4 +1,5 @@
 import { isRouteResponse, requireSuperAdmin } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
 export async function GET() {
@@ -50,6 +51,21 @@ export async function PATCH(request: Request) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "admin.usage_controls.updated",
+      actorId: auth.user.id,
+      metadata: {
+        connectorLimit: data.connector_limit,
+        monthlyRunLimit: data.monthly_run_limit,
+        requireWriteApprovals: data.require_write_approvals,
+        usageAlertThreshold: data.usage_alert_threshold,
+      },
+      request,
+      targetId: data.id,
+      targetType: "workspace_usage_controls",
+      workspaceId: data.workspace_id,
+    });
 
     return ok({ controls: data });
   } catch (error) {

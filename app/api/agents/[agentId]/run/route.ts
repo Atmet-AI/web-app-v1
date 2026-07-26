@@ -1,12 +1,14 @@
 import { isRouteResponse } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { requireAgentPermission } from "@/lib/api/permissions";
-import { created, serverError } from "@/lib/api/http";
+import { created, readJson, serverError, stringValue } from "@/lib/api/http";
+import { runWorkflowAgent } from "@/lib/agents/runner";
 
 type RouteContext = {
   params: Promise<{ agentId: string }>;
 };
 
-export async function POST(_request: Request, context: RouteContext) {
+export async function POST(request: Request, context: RouteContext) {
   try {
     const { agentId } = await context.params;
     const auth = await requireAgentPermission(agentId, "agents.manage");
@@ -15,24 +17,30 @@ export async function POST(_request: Request, context: RouteContext) {
       return auth;
     }
 
-    const { data, error } = await auth.admin
-      .from("workflow_runs")
-      .insert({
-        agent_id: agentId,
-        status: "running",
-        started_by: auth.user.id,
-        started_at: new Date().toISOString(),
-      })
-      .select("*")
-      .single();
+    const body = await readJson(request);
+    const nodeId = stringValue(body.nodeId) || undefined;
+    const result = await runWorkflowAgent({
+      admin: auth.admin,
+      agentId,
+      nodeId,
+      startedBy: auth.user.id,
+      trigger: nodeId ? "node" : "manual",
+    });
 
-    if (error) {
-      throw error;
-    }
+    await recordActivityLog(auth.admin, {
+      action: "agent.run.started",
+      actorId: auth.user.id,
+      metadata: {
+        nodeId,
+        runId: result.run?.id,
+        trigger: nodeId ? "node" : "manual",
+      },
+      request,
+      targetId: agentId,
+      targetType: "agent",
+    });
 
-    await auth.admin.from("workflow_agents").update({ runtime_state: "running" }).eq("id", agentId);
-
-    return created({ run: data });
+    return created(result);
   } catch (error) {
     return serverError(error);
   }

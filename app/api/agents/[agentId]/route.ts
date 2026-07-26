@@ -1,4 +1,5 @@
 import { isRouteResponse } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { requireAgentPermission } from "@/lib/api/permissions";
 import { ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
@@ -59,13 +60,28 @@ export async function PATCH(request: Request, context: RouteContext) {
       throw error;
     }
 
+    await recordActivityLog(auth.admin, {
+      action: "agent.updated",
+      actorId: auth.user.id,
+      metadata: {
+        agentName: data.name,
+        runtimeState: data.runtime_state,
+        schedule: data.schedule,
+        status: data.status,
+      },
+      request,
+      targetId: agentId,
+      targetType: "agent",
+      workspaceId: data.workspace_id,
+    });
+
     return ok({ agent: data });
   } catch (error) {
     return serverError(error);
   }
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
   try {
     const { agentId } = await context.params;
     const auth = await requireAgentPermission(agentId, "agents.manage");
@@ -82,6 +98,14 @@ export async function DELETE(_request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "agent.deleted",
+      actorId: auth.user.id,
+      request,
+      targetId: agentId,
+      targetType: "agent",
+    });
 
     return ok({ success: true });
   } catch (error) {

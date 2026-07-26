@@ -37,6 +37,7 @@ type ComposioConnectedAccount = JsonRecord & {
 type ComposioAuthConfig = JsonRecord & {
   id?: string;
   is_composio_managed?: boolean;
+  restrict_to_following_tools?: unknown[];
   status?: string;
   toolkit?: { slug?: string };
 };
@@ -186,6 +187,26 @@ export function getComposioToolkitSlug(appKey: string) {
   ];
 }
 
+async function createComposioManagedAuthConfig(toolkitSlug: string) {
+  const payload = await composioRequest<{
+    auth_config?: ComposioAuthConfig;
+  }>("/auth_configs", {
+    body: JSON.stringify({
+      auth_config: {
+        credentials: {},
+        restrict_to_following_tools: [],
+        type: "use_composio_managed_auth",
+      },
+      toolkit: {
+        slug: toolkitSlug,
+      },
+    }),
+    method: "POST",
+  });
+
+  return payload.auth_config?.id ?? "";
+}
+
 export function isComposioConfigured() {
   return Boolean(getComposioApiKey());
 }
@@ -240,18 +261,36 @@ export async function getComposioAuthConfigId({
   const enabledConfigs = configs.filter(
     (config) => String(config.status ?? "").toUpperCase() === "ENABLED",
   );
+  const unrestrictedConfigs = enabledConfigs.filter((config) => {
+    const restrictedTools = config.restrict_to_following_tools;
+    return !Array.isArray(restrictedTools) || restrictedTools.length === 0;
+  });
   const selectedConfig =
-    enabledConfigs.find((config) => config.is_composio_managed) ??
-    enabledConfigs[0] ??
-    configs[0];
+    unrestrictedConfigs.find((config) => config.is_composio_managed) ??
+    unrestrictedConfigs[0];
 
   if (!selectedConfig?.id) {
-    throw new Error(
-      `No Composio auth config found for ${toolkitSlug}. Create one in Composio or set COMPOSIO_AUTH_CONFIG_${normalizeEnvKey(appKey)}.`,
-    );
+    const createdAuthConfigId = await createComposioManagedAuthConfig(toolkitSlug);
+
+    if (createdAuthConfigId) {
+      return createdAuthConfigId;
+    }
   }
 
-  return selectedConfig.id;
+  if (selectedConfig?.id) {
+    return selectedConfig.id;
+  }
+
+  const restrictedFallback =
+    enabledConfigs.find((config) => config.is_composio_managed) ?? enabledConfigs[0];
+
+  if (restrictedFallback?.id) {
+    return restrictedFallback.id;
+  }
+
+  throw new Error(
+    `No Composio auth config found for ${toolkitSlug}. Create one in Composio or set COMPOSIO_AUTH_CONFIG_${normalizeEnvKey(appKey)}.`,
+  );
 }
 
 export async function createComposioConnectLink({
@@ -393,7 +432,7 @@ export async function listComposioToolkitTools(toolkitSlug: string) {
 
   const params = new URLSearchParams({
     include_deprecated: "false",
-    limit: "100",
+    limit: "500",
     toolkit_slug: toolkitSlug,
     toolkit_versions: "latest",
   });

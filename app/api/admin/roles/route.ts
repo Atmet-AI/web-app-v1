@@ -1,4 +1,5 @@
 import { isRouteResponse, requireWorkspacePermission } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { badRequest, created, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
 export async function GET(request: Request) {
@@ -73,6 +74,19 @@ export async function POST(request: Request) {
         })),
       );
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "workspace.role.created",
+      actorId: auth.user.id,
+      metadata: {
+        permissionCount: Array.isArray(body.permissions) ? body.permissions.length : 0,
+        roleName: role.name,
+      },
+      request,
+      targetId: role.id,
+      targetType: "workspace_custom_role",
+      workspaceId,
+    });
 
     return created({ role });
   } catch (error) {

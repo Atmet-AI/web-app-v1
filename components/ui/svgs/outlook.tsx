@@ -3,26 +3,26 @@ import type { SVGProps } from "react";
 const Outlook = (props: SVGProps<SVGSVGElement>) => (
   <svg viewBox="0 0 256 256" aria-hidden="true" {...props}>
     <defs>
-      <linearGradient id="outlook-back" x1="112" x2="216" y1="36" y2="216">
-        <stop stopColor="#35B8F1" />
+      <linearGradient id="outlook-mail-back" x1="134" x2="224" y1="40" y2="214">
+        <stop stopColor="#28A8EA" />
         <stop offset="1" stopColor="#0078D4" />
       </linearGradient>
-      <linearGradient id="outlook-front" x1="31" x2="132" y1="68" y2="187">
-        <stop stopColor="#0A86D9" />
-        <stop offset="1" stopColor="#064E9E" />
+      <linearGradient id="outlook-o-front" x1="24" x2="136" y1="72" y2="184">
+        <stop stopColor="#0F78D4" />
+        <stop offset="1" stopColor="#106EBE" />
       </linearGradient>
     </defs>
-    <rect width="148" height="148" x="86" y="50" fill="url(#outlook-back)" rx="18" />
-    <path fill="#50D9FF" d="M112 76h96v38h-96z" />
-    <path fill="#0078D4" d="M112 114h96v42h-96z" />
-    <path fill="#005A9E" d="M112 156h96v22c0 11-9 20-20 20h-76z" />
-    <path fill="#fff" d="m208 86-54 48 54 44z" opacity=".95" />
-    <path fill="#fff" d="m112 88 54 46-54 44z" opacity=".72" />
-    <path fill="#004B8D" d="M36 68 126 50v156l-90-18z" opacity=".35" />
-    <rect width="112" height="112" x="24" y="72" fill="url(#outlook-front)" rx="16" />
+    <rect width="142" height="142" x="92" y="56" fill="url(#outlook-mail-back)" rx="16" />
+    <path fill="#50D9FF" d="M116 78h94v40h-94z" />
+    <path fill="#0078D4" d="M116 118h94v38h-94z" />
+    <path fill="#005A9E" d="M116 156h94v21c0 12-9 21-21 21h-73z" />
+    <path fill="#fff" d="m210 86-55 48 55 44z" opacity=".96" />
+    <path fill="#fff" d="m116 88 55 46-55 44z" opacity=".72" />
+    <path fill="#064E9E" d="M36 72 130 54v148L36 184z" opacity=".36" />
+    <rect width="112" height="112" x="24" y="72" fill="url(#outlook-o-front)" rx="14" />
     <path
       fill="#fff"
-      d="M80 154c-23 0-38-17-38-42 0-26 16-43 39-43s38 17 38 42c0 26-16 43-39 43Zm1-18c13 0 20-10 20-25s-8-25-20-25c-13 0-20 10-20 25s8 25 20 25Z"
+      d="M80 154c-23 0-38-17-38-42s15-42 38-42 38 17 38 42-15 42-38 42Zm0-18c13 0 21-10 21-24s-8-24-21-24-21 10-21 24 8 24 21 24Z"
     />
   </svg>
 );

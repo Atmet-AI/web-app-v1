@@ -1,4 +1,5 @@
 import { isRouteResponse } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { requireChatPermission } from "@/lib/api/permissions";
 import { badRequest, created, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
@@ -68,6 +69,19 @@ export async function POST(request: Request, context: RouteContext) {
       .update({ last_message_at: new Date().toISOString() })
       .eq("id", chatId)
       .eq("user_id", auth.user.id);
+
+    await recordActivityLog(auth.admin, {
+      action: "chat.message.created",
+      actorId: auth.user.id,
+      metadata: {
+        contentLength: content.length,
+        messageId: data.id,
+        role: data.role,
+      },
+      request,
+      targetId: chatId,
+      targetType: "chat",
+    });
 
     return created({ message: data });
   } catch (error) {

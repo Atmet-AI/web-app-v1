@@ -1,4 +1,5 @@
 import { isRouteResponse, requireUser } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { badRequest, created, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
 export async function GET() {
@@ -77,6 +78,19 @@ export async function POST(request: Request) {
       plan_key: "pro",
       status: "active",
       billing_email: context.user.email,
+    });
+
+    await recordActivityLog(context.admin, {
+      action: "workspace.created",
+      actorId: context.user.id,
+      metadata: {
+        workspaceName: workspace.name,
+        workspaceSlug: workspace.slug,
+      },
+      request,
+      targetId: workspace.id,
+      targetType: "workspace",
+      workspaceId: workspace.id,
     });
 
     return created({ workspace });

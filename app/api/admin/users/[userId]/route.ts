@@ -1,4 +1,5 @@
 import { isRouteResponse, requireSuperAdmin } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
 type RouteContext = {
@@ -55,6 +56,20 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "admin.user.updated",
+      actorId: auth.user.id,
+      metadata: {
+        changedFields: Object.keys(body),
+        email: data.email,
+        fullName: data.full_name,
+        isSuperAdmin: data.is_super_admin,
+      },
+      request,
+      targetId: userId,
+      targetType: "profile",
+    });
 
     return ok({ user: data });
   } catch (error) {

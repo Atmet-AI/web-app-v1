@@ -4,6 +4,7 @@ import {
   requireWorkspacePermission,
   type ApiAuthContext,
 } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { badRequest, created, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 import { hasTransactionalMailConfig, sendTransactionalMail } from "@/lib/mail/smtp";
 import { workspaceInviteEmail } from "@/lib/mail/templates";
@@ -286,6 +287,20 @@ export async function POST(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "workspace.member.invited",
+      actorId: auth.user.id,
+      metadata: {
+        email,
+        inviteId: data.id,
+        role: data.role,
+      },
+      request,
+      targetId: data.id,
+      targetType: "workspace_invite",
+      workspaceId,
+    });
 
     if (hasTransactionalMailConfig()) {
       const [

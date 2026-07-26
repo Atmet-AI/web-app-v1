@@ -1,4 +1,5 @@
 import { isRouteResponse, requireWorkspacePermission } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { jsonObject, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 import { hasSupabaseServiceRoleKey } from "@/lib/supabase/admin";
 
@@ -62,13 +63,27 @@ export async function PATCH(request: Request, context: RouteContext) {
       throw error;
     }
 
+    await recordActivityLog(auth.admin, {
+      action: "workspace.updated",
+      actorId: auth.user.id,
+      metadata: {
+        changedFields: Object.keys(patch),
+        workspaceName: data.name,
+        workspaceSlug: data.slug,
+      },
+      request,
+      targetId: workspaceId,
+      targetType: "workspace",
+      workspaceId,
+    });
+
     return ok({ workspace: data });
   } catch (error) {
     return serverError(error);
   }
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
   try {
     const { workspaceId } = await context.params;
     const auth = await requireWorkspacePermission(workspaceId, "workspace.delete");
@@ -85,6 +100,15 @@ export async function DELETE(_request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "workspace.deleted",
+      actorId: auth.user.id,
+      request,
+      targetId: workspaceId,
+      targetType: "workspace",
+      workspaceId,
+    });
 
     return ok({ success: true });
   } catch (error) {

@@ -1,4 +1,5 @@
 import { isRouteResponse, requireWorkspacePermission } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { jsonObject, ok, readJson, serverError } from "@/lib/api/http";
 
 type RouteContext = {
@@ -49,6 +50,18 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "workspace.settings.updated",
+      actorId: auth.user.id,
+      metadata: {
+        changedFields: Object.keys(patch),
+      },
+      request,
+      targetId: workspaceId,
+      targetType: "workspace_settings",
+      workspaceId,
+    });
 
     return ok({ settings: data });
   } catch (error) {

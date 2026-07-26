@@ -28,12 +28,12 @@ export async function GET() {
         .from("admin_audit_logs")
         .select("*, profiles:profiles!admin_audit_logs_actor_id_fkey(full_name, email)")
         .order("created_at", { ascending: false })
-        .limit(20),
+        .limit(500),
       dataClient
         .from("session_logs")
         .select("*, profiles:profiles!session_logs_user_id_fkey(full_name, email)")
         .order("created_at", { ascending: false })
-        .limit(20),
+        .limit(500),
     ]);
 
     if (workspaceError || userError || requestError || usageError || auditError || sessionError) {

@@ -1,4 +1,5 @@
 import { isRouteResponse } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { requireChatPermission } from "@/lib/api/permissions";
 import { ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
@@ -58,13 +59,27 @@ export async function PATCH(request: Request, context: RouteContext) {
       throw error;
     }
 
+    await recordActivityLog(auth.admin, {
+      action: "chat.updated",
+      actorId: auth.user.id,
+      metadata: {
+        archived: data.archived,
+        chatTitle: data.title,
+        pinned: data.pinned,
+      },
+      request,
+      targetId: chatId,
+      targetType: "chat",
+      workspaceId: data.workspace_id,
+    });
+
     return ok({ chat: data });
   } catch (error) {
     return serverError(error);
   }
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
   try {
     const { chatId } = await context.params;
     const auth = await requireChatPermission(chatId, "chats.manage");
@@ -82,6 +97,14 @@ export async function DELETE(_request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "chat.deleted",
+      actorId: auth.user.id,
+      request,
+      targetId: chatId,
+      targetType: "chat",
+    });
 
     return ok({ success: true });
   } catch (error) {

@@ -517,6 +517,7 @@ create index if not exists skills_created_by_idx on public.skills(created_by);
 create index if not exists workflow_agents_workspace_id_idx on public.workflow_agents(workspace_id);
 create index if not exists workflow_nodes_agent_id_idx on public.workflow_nodes(agent_id);
 create index if not exists usage_events_workspace_created_idx on public.usage_events(workspace_id, created_at desc);
+create index if not exists admin_audit_logs_created_idx on public.admin_audit_logs(created_at desc);
 create index if not exists session_logs_created_idx on public.session_logs(created_at desc);
 create index if not exists ai_models_provider_idx on public.ai_models(provider_key);
 create index if not exists user_model_connections_user_idx on public.user_model_connections(user_id);

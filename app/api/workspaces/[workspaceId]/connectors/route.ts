@@ -1,4 +1,5 @@
 import { isRouteResponse, requireWorkspacePermission } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import {
   badRequest,
   jsonObject,
@@ -203,6 +204,20 @@ export async function POST(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: action === "disconnect" ? "connector.disconnected" : "connector.connect_link_created",
+      actorId: auth.user.id,
+      metadata: {
+        appKey,
+        status: data.status,
+        toolkitSlug,
+      },
+      request,
+      targetId: data.id,
+      targetType: "connector",
+      workspaceId,
+    });
 
     return ok({ connection: data, redirectUrl });
   } catch (error) {

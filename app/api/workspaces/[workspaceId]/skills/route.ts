@@ -1,4 +1,5 @@
 import { isRouteResponse, requireWorkspacePermission } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { badRequest, created, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
 type RouteContext = {
@@ -77,6 +78,19 @@ export async function POST(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "skill.created",
+      actorId: auth.user.id,
+      metadata: {
+        skillName: data.name,
+        source: data.source,
+      },
+      request,
+      targetId: data.id,
+      targetType: "skill",
+      workspaceId,
+    });
 
     return created({ skill: data });
   } catch (error) {

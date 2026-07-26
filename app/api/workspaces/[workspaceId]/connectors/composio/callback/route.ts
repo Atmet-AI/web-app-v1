@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isRouteResponse, requireWorkspacePermission } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { jsonObject, serverError, stringValue } from "@/lib/api/http";
 import {
   getComposioToolkitSlug,
@@ -86,6 +87,20 @@ export async function GET(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: connected ? "connector.connected" : "connector.connection_pending",
+      actorId: auth.user.id,
+      metadata: {
+        appKey,
+        connectedAccountId: stringValue(account?.id),
+        status: accountStatus || "UNKNOWN",
+        toolkitSlug,
+      },
+      request,
+      targetType: "connector",
+      workspaceId,
+    });
 
     redirectUrl.searchParams.set("composio", connected ? "connected" : "pending");
     redirectUrl.searchParams.set("app", appKey);

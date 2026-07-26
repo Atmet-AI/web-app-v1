@@ -8,6 +8,7 @@ import {
   type ParsedChatAttachment,
 } from "@/lib/ai/attachments";
 import { isRouteResponse } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import {
   badRequest,
   jsonObject,
@@ -116,8 +117,54 @@ function getChatMessageMentions(value: unknown) {
     : [];
 }
 
+function getRecentMessageAppKeys(rows: unknown[]) {
+  const appKeys: string[] = [];
+
+  for (const row of rows) {
+    const record = asRecord(row);
+    const metadata = asRecord(record.metadata);
+    const mentions = getChatMessageMentions(metadata.mentions);
+    appKeys.push(
+      ...mentions
+        .filter((mention) => mention.kind === "apps")
+        .map((mention) => mention.key || mention.name),
+    );
+
+    const connectedAppContext = Array.isArray(metadata.connectedAppContext)
+      ? metadata.connectedAppContext
+      : [];
+    for (const item of connectedAppContext) {
+      appKeys.push(stringValue(asRecord(item).appKey));
+    }
+  }
+
+  return appKeys;
+}
+
+function normalizeConnectorAppKey(value: string) {
+  const normalized = value.trim().toLowerCase();
+  const connector = connectorCatalog.find(
+    (item) =>
+      item.key.toLowerCase() === normalized ||
+      item.name.toLowerCase() === normalized,
+  );
+
+  return connector?.key ?? normalized;
+}
+
+function buildRecentConversationContext(messages: AtmetChatMessage[]) {
+  return messages
+    .slice(-8)
+    .map((message) => {
+      const content =
+        typeof message.content === "string" ? message.content : "[attachment]";
+      return `${message.role}: ${truncateJson(content, 1800)}`;
+    })
+    .join("\n\n");
+}
+
 function uniqueStrings(values: string[]) {
-  return Array.from(new Set(values.filter(Boolean)));
+  return Array.from(new Set(values.map(normalizeConnectorAppKey).filter(Boolean)));
 }
 
 function uniqueToolsBySlug<T extends { slug?: string }>(tools: T[]) {
@@ -192,16 +239,27 @@ function isSuccessfulToolResult(value: unknown) {
   return !getToolResultError(value);
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasStandaloneAppLabel(content: string, label: string) {
+  const pattern = new RegExp(
+    `(^|\\s|@)${escapeRegExp(label)}(?=$|\\s|[,;:!?\\)\\]])`,
+    "i",
+  );
+
+  return pattern.test(content);
+}
+
 function getMentionedAppKeys(content: string) {
-  const normalizedContent = content.toLowerCase();
   return connectorCatalog
     .filter((connector) => {
       const name = connector.name.toLowerCase();
       const key = connector.key.toLowerCase();
       return (
-        normalizedContent.includes(`@${key}`) ||
-        normalizedContent.includes(key) ||
-        normalizedContent.includes(name)
+        hasStandaloneAppLabel(content, key) ||
+        hasStandaloneAppLabel(content, name)
       );
     })
     .map((connector) => connector.key);
@@ -231,7 +289,7 @@ function getToolSearchQuery(appKey: string, content: string) {
   if (appKey === "gmail" || appKey === "email" || appKey === "outlook") {
     const normalized = content.toLowerCase();
     const provider = appKey === "outlook" ? "outlook" : "gmail";
-    if (/\bsend\b/.test(normalized)) {
+    if (hasEmailSendIntent(normalized)) {
       return `send email ${provider} recipient subject body`;
     }
 
@@ -286,11 +344,8 @@ function getIntentComposioTools(appKey: string, content: string) {
   }
 
   if (appKey === "gmail" || appKey === "email") {
-    if (/\bsend\b/.test(normalized)) {
-      return [
-        { slug: "GMAIL_SEND_EMAIL", version: "latest" },
-        { slug: "GMAIL_CREATE_EMAIL_DRAFT", version: "latest" },
-      ];
+    if (hasEmailSendIntent(normalized)) {
+      return [{ slug: "GMAIL_SEND_EMAIL", version: "latest" }];
     }
 
     if (/\bdraft\b/.test(normalized)) {
@@ -319,11 +374,8 @@ function getIntentComposioTools(appKey: string, content: string) {
   }
 
   if (appKey === "outlook") {
-    if (/\bsend\b/.test(normalized)) {
-      return [
-        { slug: "OUTLOOK_SEND_EMAIL", version: "latest" },
-        { slug: "OUTLOOK_CREATE_DRAFT", version: "latest" },
-      ];
+    if (hasEmailSendIntent(normalized)) {
+      return [{ slug: "OUTLOOK_SEND_EMAIL", version: "latest" }];
     }
 
     if (/\bdraft\b/.test(normalized)) {
@@ -362,6 +414,101 @@ function getRepoFullName(repo: unknown) {
 function getProxyData(value: unknown) {
   const record = asRecord(value);
   return record.data ?? record;
+}
+
+function hasEmailSendIntent(content: string) {
+  return (
+    /\b(send|sned|snead|sent)\b/i.test(content) ||
+    /\b(?:email|mail)\s+(?:to|for)\b/i.test(content)
+  );
+}
+
+function cleanEmailBody(value: string) {
+  return value
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => !/^(gmail|outlook|email)$/i.test(line.trim()))
+    .join("\n")
+    .trim();
+}
+
+function extractEmailSendDetails(content: string, conversationContext?: string) {
+  const combined = [conversationContext, content].filter(Boolean).join("\n");
+  const emailMatches = Array.from(
+    combined.matchAll(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi),
+  ).map((match) => match[0]);
+  const recipient = emailMatches[emailMatches.length - 1] ?? "";
+  const subject =
+    /(?:^|\n)\s*subject\s*[:\-]\s*([^\n]+)/i.exec(combined)?.[1]?.trim() ??
+    /(?:^|\n)\s*title\s*[:\-]\s*([^\n]+)/i.exec(combined)?.[1]?.trim() ??
+    "";
+  const explicitBody =
+    /(?:^|\n)\s*(?:message|body|email body)\s*[:\-]\s*([\s\S]+)/i.exec(combined)?.[1] ??
+    "";
+  const body = cleanEmailBody(explicitBody);
+
+  return {
+    body,
+    recipient,
+    subject,
+  };
+}
+
+function buildGmailRawEmail({
+  body,
+  recipient,
+  subject,
+}: {
+  body: string;
+  recipient: string;
+  subject: string;
+}) {
+  const raw = [
+    `To: ${recipient}`,
+    `Subject: ${subject}`,
+    "MIME-Version: 1.0",
+    "Content-Type: text/plain; charset=UTF-8",
+    "",
+    body,
+  ].join("\r\n");
+
+  return Buffer.from(raw).toString("base64url");
+}
+
+async function sendGmailMessage({
+  connectedAccountId,
+  content,
+  conversationContext,
+}: {
+  connectedAccountId?: string;
+  content: string;
+  conversationContext?: string;
+}) {
+  const details = extractEmailSendDetails(content, conversationContext);
+
+  if (!details.recipient || !details.subject || !details.body) {
+    return null;
+  }
+
+  const body = { raw: buildGmailRawEmail(details) };
+  const result = await executeComposioProxy({
+    body,
+    connectedAccountId,
+    endpoint: "/gmail/v1/users/me/messages/send",
+    method: "POST",
+  }).catch(() =>
+    executeComposioProxy({
+      body,
+      connectedAccountId,
+      endpoint: "/users/me/messages/send",
+      method: "POST",
+    }),
+  );
+
+  return {
+    ...details,
+    result,
+  };
 }
 
 function getRequestedEmailLimit(content: string) {
@@ -767,15 +914,21 @@ async function loadGitHubLatestPushContext({
 
 function buildToolPrompt({
   appKey,
+  conversationContext,
   content,
 }: {
   appKey: string;
+  conversationContext?: string;
   content: string;
 }) {
   const base = [
     "Connected app request for Atmet AI.",
     "Use the connected app only for the user's explicit request. Do not perform unrelated actions.",
     `User request: ${content}`,
+    conversationContext ? `Recent conversation context:\n${conversationContext}` : "",
+    "Resolve the latest user message together with the recent conversation. If Atmet asked for missing subject/body/recipient and the user now provides it, continue the original app action.",
+    "Use any action exposed by the connected Composio toolkit when it matches the request and the connected account has permission.",
+    "Do not downgrade write requests to read-only or drafts when a send/create/update/delete/post action is available and the user explicitly asked for it.",
   ];
 
   if (appKey === "gmail" || appKey === "email") {
@@ -819,12 +972,14 @@ async function loadConnectedAppToolContext({
   appKeys,
   content,
   connections,
+  conversationContext,
   userId,
   workspaceId,
 }: {
   appKeys: string[];
   content: string;
   connections: Record<string, unknown>[];
+  conversationContext?: string;
   userId: string;
   workspaceId: string;
 }) {
@@ -834,7 +989,7 @@ async function loadConnectedAppToolContext({
     connections.map((connection) => [stringValue(connection.app_key), connection]),
   );
 
-  for (const appKey of appKeys.slice(0, 3)) {
+  for (const appKey of appKeys.slice(0, 6)) {
     const connection = connectionsByAppKey.get(appKey);
     const connector = connectorCatalog.find((item) => item.key === appKey);
     const toolkitSlug = getComposioToolkitSlug(appKey);
@@ -859,16 +1014,56 @@ async function loadConnectedAppToolContext({
     const userConnection = getComposioUserConnection(connection.settings, userId);
     const connectedAccountId = stringValue(userConnection.connectedAccountId);
     const composioUserId = getComposioUserId(workspaceId, userId);
+    const intentContent = [conversationContext, content].filter(Boolean).join("\n");
 
     try {
       if (
         (appKey === "gmail" || appKey === "email") &&
-        shouldUseGmailReader(content)
+        hasEmailSendIntent(intentContent)
+      ) {
+        try {
+          const result = await sendGmailMessage({
+            connectedAccountId,
+            content,
+            conversationContext,
+          });
+
+          if (result) {
+            contextItems.push(
+              [
+                `### ${connector.name}`,
+                "Tool: Gmail proxy /gmail/v1/users/me/messages/send",
+                "Result:",
+                truncateJson(result),
+              ].join("\n"),
+            );
+            metadata.push({
+              appKey,
+              status: "used",
+              toolSlug: "gmail_proxy_send_message",
+            });
+            continue;
+          }
+        } catch (gmailSendError) {
+          metadata.push({
+            appKey,
+            error:
+              gmailSendError instanceof Error
+                ? gmailSendError.message
+                : "Gmail send failed",
+            status: "send_proxy_fallback",
+          });
+        }
+      }
+
+      if (
+        (appKey === "gmail" || appKey === "email") &&
+        shouldUseGmailReader(intentContent)
       ) {
         try {
           const result = await loadGmailMessagesContext({
             connectedAccountId,
-            content,
+            content: intentContent,
           });
 
           contextItems.push(
@@ -898,11 +1093,11 @@ async function loadConnectedAppToolContext({
         }
       }
 
-      if (appKey === "outlook" && shouldUseOutlookReader(content)) {
+      if (appKey === "outlook" && shouldUseOutlookReader(intentContent)) {
         try {
           const result = await loadOutlookMessagesContext({
             connectedAccountId,
-            content,
+            content: intentContent,
           });
 
           contextItems.push(
@@ -937,7 +1132,7 @@ async function loadConnectedAppToolContext({
 
       if (
         appKey === "github" &&
-        /\b(push|commit|commits|last push|latest push)\b/i.test(content)
+        /\b(push|commit|commits|last push|latest push)\b/i.test(intentContent)
       ) {
         try {
           const result = await loadGitHubLatestPushContext({
@@ -972,19 +1167,23 @@ async function loadConnectedAppToolContext({
 
       const [searchedTools, allToolkitTools] = await Promise.all([
         listComposioTools({
-          query: getToolSearchQuery(appKey, content),
+          query: getToolSearchQuery(appKey, intentContent),
           toolkitSlug,
         }),
-        appKey === "gmail" || appKey === "email" || appKey === "outlook"
-          ? listComposioToolkitTools(toolkitSlug)
-          : Promise.resolve([]),
+        listComposioToolkitTools(toolkitSlug),
       ]);
-      const tools = uniqueToolsBySlug([
-        ...getIntentComposioTools(appKey, content),
-        ...searchedTools,
+      const intentTools = getIntentComposioTools(appKey, intentContent);
+      const allTools = uniqueToolsBySlug([
+        ...intentTools,
         ...allToolkitTools,
+        ...searchedTools,
         ...getFallbackComposioTools(toolkitSlug),
       ]);
+      const tools =
+        (appKey === "gmail" || appKey === "email" || appKey === "outlook") &&
+        hasEmailSendIntent(intentContent)
+          ? allTools.filter((tool) => stringValue(tool.slug).includes("_SEND"))
+          : allTools;
 
       if (tools.length === 0) {
         contextItems.push(
@@ -997,10 +1196,7 @@ async function loadConnectedAppToolContext({
       let lastToolError = "";
       let toolWasUsed = false;
 
-      const maxToolAttempts =
-        appKey === "gmail" || appKey === "email" || appKey === "outlook"
-          ? 18
-          : 8;
+      const maxToolAttempts = tools.length;
 
       for (const tool of tools.slice(0, maxToolAttempts)) {
         const toolSlug = stringValue(tool.slug);
@@ -1011,7 +1207,7 @@ async function loadConnectedAppToolContext({
         try {
           const result = await executeComposioToolWithText({
             connectedAccountId,
-            text: buildToolPrompt({ appKey, content }),
+            text: buildToolPrompt({ appKey, content, conversationContext }),
             toolSlug,
             userId: composioUserId,
             version: stringValue(tool.version, "latest"),
@@ -1150,7 +1346,7 @@ export async function POST(request: Request) {
           .maybeSingle(),
         auth.admin
           .from("chat_messages")
-          .select("id, role, content, created_at")
+          .select("id, role, content, created_at, metadata")
           .eq("chat_id", chatId)
           .order("created_at", { ascending: false })
           .limit(20),
@@ -1213,14 +1409,17 @@ export async function POST(request: Request) {
       modelKey,
     );
     const connectionRows = (connectionsResult.data ?? []).map(asRecord);
+    const recentMessageRows = recentMessagesResult.data ?? [];
     const appKeysForContext = uniqueStrings([
       ...selectedAppKeys,
       ...getMentionedAppKeys(content),
+      ...getRecentMessageAppKeys(recentMessageRows),
     ]);
     const appContext = await loadConnectedAppToolContext({
       appKeys: appKeysForContext,
       connections: connectionRows,
       content,
+      conversationContext: buildRecentConversationContext(providerMessages),
       userId: auth.user.id,
       workspaceId,
     });
@@ -1306,6 +1505,25 @@ export async function POST(request: Request) {
       status,
       user_id: auth.user.id,
       workspace_id: workspaceId,
+    });
+
+    await recordActivityLog(auth.admin, {
+      action: `ai.chat.${status}`,
+      actorId: auth.user.id,
+      metadata: {
+        appKeys: appKeysForContext,
+        attachmentCount: parsedAttachments.length,
+        chatTitle: nextChatTitle || stringValue(chatRecord.title),
+        connectedAppContext: appContext.metadata,
+        model: model.displayName,
+        modelKey: model.key,
+        providerKey: aiResult.providerKey,
+        status,
+      },
+      request,
+      targetId: chatId,
+      targetType: "chat",
+      workspaceId,
     });
 
     return ok({

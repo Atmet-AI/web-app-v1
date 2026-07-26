@@ -1,18 +1,18 @@
 import type { SVGProps } from "react";
 
 const GoogleCalendar = (props: SVGProps<SVGSVGElement>) => (
-  <svg {...props} viewBox="0 0 64 64" fill="none">
-    <path d="M12 18h40v34a6 6 0 0 1-6 6H18a6 6 0 0 1-6-6V18Z" fill="#fff" />
-    <path d="M12 18h40v10H12V18Z" fill="#4285F4" />
-    <path d="M18 6h28a6 6 0 0 1 6 6v6H12v-6a6 6 0 0 1 6-6Z" fill="#1A73E8" />
-    <path d="M12 28h10v30h-4a6 6 0 0 1-6-6V28Z" fill="#34A853" />
-    <path d="M42 28h10v24a6 6 0 0 1-6 6h-4V28Z" fill="#FBBC04" />
-    <path d="M20 58h24V28H20v30Z" fill="#fff" />
+  <svg {...props} viewBox="0 0 48 48" fill="none" aria-hidden="true">
+    <path fill="#fff" d="M13 6h22l7 7v27a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4h3Z" />
+    <path fill="#4285F4" d="M6 17h36v-4l-7-7H10a4 4 0 0 0-4 4v7Z" />
+    <path fill="#34A853" d="M6 17h9v27h-5a4 4 0 0 1-4-4V17Z" />
+    <path fill="#FBBC04" d="M33 17h9v23a4 4 0 0 1-4 4h-5V17Z" />
+    <path fill="#EA4335" d="M15 6h20v11H15V6Z" />
+    <path fill="#fff" d="M15 17h18v27H15V17Z" />
     <path
-      d="M25.6 45.5h5.2v-14h-4.4l-4.2 2.9 2 3.2 1.4-.9v8.8Zm11.2.3c4.2 0 7-2.4 7-6.1 0-3.4-2.5-5.7-6.3-5.7-.5 0-1 .1-1.4.2l.3-2.7h6.5v-3.8h-10l-.9 9.6 2.7 1.3c.7-.5 1.4-.7 2.3-.7 1.2 0 2 .7 2 1.8s-.9 1.9-2.2 1.9c-1.4 0-2.6-.5-3.8-1.6l-2.4 3.2c1.6 1.7 3.8 2.6 6.2 2.6Z"
       fill="#3C4043"
+      d="M21.2 34.8h2.9V22.6h-2.5l-3.5 2.5 1.3 2.1 1.8-1.2v8.8Zm8.6.3c3.4 0 5.6-1.9 5.6-4.7 0-2.6-1.9-4.3-4.7-4.3-.5 0-1 .1-1.4.2l.2-1.4h5.2v-2.5h-7.5l-.7 6 1.8.9c.6-.4 1.2-.6 2-.6 1.3 0 2.2.7 2.2 1.8 0 1.2-.9 1.9-2.3 1.9-1.2 0-2.3-.4-3.2-1.2l-1.5 2c1.1 1.2 2.6 1.9 4.3 1.9Z"
     />
-    <path d="M18 6h28a6 6 0 0 1 6 6v40a6 6 0 0 1-6 6H18a6 6 0 0 1-6-6V12a6 6 0 0 1 6-6Z" stroke="#DADCE0" strokeWidth="2" />
+    <path fill="#185ABC" d="m35 6 7 7h-7V6Z" />
   </svg>
 );
 

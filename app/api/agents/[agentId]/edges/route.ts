@@ -1,4 +1,5 @@
 import { isRouteResponse } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { requireAgentPermission } from "@/lib/api/permissions";
 import { badRequest, created, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
@@ -41,6 +42,19 @@ export async function POST(request: Request, context: RouteContext) {
       throw error;
     }
 
+    await recordActivityLog(auth.admin, {
+      action: "agent.edge.saved",
+      actorId: auth.user.id,
+      metadata: {
+        label: data.label,
+        sourceNodeId: data.source_node_id,
+        targetNodeId: data.target_node_id,
+      },
+      request,
+      targetId: data.id,
+      targetType: "workflow_edge",
+    });
+
     return created({ edge: data });
   } catch (error) {
     return serverError(error);
@@ -62,6 +76,15 @@ export async function DELETE(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "agent.edge.deleted",
+      actorId: auth.user.id,
+      metadata: { agentId },
+      request,
+      targetId: id,
+      targetType: "workflow_edge",
+    });
 
     return ok({ success: true });
   } catch (error) {

@@ -1,4 +1,5 @@
 import { isRouteResponse } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { requireAgentPermission, requireChatPermission } from "@/lib/api/permissions";
 import { created, ok, readJson, serverError, stringValue, numberValue } from "@/lib/api/http";
 
@@ -45,6 +46,20 @@ export async function POST(request: Request, context: RouteContext) {
       throw error;
     }
 
+    await recordActivityLog(auth.admin, {
+      action: "agent.node.created",
+      actorId: auth.user.id,
+      metadata: {
+        appKeys: data.app_keys,
+        nodeTitle: data.title,
+        position: { x: data.position_x, y: data.position_y },
+        sourceChatId: data.source_chat_id,
+      },
+      request,
+      targetId: data.id,
+      targetType: "workflow_node",
+    });
+
     return created({ node: data });
   } catch (error) {
     return serverError(error);
@@ -82,6 +97,21 @@ export async function PATCH(request: Request, context: RouteContext) {
       throw error;
     }
 
+    await recordActivityLog(auth.admin, {
+      action: "agent.node.updated",
+      actorId: auth.user.id,
+      metadata: {
+        appKeys: data.app_keys,
+        nodeTitle: data.title,
+        position: { x: data.position_x, y: data.position_y },
+        runtimeState: data.runtime_state,
+        status: data.status,
+      },
+      request,
+      targetId: id,
+      targetType: "workflow_node",
+    });
+
     return ok({ node: data });
   } catch (error) {
     return serverError(error);
@@ -113,6 +143,18 @@ export async function DELETE(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "agent.node.deleted",
+      actorId: auth.user.id,
+      metadata: {
+        agentId,
+        sourceChatId,
+      },
+      request,
+      targetId: id,
+      targetType: "workflow_node",
+    });
 
     return ok({ success: true });
   } catch (error) {

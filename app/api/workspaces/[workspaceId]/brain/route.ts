@@ -1,4 +1,5 @@
 import { isRouteResponse, requireWorkspacePermission } from "@/lib/api/auth";
+import { recordActivityLog } from "@/lib/api/audit";
 import { ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
 type RouteContext = {
@@ -59,6 +60,23 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await recordActivityLog(auth.admin, {
+      action: "workspace.brain.updated",
+      actorId: auth.user.id,
+      metadata: {
+        knowledgeGraphStatus: data.knowledge_graph_status,
+        sectionsUpdated: [
+          stringValue(body.personalization) ? "personalization" : "",
+          stringValue(body.businessDetails) ? "businessDetails" : "",
+          stringValue(body.outputStyle) ? "outputStyle" : "",
+        ].filter(Boolean),
+      },
+      request,
+      targetId: workspaceId,
+      targetType: "workspace_brain",
+      workspaceId,
+    });
 
     return ok({ brain: data });
   } catch (error) {
