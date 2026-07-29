@@ -563,7 +563,27 @@ type AdminProfileView =
   | { name: string; type: "user" }
   | { name: string; type: "workspace" };
 
+type AdminAIFeedback = {
+  assistantDislikes: number;
+  assistantLikes: number;
+  assistantPositiveRate: number;
+  assistantTotal: number;
+  dislikes: number;
+  likes: number;
+  total: number;
+};
+
+type AdminAIPerformance = {
+  avgLatencyMs: number;
+  completed: number;
+  failed: number;
+  runs: number;
+  successRate: number;
+};
+
 type AdminData = {
+  aiFeedback: AdminAIFeedback;
+  aiPerformance: AdminAIPerformance;
   activityLogs: AdminLogRow[];
   requests: AdminRequestRow[];
   roles: AdminRoleRow[];
@@ -573,7 +593,27 @@ type AdminData = {
   workspaces: AdminWorkspaceRow[];
 };
 
+const emptyAdminAIFeedback: AdminAIFeedback = {
+  assistantDislikes: 0,
+  assistantLikes: 0,
+  assistantPositiveRate: 0,
+  assistantTotal: 0,
+  dislikes: 0,
+  likes: 0,
+  total: 0,
+};
+
+const emptyAdminAIPerformance: AdminAIPerformance = {
+  avgLatencyMs: 0,
+  completed: 0,
+  failed: 0,
+  runs: 0,
+  successRate: 0,
+};
+
 const emptyAdminData: AdminData = {
+  aiFeedback: emptyAdminAIFeedback,
+  aiPerformance: emptyAdminAIPerformance,
   activityLogs: [],
   requests: [],
   roles: [],
@@ -805,7 +845,7 @@ const chatAttachmentAccept = [
   ".yml",
 ].join(",");
 const maxComposerAttachments = 6;
-const maxComposerAttachmentBytes = 8 * 1024 * 1024;
+const maxComposerAttachmentBytes = 150 * 1024 * 1024;
 const initialSidebarChats: SidebarChat[] = [];
 
 type ChatModelLogo = "anthropic" | "atmet" | "openai";
@@ -915,12 +955,23 @@ type AiOutputVariant =
   | "web-search";
 
 type ChatMessage = {
+  attachments?: ChatMessageAttachment[];
   content: string;
+  feedback?: "dislike" | "like" | null;
   id: string;
   mentions?: ChatMessageMention[];
   role: "assistant" | "user";
   state?: "complete" | "thinking" | "typing";
   variant?: AiOutputVariant;
+};
+
+type ChatMessageAttachment = {
+  error?: string | null;
+  kind?: string;
+  name: string;
+  previewData?: string | null;
+  size: number;
+  type: string;
 };
 
 type ChatMessageMention = {
@@ -933,6 +984,7 @@ type ChatMessageMention = {
 type ComposerAttachment = {
   data: string;
   id: string;
+  kind: "document" | "image" | "text" | "unknown";
   name: string;
   size: number;
   type: string;
@@ -1068,6 +1120,41 @@ function formatFileSize(bytes: number) {
   return `${size >= 10 || unitIndex === 0 ? Math.round(size) : size.toFixed(1)} ${units[unitIndex]}`;
 }
 
+function isPreviewableImageType(type: string) {
+  return /^image\/(png|jpe?g|webp|gif)$/i.test(type);
+}
+
+function getAttachmentKind(type: string, name: string): ComposerAttachment["kind"] {
+  if (isPreviewableImageType(type)) {
+    return "image";
+  }
+
+  if (/\.((txt|md|json|csv|html|xml|ya?ml|js|jsx|ts|tsx|css|py|sql|log))$/i.test(name)) {
+    return "text";
+  }
+
+  if (
+    /(\.pdf|\.docx?|\.xlsx?|\.pptx?|\.rtf|\.odt|\.ods|\.odp|\.epub)$/i.test(name) ||
+    /^(application\/pdf|application\/rtf|application\/msword|application\/vnd\.)/i.test(type)
+  ) {
+    return "document";
+  }
+
+  return "unknown";
+}
+
+function getAttachmentPreviewSrc(
+  attachment: Pick<ChatMessageAttachment, "previewData" | "type">,
+) {
+  if (!attachment.previewData || !isPreviewableImageType(attachment.type)) {
+    return "";
+  }
+
+  return attachment.previewData.startsWith("data:")
+    ? attachment.previewData
+    : `data:${attachment.type};base64,${attachment.previewData}`;
+}
+
 function arrayBufferToBase64(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
   let binary = "";
@@ -1082,12 +1169,13 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
 
 async function fileToComposerAttachment(file: File): Promise<ComposerAttachment> {
   if (file.size > maxComposerAttachmentBytes) {
-    throw new Error(`${file.name} is larger than 8 MB.`);
+    throw new Error(`${file.name} is larger than 150 MB.`);
   }
 
   return {
     data: arrayBufferToBase64(await file.arrayBuffer()),
     id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+    kind: getAttachmentKind(file.type || "", file.name),
     name: file.name,
     size: file.size,
     type: file.type || "application/octet-stream",
@@ -1275,19 +1363,49 @@ function mapChatMessage(row: unknown): ChatMessage | null {
   const record = asRecord(row);
   const id = asString(record.id);
   const role = asString(record.role);
+  const metadata = asRecord(record.metadata);
 
   if (!id || (role !== "assistant" && role !== "user")) {
     return null;
   }
 
   return {
+    attachments: asRecordArray(metadata.attachments)
+      .map(mapChatMessageAttachment)
+      .filter((attachment): attachment is ChatMessageAttachment =>
+        Boolean(attachment),
+      ),
     content: asString(record.content),
+    feedback:
+      asString(metadata.feedback) === "like"
+        ? "like"
+        : asString(metadata.feedback) === "dislike"
+          ? "dislike"
+          : null,
     id,
-    mentions: asRecordArray(asRecord(record.metadata).mentions)
+    mentions: asRecordArray(metadata.mentions)
       .map(mapChatMessageMention)
       .filter((mention): mention is ChatMessageMention => Boolean(mention)),
     role,
     state: "complete",
+  };
+}
+
+function mapChatMessageAttachment(row: unknown): ChatMessageAttachment | null {
+  const record = asRecord(row);
+  const name = asString(record.name);
+  if (!name) {
+    return null;
+  }
+
+  const type = asString(record.type, "application/octet-stream");
+  return {
+    error: asString(record.error) || null,
+    kind: asString(record.kind, getAttachmentKind(type, name)),
+    name,
+    previewData: asString(record.previewData) || null,
+    size: asNumber(record.size),
+    type,
   };
 }
 
@@ -1386,8 +1504,8 @@ function mapAgent(row: unknown, index: number): Agent | null {
   const nodeRows = asRecordArray(record.workflow_nodes);
   const edgeRows = asRecordArray(record.workflow_edges);
   const appLogos = nodeRows
-    .flatMap((node) => asRecordArray(node.connected_apps))
-    .map((app) => asString(app.logo))
+    .flatMap((node) => (Array.isArray(node.app_keys) ? node.app_keys : []))
+    .map((key) => asString(key))
     .filter(Boolean);
   const workflowCards = nodeRows
     .map((node, nodeIndex) => {
@@ -1404,7 +1522,7 @@ function mapAgent(row: unknown, index: number): Agent | null {
       return {
         apps:
           appKeys.length > 0
-            ? appKeys.map((key) => getInitialsFromText(key))
+            ? appKeys
             : ["AT"],
         ...(sourceChatId ? { chatId: sourceChatId } : {}),
         id: nodeId,
@@ -2280,7 +2398,49 @@ export default function Home() {
         }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
-      }).catch(() => undefined);
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            return;
+          }
+
+          const payload = asRecord(await response.json().catch(() => ({})));
+          const node = asRecord(payload.node);
+          const appKeys = Array.isArray(node.app_keys)
+            ? node.app_keys.map((item) => asString(item)).filter(Boolean)
+            : [];
+          const nodeId = asString(node.id);
+
+          if (!nodeId) {
+            return;
+          }
+
+          setAgentList((current) =>
+            current.map((item) =>
+              item.id === agent.id
+                ? {
+                    ...item,
+                    appLogos: appKeys.length > 0 ? appKeys.slice(0, 3) : item.appLogos,
+                    workflowCards: [
+                      ...(item.workflowCards ?? []).filter(
+                        (card) => card.chatId !== chat.id && card.id !== nodeId,
+                      ),
+                      {
+                        apps: appKeys.length > 0 ? appKeys : ["AT"],
+                        chatId: chat.id,
+                        id: nodeId,
+                        runtime: mapRuntime(node.runtime_state),
+                        title: asString(node.title, chat.title),
+                        x: asNumber(node.position_x, 120),
+                        y: asNumber(node.position_y, 120),
+                      },
+                    ],
+                  }
+                : item,
+            ),
+          );
+        })
+        .catch(() => undefined);
     }
     setSelectedAgentName(agentName);
     setAgentsPlaygroundOpen(true);
@@ -2323,7 +2483,7 @@ export default function Home() {
         agent.name === agentName
           ? {
               ...agent,
-              workflowCards: (agent.workflowCards ?? []).filter(
+            workflowCards: (agent.workflowCards ?? []).filter(
                 (card) => card.chatId !== chatId,
               ),
             }
@@ -4456,6 +4616,180 @@ function ChatExperience({
     setComposerIsEmpty(editor.textContent?.trim().length === 0);
   }
 
+  async function editUserMessage(message: ChatMessage) {
+    if (!activeChatId || message.role !== "user") {
+      return;
+    }
+
+    const nextContent = window.prompt("Edit message", message.content)?.trim();
+    if (!nextContent || nextContent === message.content) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/chats/${activeChatId}/messages`, {
+        body: JSON.stringify({
+          action: "edit",
+          content: nextContent,
+          messageId: message.id,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      });
+      const payload = asRecord(await response.json().catch(() => ({})));
+      if (!response.ok) {
+        throw new Error(asString(payload.error, "Could not edit message."));
+      }
+
+      const editedMessage = mapChatMessage(payload.message);
+      setMessages((current) => {
+        const index = current.findIndex((item) => item.id === message.id);
+        if (index === -1) {
+          return current;
+        }
+
+        return [
+          ...current.slice(0, index),
+          editedMessage ?? { ...message, content: nextContent },
+        ];
+      });
+    } catch (error) {
+      void playAtmetSound("error");
+      window.alert(error instanceof Error ? error.message : "Could not edit message.");
+    }
+  }
+
+  async function setMessageFeedback(message: ChatMessage, feedback: "dislike" | "like") {
+    if (!activeChatId) {
+      return;
+    }
+
+    setMessages((current) =>
+      current.map((item) =>
+        item.id === message.id ? { ...item, feedback } : item,
+      ),
+    );
+
+    try {
+      const response = await fetch(`/api/chats/${activeChatId}/messages`, {
+        body: JSON.stringify({
+          action: "feedback",
+          feedback,
+          messageId: message.id,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      });
+
+      if (!response.ok) {
+        const payload = asRecord(await response.json().catch(() => ({})));
+        throw new Error(asString(payload.error, "Could not save feedback."));
+      }
+    } catch (error) {
+      void playAtmetSound("error");
+      window.alert(error instanceof Error ? error.message : "Could not save feedback.");
+    }
+  }
+
+  function copyMessageContent(message: ChatMessage) {
+    navigator.clipboard?.writeText(message.content).catch(() => undefined);
+  }
+
+  async function regenerateFromMessage(message: ChatMessage) {
+    if (!activeChatId || !workspaceId || isSending) {
+      return;
+    }
+
+    const targetMessage =
+      message.role === "user"
+        ? message
+        : [...messages]
+            .slice(0, messages.findIndex((item) => item.id === message.id))
+            .reverse()
+            .find((item) => item.role === "user");
+
+    if (!targetMessage) {
+      return;
+    }
+
+    const targetIndex = messages.findIndex((item) => item.id === targetMessage.id);
+    const assistantPendingId = `regenerate-${Date.now()}`;
+    const selectedAppKeys = (targetMessage.mentions ?? [])
+      .filter((mention) => mention.kind === "apps")
+      .map((mention) => mention.key || mention.name)
+      .filter(Boolean);
+
+    keepChatAtEndOnNextPaint();
+    setMessages((current) => {
+      const index = current.findIndex((item) => item.id === targetMessage.id);
+      if (index === -1) {
+        return current;
+      }
+
+      return [
+        ...current.slice(0, index + 1),
+        {
+          content: "",
+          id: assistantPendingId,
+          role: "assistant" as const,
+          state: "thinking" as const,
+        },
+      ];
+    });
+    setIsSending(true);
+
+    try {
+      const response = await fetch("/api/ai/chat", {
+        body: JSON.stringify({
+          appKeys: selectedAppKeys,
+          chatId: activeChatId,
+          regenerateMessageId: targetMessage.id,
+          modelKey: selectedModel.id,
+          workspaceId,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = asRecord(await response.json().catch(() => ({})));
+      if (!response.ok) {
+        throw new Error(
+          asString(payload.error) ||
+            asString(payload.message) ||
+            "Atmet could not regenerate this response.",
+        );
+      }
+
+      const savedAssistantMessage = mapChatMessage(payload.assistantMessage);
+      keepChatAtEndOnNextPaint();
+      setMessages((current) =>
+        current.map((currentMessage) =>
+          currentMessage.id === assistantPendingId && savedAssistantMessage
+            ? { ...savedAssistantMessage, state: "typing" as const }
+            : currentMessage,
+        ),
+      );
+    } catch (error) {
+      void playAtmetSound("error");
+      const errorMessage =
+        error instanceof Error ? error.message : "Could not regenerate response.";
+      setMessages((current) => {
+        const trimmed =
+          targetIndex >= 0 ? current.slice(0, targetIndex + 1) : current;
+        return [
+          ...trimmed,
+          {
+            content: `Atmet could not complete this message: ${errorMessage}`,
+            id: assistantPendingId,
+            role: "assistant" as const,
+            state: "complete" as const,
+          },
+        ];
+      });
+    } finally {
+      setIsSending(false);
+    }
+  }
+
   function updateMentionFromEditor() {
     const editor = editorRef.current;
     const selection = window.getSelection();
@@ -4587,6 +4921,13 @@ function ChatExperience({
     setCreateAgentDialogOpen(false);
 
     const optimisticMessage = {
+      attachments: selectedAttachments.map((attachment) => ({
+        kind: attachment.kind,
+        name: attachment.name,
+        previewData: attachment.kind === "image" ? attachment.data : null,
+        size: attachment.size,
+        type: attachment.type,
+      })),
       content,
       id: `pending-${Date.now()}`,
       mentions: selectedMentions,
@@ -4907,6 +5248,10 @@ function ChatExperience({
                     >
                       <ChatMessageBubble
                         message={message}
+                        onCopy={copyMessageContent}
+                        onEdit={editUserMessage}
+                        onFeedback={setMessageFeedback}
+                        onRegenerate={regenerateFromMessage}
                         onTypingFrame={keepChatAtEndOnNextPaint}
                         onTypingComplete={(messageId) => {
                           setMessages((current) =>
@@ -5006,31 +5351,26 @@ function ChatExperience({
             </div>
           )}
           {composerAttachments.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-1.5 px-3 pb-1">
+            <div className="px-3 pb-1">
+              <div className="flex max-h-48 flex-wrap items-start gap-2 overflow-y-auto pr-1">
               {composerAttachments.map((attachment) => (
-                <span
-                  className="inline-flex h-7 max-w-64 items-center gap-1.5 rounded-md bg-muted px-2 text-xs text-muted-foreground"
+                <ChatAttachmentPreview
+                  attachment={{
+                    kind: attachment.kind,
+                    name: attachment.name,
+                    previewData: attachment.kind === "image" ? attachment.data : null,
+                    size: attachment.size,
+                    type: attachment.type,
+                  }}
                   key={attachment.id}
-                >
-                  <Icon className="size-3.5 shrink-0" icon={File01Icon} />
-                  <span className="min-w-0 truncate text-foreground">
-                    {attachment.name}
-                  </span>
-                  <span className="shrink-0">{formatFileSize(attachment.size)}</span>
-                  <button
-                    aria-label={`Remove ${attachment.name}`}
-                    className="grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-background hover:text-foreground"
-                    onClick={() =>
-                      setComposerAttachments((current) =>
-                        current.filter((item) => item.id !== attachment.id),
-                      )
-                    }
-                    type="button"
-                  >
-                    <Icon className="size-3" icon={Delete02Icon} />
-                  </button>
-                </span>
+                  onRemove={() =>
+                    setComposerAttachments((current) =>
+                      current.filter((item) => item.id !== attachment.id),
+                    )
+                  }
+                />
               ))}
+              </div>
             </div>
           ) : null}
           <div className="flex flex-wrap items-center gap-2 px-3 pb-2 pt-2">
@@ -5395,20 +5735,43 @@ function ChatModelMark({
 
 function ChatMessageBubble({
   message,
+  onCopy,
+  onEdit,
+  onFeedback,
+  onRegenerate,
   onTypingFrame,
   onTypingComplete,
 }: {
   message: ChatMessage;
+  onCopy?: (message: ChatMessage) => void;
+  onEdit?: (message: ChatMessage) => void;
+  onFeedback?: (message: ChatMessage, feedback: "dislike" | "like") => void;
+  onRegenerate?: (message: ChatMessage) => void;
   onTypingFrame?: () => void;
   onTypingComplete?: (messageId: string) => void;
 }) {
   if (message.role === "user") {
     return (
-      <div className="flex justify-end px-1 sm:px-2 lg:px-3">
-        <div className="max-w-[80%] rounded-xl bg-secondary px-3 py-2 text-sm leading-6 text-secondary-foreground">
-          <UserMessageContent
-            content={message.content}
-            mentions={message.mentions ?? []}
+      <div className="group flex justify-end px-1 sm:px-2 lg:px-3">
+        <div className="grid justify-items-end gap-1">
+          {message.attachments && message.attachments.length > 0 ? (
+            <ChatAttachmentGrid
+              attachments={message.attachments}
+              align="end"
+            />
+          ) : null}
+          <div className="max-w-[80%] rounded-xl bg-secondary px-3 py-2 text-sm leading-6 text-secondary-foreground">
+            <UserMessageContent
+              content={message.content}
+              mentions={message.mentions ?? []}
+            />
+          </div>
+          <MessageActionBar
+            message={message}
+            onCopy={onCopy}
+            onEdit={onEdit}
+            onFeedback={onFeedback}
+            onRegenerate={onRegenerate}
           />
         </div>
       </div>
@@ -5416,7 +5779,7 @@ function ChatMessageBubble({
   }
 
   return (
-    <div className="flex justify-start px-1 sm:px-2 lg:px-3">
+    <div className="group flex justify-start px-1 sm:px-2 lg:px-3">
       <div className="grid w-full max-w-full gap-3">
         {message.state === "thinking" ? (
           <AiThinkingState />
@@ -5430,7 +5793,190 @@ function ChatMessageBubble({
         ) : (
           <AiTextResponse text={message.content} />
         )}
+        {message.state === "complete" ? (
+          <MessageActionBar
+            message={message}
+            onCopy={onCopy}
+            onFeedback={onFeedback}
+            onRegenerate={onRegenerate}
+          />
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+function ChatAttachmentGrid({
+  align = "start",
+  attachments,
+  onRemove,
+}: {
+  align?: "end" | "start";
+  attachments: readonly ChatMessageAttachment[];
+  onRemove?: (attachment: ChatMessageAttachment) => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex max-w-[min(36rem,100%)] flex-wrap items-start gap-2",
+        align === "end" ? "justify-end" : "justify-start",
+      )}
+    >
+      {attachments.map((attachment) => (
+        <ChatAttachmentPreview
+          attachment={attachment}
+          key={`${attachment.name}-${attachment.size}-${attachment.type}`}
+          onRemove={onRemove}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ChatAttachmentPreview({
+  attachment,
+  onRemove,
+}: {
+  attachment: ChatMessageAttachment;
+  onRemove?: (attachment: ChatMessageAttachment) => void;
+}) {
+  const previewSrc = getAttachmentPreviewSrc(attachment);
+  const typeLabel =
+    attachment.kind === "image"
+      ? "Image"
+      : attachment.kind === "text"
+        ? "Text"
+        : attachment.kind === "document"
+          ? "Document"
+          : "File";
+
+  if (previewSrc) {
+    return (
+      <figure className="group/attachment relative overflow-hidden rounded-lg border border-border bg-muted/30 shadow-xs/5">
+        <img
+          alt={attachment.name}
+          className="h-28 w-40 object-cover"
+          src={previewSrc}
+        />
+        <figcaption className="absolute inset-x-0 bottom-0 bg-background/88 px-2 py-1 backdrop-blur-md">
+          <span className="block truncate text-[0.6875rem] font-medium">
+            {attachment.name}
+          </span>
+          <span className="block text-[0.625rem] text-muted-foreground">
+            {formatFileSize(attachment.size)}
+          </span>
+        </figcaption>
+        {onRemove ? (
+          <button
+            aria-label={`Remove ${attachment.name}`}
+            className="absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-md bg-background/90 text-muted-foreground opacity-0 shadow-xs/5 transition-opacity hover:text-foreground group-hover/attachment:opacity-100"
+            onClick={() => onRemove(attachment)}
+            type="button"
+          >
+            <Icon className="size-3.5" icon={Delete02Icon} />
+          </button>
+        ) : null}
+      </figure>
+    );
+  }
+
+  return (
+    <div className="group/attachment relative flex min-h-16 w-64 max-w-full items-center self-start rounded-lg border border-border bg-muted/30 p-2 shadow-xs/5">
+      <span className="grid size-10 shrink-0 place-items-center rounded-md bg-background text-muted-foreground">
+        <Icon className="size-5" icon={File01Icon} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-medium">{attachment.name}</span>
+        <span className="mt-0.5 block truncate text-[0.6875rem] text-muted-foreground">
+          {typeLabel} · {formatFileSize(attachment.size)}
+        </span>
+        {attachment.error ? (
+          <span className="mt-0.5 block truncate text-[0.6875rem] text-destructive">
+            Text extraction warning
+          </span>
+        ) : null}
+      </span>
+      {onRemove ? (
+        <button
+          aria-label={`Remove ${attachment.name}`}
+          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-[background-color,color,opacity] hover:bg-background hover:text-foreground group-hover/attachment:opacity-100"
+          onClick={() => onRemove(attachment)}
+          type="button"
+        >
+          <Icon className="size-3.5" icon={Delete02Icon} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function MessageActionBar({
+  message,
+  onCopy,
+  onEdit,
+  onFeedback,
+  onRegenerate,
+}: {
+  message: ChatMessage;
+  onCopy?: (message: ChatMessage) => void;
+  onEdit?: (message: ChatMessage) => void;
+  onFeedback?: (message: ChatMessage, feedback: "dislike" | "like") => void;
+  onRegenerate?: (message: ChatMessage) => void;
+}) {
+  return (
+    <div className="flex min-h-8 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      {message.role === "user" ? (
+        <button
+          aria-label="Edit message"
+          className="grid size-8 place-items-center rounded-md text-muted-foreground transition-[background-color,color,scale] hover:bg-muted hover:text-foreground active:scale-[0.96]"
+          onClick={() => onEdit?.(message)}
+          type="button"
+        >
+          <Icon className="size-3.5" icon={Edit02Icon} />
+        </button>
+      ) : null}
+      <button
+        aria-label="Regenerate"
+        className="grid size-8 place-items-center rounded-md text-muted-foreground transition-[background-color,color,scale] hover:bg-muted hover:text-foreground active:scale-[0.96]"
+        onClick={() => onRegenerate?.(message)}
+        type="button"
+      >
+        <Icon className="size-3.5" icon={AiMagicIcon} />
+      </button>
+      <button
+        aria-label="Like"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-xs font-semibold transition-[background-color,color,scale] active:scale-[0.96]",
+          message.feedback === "like"
+            ? "bg-success/15 text-success-foreground"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground",
+        )}
+        onClick={() => onFeedback?.(message, "like")}
+        type="button"
+      >
+        +1
+      </button>
+      <button
+        aria-label="Dislike"
+        className={cn(
+          "grid size-8 place-items-center rounded-md text-xs font-semibold transition-[background-color,color,scale] active:scale-[0.96]",
+          message.feedback === "dislike"
+            ? "bg-destructive/15 text-destructive"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground",
+        )}
+        onClick={() => onFeedback?.(message, "dislike")}
+        type="button"
+      >
+        -1
+      </button>
+      <button
+        aria-label="Copy"
+        className="grid size-8 place-items-center rounded-md text-muted-foreground transition-[background-color,color,scale] hover:bg-muted hover:text-foreground active:scale-[0.96]"
+        onClick={() => onCopy?.(message)}
+        type="button"
+      >
+        <Icon className="size-3.5" icon={ClipboardCopyIcon} />
+      </button>
     </div>
   );
 }
@@ -5589,7 +6135,7 @@ function ChatMentionBadge({ mention }: { mention: ChatMessageMention }) {
   return (
     <span
       className={cn(
-        "mx-0.5 inline-flex h-[1.35em] translate-y-[-0.08em] items-center gap-1 rounded-md px-1.5 align-baseline text-[0.82em] font-medium leading-none",
+        "mx-0.5 inline-flex h-[1.65em] translate-y-[-0.04em] items-center gap-1.5 rounded-sm px-2 align-baseline text-[0.82em] font-medium leading-none",
         isApp
           ? "bg-[#ddf4ff] text-[#0969da] dark:bg-[#1f6feb]/24 dark:text-[#0969da]"
           : "bg-pink-500/16 text-pink-700 dark:text-pink-200",
@@ -5597,9 +6143,9 @@ function ChatMentionBadge({ mention }: { mention: ChatMessageMention }) {
     >
       <span
         className={cn(
-          "grid size-[1em] shrink-0 place-items-center overflow-hidden rounded-sm",
+          "grid size-[1.08em] shrink-0 place-items-center overflow-hidden rounded-sm",
           isApp
-            ? "text-[#0969da] dark:text-[#0969da]"
+            ? "text-current [&_svg]:text-[initial]"
             : "text-pink-700 dark:text-pink-200",
         )}
       >
@@ -6493,9 +7039,9 @@ function AtmetLogo({
 function getComposerAppLogoSvg(key?: string) {
   switch (key) {
     case "chatgpt":
-      return `<svg viewBox="0 0 256 260" aria-hidden="true"><path fill="currentColor" d="M239.2 106.2a64.7 64.7 0 0 0-5.6-53.1C219.5 28.5 191 15.8 163.2 21.7A65.6 65.6 0 0 0 52.1 45.2 64.7 64.7 0 0 0 8.9 76.6c-14.3 24.6-11.1 55.6 8 76.7a64.7 64.7 0 0 0 5.5 53.1c14.2 24.7 42.6 37.3 70.4 31.4a64.7 64.7 0 0 0 48.8 21.7c28.5 0 53.7-18.4 62.4-45.5a64.8 64.8 0 0 0 43.2-31.4c14.2-24.5 10.9-55.4-8-76.4Zm-97.6 136.3a48.4 48.4 0 0 1-31.1-11.2l53.2-30.7a8.6 8.6 0 0 0 4.3-7.4v-72.8l21.8 12.6c.2.1.4.3.4.6v60.3c-.1 26.9-21.8 48.6-48.6 48.6ZM37.2 197.9a48.3 48.3 0 0 1-5.8-32.6l53.3 30.8a8.3 8.3 0 0 0 8.4 0l63.2-36.4v25.2c0 .3-.1.5-.4.7l-52.3 30.1c-23.3 13.4-53 5.5-66.4-17.8ZM23.5 85.4a48.5 48.5 0 0 1 25.6-21.3v61.3a8.3 8.3 0 0 0 4.2 7.3l62.9 36.3-21.9 12.7a.8.8 0 0 1-.8 0l-52.2-30.2C18.1 138.1 10.2 108.4 23.5 85.4Zm179.5 41.7-63.1-36.7 21.8-12.5a.8.8 0 0 1 .8 0l52.2 30.1a48.6 48.6 0 0 1-7.3 87.7v-61.4a8.5 8.5 0 0 0-4.4-7.2Zm21.8-32.7-53.2-31a8.4 8.4 0 0 0-8.5 0L100 99.8V74.6c0-.3.1-.5.3-.7l52.2-30.1a48.7 48.7 0 0 1 72.3 50.6ZM88.1 139.1l-21.9-12.6a.9.9 0 0 1-.4-.6V65.7a48.7 48.7 0 0 1 79.8-37.4L92.4 59a8.6 8.6 0 0 0-4.2 7.4l-.1 72.7Zm11.8-25.6 28.2-16.2 28.2 16.2V146l-28.1 16.2L100 146l-.1-32.5Z"/></svg>`;
+      return `<svg viewBox="0 0 256 260" aria-hidden="true"><path fill="#10a37f" d="M239.2 106.2a64.7 64.7 0 0 0-5.6-53.1C219.5 28.5 191 15.8 163.2 21.7A65.6 65.6 0 0 0 52.1 45.2 64.7 64.7 0 0 0 8.9 76.6c-14.3 24.6-11.1 55.6 8 76.7a64.7 64.7 0 0 0 5.5 53.1c14.2 24.7 42.6 37.3 70.4 31.4a64.7 64.7 0 0 0 48.8 21.7c28.5 0 53.7-18.4 62.4-45.5a64.8 64.8 0 0 0 43.2-31.4c14.2-24.5 10.9-55.4-8-76.4Zm-97.6 136.3a48.4 48.4 0 0 1-31.1-11.2l53.2-30.7a8.6 8.6 0 0 0 4.3-7.4v-72.8l21.8 12.6c.2.1.4.3.4.6v60.3c-.1 26.9-21.8 48.6-48.6 48.6ZM37.2 197.9a48.3 48.3 0 0 1-5.8-32.6l53.3 30.8a8.3 8.3 0 0 0 8.4 0l63.2-36.4v25.2c0 .3-.1.5-.4.7l-52.3 30.1c-23.3 13.4-53 5.5-66.4-17.8ZM23.5 85.4a48.5 48.5 0 0 1 25.6-21.3v61.3a8.3 8.3 0 0 0 4.2 7.3l62.9 36.3-21.9 12.7a.8.8 0 0 1-.8 0l-52.2-30.2C18.1 138.1 10.2 108.4 23.5 85.4Zm179.5 41.7-63.1-36.7 21.8-12.5a.8.8 0 0 1 .8 0l52.2 30.1a48.6 48.6 0 0 1-7.3 87.7v-61.4a8.5 8.5 0 0 0-4.4-7.2Zm21.8-32.7-53.2-31a8.4 8.4 0 0 0-8.5 0L100 99.8V74.6c0-.3.1-.5.3-.7l52.2-30.1a48.7 48.7 0 0 1 72.3 50.6ZM88.1 139.1l-21.9-12.6a.9.9 0 0 1-.4-.6V65.7a48.7 48.7 0 0 1 79.8-37.4L92.4 59a8.6 8.6 0 0 0-4.2 7.4l-.1 72.7Zm11.8-25.6 28.2-16.2 28.2 16.2V146l-28.1 16.2L100 146l-.1-32.5Z"/></svg>`;
     case "claude":
-      return `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13.8 3.5h3.6L24 20h-3.6L13.8 3.5Zm-7.2 0h3.7L16.9 20h-3.7l-1.3-3.5H5L3.7 20H0L6.6 3.5Zm4.1 10L8.5 7.7l-2.3 5.8h4.5Z"/></svg>`;
+      return `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#d97757" d="M13.8 3.5h3.6L24 20h-3.6L13.8 3.5Zm-7.2 0h3.7L16.9 20h-3.7l-1.3-3.5H5L3.7 20H0L6.6 3.5Zm4.1 10L8.5 7.7l-2.3 5.8h4.5Z"/></svg>`;
     case "telegram":
       return `<svg viewBox="0 0 256 256" aria-hidden="true"><defs><linearGradient id="composer-telegram" x1="50%" x2="50%" y1="0%" y2="100%"><stop offset="0%" stop-color="#2AABEE"/><stop offset="100%" stop-color="#229ED9"/></linearGradient></defs><path fill="url(#composer-telegram)" d="M128 0C57.3 0 0 57.3 0 128s57.3 128 128 128 128-57.3 128-128S198.7 0 128 0Z"/><path fill="#fff" d="M57.9 126.6c37.3-16.3 62.2-27 74.6-32.1 35.6-14.8 42.9-17.4 47.8-17.4 1.1 0 3.4.2 5 1.5 1.3 1.1 1.6 2.5 1.8 3.5.2 1 .4 3.3.2 5-1.9 20.2-10.3 69.4-14.5 92-1.8 9.6-5.3 12.8-8.7 13.1-7.4.7-13.1-4.9-20.3-9.6-11.3-7.4-17.6-12-28.6-19.2-12.6-8.3-4.4-12.9 2.8-20.4 1.9-2 34.6-31.7 35.3-34.5.1-.3.2-1.6-.6-2.3-.7-.7-1.8-.4-2.6-.3-1.1.3-19.1 12.2-54 35.7-5.1 3.5-9.7 5.2-13.9 5.1-4.6-.1-13.4-2.6-19.9-4.7-8-2.6-14.4-4-13.8-8.4.3-2.3 3.5-4.7 9.5-7.1Z"/></svg>`;
     case "gmail":
@@ -6522,8 +7068,8 @@ function createComposerBadge(option: ComposerOption) {
   const badge = document.createElement("span");
   const isApp = option.kind === "apps";
   badge.className = isApp
-    ? "mx-0.5 inline-flex h-[1.35em] translate-y-[-0.08em] items-center gap-1 rounded-md bg-[#ddf4ff] px-1.5 align-baseline text-[0.82em] font-medium leading-none text-[#0969da] dark:bg-[#1f6feb]/24 dark:text-[#0969da]"
-    : "mx-0.5 inline-flex h-[1.35em] translate-y-[-0.08em] items-center gap-1 rounded-md bg-pink-500/16 px-1.5 align-baseline text-[0.82em] font-medium leading-none text-pink-700 dark:text-pink-200";
+    ? "mx-0.5 inline-flex h-[1.65em] translate-y-[-0.04em] items-center gap-1.5 rounded-sm bg-[#ddf4ff] px-2 align-baseline text-[0.82em] font-medium leading-none text-[#0969da] dark:bg-[#1f6feb]/24 dark:text-[#0969da]"
+    : "mx-0.5 inline-flex h-[1.65em] translate-y-[-0.04em] items-center gap-1.5 rounded-sm bg-pink-500/16 px-2 align-baseline text-[0.82em] font-medium leading-none text-pink-700 dark:text-pink-200";
   badge.contentEditable = "false";
   badge.dataset.composerToken = "true";
   badge.dataset.composerLabel = option.name;
@@ -6537,8 +7083,8 @@ function createComposerBadge(option: ComposerOption) {
 
   const icon = document.createElement("span");
   icon.className = isApp
-    ? "grid size-[1em] shrink-0 place-items-center overflow-hidden rounded-sm text-[#0969da] dark:text-[#0969da]"
-    : "grid size-[1em] shrink-0 place-items-center rounded-sm text-pink-700 dark:text-pink-200";
+    ? "grid size-[1.08em] shrink-0 place-items-center overflow-hidden rounded-sm"
+    : "grid size-[1.08em] shrink-0 place-items-center rounded-sm text-pink-700 dark:text-pink-200";
   const appLogoSvg = isApp ? getComposerAppLogoSvg(option.connectorKey) : "";
   if (appLogoSvg) {
     icon.innerHTML = appLogoSvg;
@@ -6966,6 +7512,8 @@ function AgentAppLogo({
   className?: string;
   logo: string;
 }) {
+  const connector = connectorCatalog.find((item) => item.key === logo);
+
   return (
     <div
       className={cn(
@@ -6974,7 +7522,18 @@ function AgentAppLogo({
       )}
     >
       <span className="relative z-10 grid min-h-5 min-w-5 place-items-center rounded-md px-1">
-        {logo}
+        {connector ? (
+          <ConnectorLogo
+            className="size-5"
+            connector={{
+              key: connector.key,
+              logo: connector.logo,
+              name: connector.name,
+            }}
+          />
+        ) : (
+          logo
+        )}
       </span>
     </div>
   );
@@ -7141,6 +7700,38 @@ function AgentPlayground({
       clearRunTimeouts(runTimeoutsRef);
     };
   }, []);
+
+  useEffect(() => {
+    const appKeysByCardId = new Map(
+      (agent.workflowCards ?? [])
+        .filter((card) => card.apps.length > 0 && !card.apps.includes("AT"))
+        .map((card) => [card.id, card.apps] as const),
+    );
+    const appKeysByChatId = new Map(
+      (agent.workflowCards ?? [])
+        .filter(
+          (card) =>
+            Boolean(card.chatId) &&
+            card.apps.length > 0 &&
+            !card.apps.includes("AT"),
+        )
+        .map((card) => [card.chatId ?? "", card.apps] as const),
+    );
+
+    if (appKeysByCardId.size === 0 && appKeysByChatId.size === 0) {
+      return;
+    }
+
+    setCards((current) =>
+      current.map((card) => {
+        const nextApps =
+          appKeysByCardId.get(card.id) ||
+          (card.chatId ? appKeysByChatId.get(card.chatId) : undefined);
+
+        return nextApps ? { ...card, apps: [...nextApps] } : card;
+      }),
+    );
+  }, [agent.workflowCards]);
 
   useEffect(() => {
     if (highlightedCardIds.length === 0) {
@@ -7854,6 +8445,50 @@ function AgentSettingsSheet({
   const agentUrl = `https://app.atmetai.com/agents/${agent.name
     .toLowerCase()
     .replace(/\s+/g, "-")}`;
+  const customScheduleMatch = /^every\s+(\d{1,3})\s*(minute|minutes|hour|hours|day|days)$/i.exec(
+    agent.schedule ?? "",
+  );
+  const [customEveryCount, setCustomEveryCount] = useState(
+    customScheduleMatch?.[1] ?? "15",
+  );
+  const [customEveryUnit, setCustomEveryUnit] = useState(
+    customScheduleMatch?.[2]?.startsWith("hour")
+      ? "hours"
+      : customScheduleMatch?.[2]?.startsWith("day")
+        ? "days"
+        : "minutes",
+  );
+  useEffect(() => {
+    const nextScheduleMatch = /^every\s+(\d{1,3})\s*(minute|minutes|hour|hours|day|days)$/i.exec(
+      agent.schedule ?? "",
+    );
+
+    if (!nextScheduleMatch) {
+      return;
+    }
+
+    setCustomEveryCount(nextScheduleMatch[1] ?? "15");
+    setCustomEveryUnit(
+      nextScheduleMatch[2]?.startsWith("hour")
+        ? "hours"
+        : nextScheduleMatch[2]?.startsWith("day")
+          ? "days"
+          : "minutes",
+    );
+  }, [agent.schedule]);
+  const selectedScheduleValue =
+    agent.schedule &&
+    ["hourly", "daily", "weekdays", "weekly"].includes(agent.schedule)
+      ? agent.schedule
+      : agent.schedule
+        ? "custom"
+        : "manual";
+
+  function applyCustomSchedule() {
+    const count = Math.max(1, Math.min(999, Number.parseInt(customEveryCount, 10) || 1));
+    const unit = count === 1 ? customEveryUnit.replace(/s$/, "") : customEveryUnit;
+    onAgentScheduleChange(`every ${count} ${unit}`);
+  }
 
   return (
     <Sheet>
@@ -7901,9 +8536,11 @@ function AgentSettingsSheet({
                 </div>
                 <Select
                   onValueChange={(value) =>
-                    onAgentScheduleChange(value === "manual" ? null : value)
+                    value === "custom"
+                      ? applyCustomSchedule()
+                      : onAgentScheduleChange(value === "manual" ? null : value)
                   }
-                  value={agent.schedule ?? "manual"}
+                  value={selectedScheduleValue}
                 >
                   <SelectTrigger className="w-40" size="sm">
                     <SelectValue />
@@ -7914,8 +8551,42 @@ function AgentSettingsSheet({
                     <SelectItem value="daily">Daily</SelectItem>
                     <SelectItem value="weekdays">Weekdays</SelectItem>
                     <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="custom">Custom</SelectItem>
                   </SelectPopup>
                 </Select>
+              </div>
+              <div className="grid gap-2 rounded-lg border border-border p-3">
+                <p className="text-sm font-medium">Custom interval</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    aria-label="Custom schedule count"
+                    className="w-24"
+                    min={1}
+                    onChange={(event) => setCustomEveryCount(event.target.value)}
+                    type="number"
+                    value={customEveryCount}
+                  />
+                  <Select
+                    onValueChange={(value) => {
+                      if (value) {
+                        setCustomEveryUnit(value);
+                      }
+                    }}
+                    value={customEveryUnit}
+                  >
+                    <SelectTrigger className="w-32" size="sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectPopup>
+                      <SelectItem value="minutes">Minutes</SelectItem>
+                      <SelectItem value="hours">Hours</SelectItem>
+                      <SelectItem value="days">Days</SelectItem>
+                    </SelectPopup>
+                  </Select>
+                  <Button onClick={applyCustomSchedule} size="sm" type="button" variant="outline">
+                    Apply
+                  </Button>
+                </div>
               </div>
               <AgentSettingRow
                 label="Status"
@@ -12166,7 +12837,26 @@ function AdminPage() {
         }
 
         if (!cancelled) {
+          const aiFeedbackRecord = asRecord(overview.aiFeedback);
+          const aiPerformanceRecord = asRecord(overview.aiPerformance);
+
           setAdminData({
+            aiFeedback: {
+              assistantDislikes: asNumber(aiFeedbackRecord.assistantDislikes),
+              assistantLikes: asNumber(aiFeedbackRecord.assistantLikes),
+              assistantPositiveRate: asNumber(aiFeedbackRecord.assistantPositiveRate),
+              assistantTotal: asNumber(aiFeedbackRecord.assistantTotal),
+              dislikes: asNumber(aiFeedbackRecord.dislikes),
+              likes: asNumber(aiFeedbackRecord.likes),
+              total: asNumber(aiFeedbackRecord.total),
+            },
+            aiPerformance: {
+              avgLatencyMs: asNumber(aiPerformanceRecord.avgLatencyMs),
+              completed: asNumber(aiPerformanceRecord.completed),
+              failed: asNumber(aiPerformanceRecord.failed),
+              runs: asNumber(aiPerformanceRecord.runs),
+              successRate: asNumber(aiPerformanceRecord.successRate),
+            },
             activityLogs: asRecordArray(overview.auditLogs)
               .map((log) => mapAdminLog(log, "Activity"))
               .filter((item): item is AdminLogRow => Boolean(item)),
@@ -12268,6 +12958,8 @@ function AdminOverviewTab({ adminData }: { adminData: AdminData }) {
   const activeWorkspaces = adminData.workspaces.filter(
     ([, , , , status]) => status.toLowerCase() === "active",
   ).length;
+  const aiFeedback = adminData.aiFeedback;
+  const aiPerformance = adminData.aiPerformance;
   const workspaceTrend = Array.from({ length: 7 }, (_, index) =>
     Math.max(0, workspacesCount - 6 + index),
   );
@@ -12302,6 +12994,10 @@ function AdminOverviewTab({ adminData }: { adminData: AdminData }) {
             ["Active workspaces", String(activeWorkspaces)],
             ["Activity logs", String(adminData.activityLogs.length)],
             ["Session logs", String(adminData.sessionLogs.length)],
+            ["AI likes", String(aiFeedback.assistantLikes)],
+            ["AI dislikes", String(aiFeedback.assistantDislikes)],
+            ["AI positive", `${aiFeedback.assistantPositiveRate}%`],
+            ["AI success", `${aiPerformance.successRate}%`],
           ]}
         />
         <div className="grid gap-3 p-4 md:grid-cols-3">
@@ -12324,6 +13020,12 @@ function AdminOverviewTab({ adminData }: { adminData: AdminData }) {
         <div className="grid gap-3 border-t border-border/70 p-4 lg:grid-cols-[1.2fr_0.8fr]">
           <AdminBarChart bars={runBars} title="Run volume" />
           <AdminPlanMix workspaces={adminData.workspaces} />
+        </div>
+        <div className="border-t border-border/70 p-4">
+          <AdminAIFeedbackCard
+            feedback={aiFeedback}
+            performance={aiPerformance}
+          />
         </div>
       </SettingsSection>
       <AdminLogsTable
@@ -12402,6 +13104,79 @@ function AdminBarChart({
             <span className="text-xs text-muted-foreground">{label}</span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function AdminAIFeedbackCard({
+  feedback,
+  performance,
+}: {
+  feedback: AdminAIFeedback;
+  performance: AdminAIPerformance;
+}) {
+  const totalFeedback = Math.max(1, feedback.assistantTotal);
+  const likesWidth = Math.round((feedback.assistantLikes / totalFeedback) * 100);
+  const dislikesWidth = Math.round((feedback.assistantDislikes / totalFeedback) * 100);
+
+  return (
+    <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold">AI feedback and performance</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Assistant ratings and model-run health across all users.
+          </p>
+        </div>
+        <Badge variant="outline">{performance.runs} runs</Badge>
+      </div>
+      <div className="mt-5 grid gap-4 md:grid-cols-[1fr_0.9fr]">
+        <div className="grid gap-3">
+          <div>
+            <div className="flex items-center justify-between text-xs">
+              <span>Likes</span>
+              <span className="tabular-nums text-muted-foreground">
+                {feedback.assistantLikes}
+              </span>
+            </div>
+            <div className="mt-1.5 h-2 rounded-full bg-background/70">
+              <div
+                className="h-full rounded-full bg-success"
+                style={{ width: `${likesWidth}%` }}
+              />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-xs">
+              <span>Dislikes</span>
+              <span className="tabular-nums text-muted-foreground">
+                {feedback.assistantDislikes}
+              </span>
+            </div>
+            <div className="mt-1.5 h-2 rounded-full bg-background/70">
+              <div
+                className="h-full rounded-full bg-destructive"
+                style={{ width: `${dislikesWidth}%` }}
+              />
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            ["Positive", `${feedback.assistantPositiveRate}%`],
+            ["Success", `${performance.successRate}%`],
+            ["Latency", performance.avgLatencyMs ? `${performance.avgLatencyMs}ms` : "0ms"],
+          ].map(([label, value]) => (
+            <div
+              className="rounded-lg border border-border/70 bg-background/60 p-3"
+              key={label}
+            >
+              <p className="text-xs text-muted-foreground">{label}</p>
+              <p className="mt-1 text-lg font-semibold tabular-nums">{value}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

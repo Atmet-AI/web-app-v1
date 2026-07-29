@@ -23,7 +23,7 @@ export type ParsedChatAttachment = {
 };
 
 const MAX_ATTACHMENTS = 6;
-const MAX_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_FILE_BYTES = 150 * 1024 * 1024;
 const MAX_EXTRACTED_CHARS_PER_FILE = 14_000;
 const MAX_CONTEXT_CHARS = 36_000;
 
@@ -65,9 +65,30 @@ const textExtensions = new Set([
   "yml",
 ]);
 
+const mimeExtensionMap = new Map([
+  ["application/msword", "doc"],
+  ["application/pdf", "pdf"],
+  ["application/rtf", "rtf"],
+  ["application/vnd.ms-excel", "xls"],
+  ["application/vnd.ms-powerpoint", "ppt"],
+  ["application/vnd.oasis.opendocument.presentation", "odp"],
+  ["application/vnd.oasis.opendocument.spreadsheet", "ods"],
+  ["application/vnd.oasis.opendocument.text", "odt"],
+  ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"],
+  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"],
+  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"],
+  ["text/csv", "csv"],
+  ["text/html", "html"],
+  ["text/markdown", "md"],
+]);
+
 function extensionFromName(name: string) {
   const match = /\.([a-z0-9]+)$/i.exec(name);
   return match?.[1]?.toLowerCase() ?? "";
+}
+
+function extensionFromAttachment(name: string, type: string) {
+  return extensionFromName(name) || mimeExtensionMap.get(type) || "";
 }
 
 function isImageMime(type: string) {
@@ -101,17 +122,31 @@ function decodeBase64(data: string) {
 
 async function parseOfficeText(buffer: Buffer, fileType: SupportedFileType) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
+  const timeout = setTimeout(() => controller.abort(), 60_000);
 
   try {
-    const ast = await OfficeParser.parseOffice(buffer, {
+    const parserConfig = {
       abortSignal: controller.signal,
-      fileType,
       ignoreComments: false,
       ignoreHeadersAndFooters: false,
       ignoreNotes: false,
       ocr: false,
-    });
+    };
+    let ast: Awaited<ReturnType<typeof OfficeParser.parseOffice>>;
+
+    try {
+      ast = await OfficeParser.parseOffice(buffer, parserConfig);
+    } catch (error) {
+      if (!fileType) {
+        throw error;
+      }
+
+      ast = await OfficeParser.parseOffice(buffer, {
+        ...parserConfig,
+        fileType,
+      });
+    }
+
     const result = await ast.to("text", {
       includeImages: true,
       textConfig: {
@@ -119,8 +154,9 @@ async function parseOfficeText(buffer: Buffer, fileType: SupportedFileType) {
         renderNotes: true,
       },
     });
+    const value = typeof result.value === "string" ? result.value : "";
 
-    return typeof result.value === "string" ? result.value : "";
+    return value || ast.toText?.() || "";
   } finally {
     clearTimeout(timeout);
   }
@@ -132,7 +168,7 @@ export async function parseChatAttachment(
   const name = attachment.name.trim() || "attachment";
   const type = attachment.type.trim().toLowerCase();
   const size = Number.isFinite(attachment.size) ? attachment.size : 0;
-  const extension = extensionFromName(name);
+  const extension = extensionFromAttachment(name, type);
 
   if (!attachment.data) {
     return {
@@ -147,7 +183,7 @@ export async function parseChatAttachment(
 
   if (size > MAX_FILE_BYTES) {
     return {
-      error: "File is larger than the 8 MB per-message limit.",
+      error: "File is larger than the 150 MB per-message limit.",
       kind: "unsupported",
       name,
       size,
@@ -204,13 +240,27 @@ export async function parseChatAttachment(
           error instanceof Error
             ? error.message
             : "Document parser could not read this file.",
-        kind: "unsupported",
+        kind: "document",
         name,
         size,
-        text: "",
+        text:
+          "A document was attached, but text extraction failed. The assistant can still identify the file name and type, but cannot read its body text from this upload.",
         type,
       };
     }
+  }
+
+  if (extension === "doc" || extension === "xls" || extension === "ppt") {
+    return {
+      error:
+        "Legacy Microsoft Office files are attached but cannot be text-extracted reliably. Save/export the file as DOCX, XLSX, PPTX, PDF, or paste the text.",
+      kind: "document",
+      name,
+      size,
+      text:
+        "A legacy Microsoft Office document was attached, but this upload format could not be text-extracted.",
+      type,
+    };
   }
 
   return {
@@ -270,7 +320,7 @@ export function buildAttachmentContext(attachments: ParsedChatAttachment[]) {
   return truncate(
     [
       "Uploaded File Context",
-      "Use this uploaded-file context when answering the user's latest message. If an attachment is an image and visual content is available in the model input, inspect the image directly. If extraction failed, say what was unavailable.",
+      "Use this uploaded-file context when answering the user's latest message. If an attachment is an image and visual content is available in the model input, inspect the image directly. If extraction failed, say what was unavailable. Do not tell the user to upload a PDF unless the user specifically asked for PDF; for documents, prefer DOCX, XLSX, PPTX, PDF, plain text, Markdown, CSV, or screenshots as appropriate.",
       ...sections,
     ].join("\n\n"),
     MAX_CONTEXT_CHARS,
@@ -282,6 +332,7 @@ export function serializeAttachmentMetadata(attachments: ParsedChatAttachment[])
     error: attachment.error ?? null,
     kind: attachment.kind,
     name: attachment.name,
+    previewData: attachment.image?.data ?? null,
     size: attachment.size,
     type: attachment.type,
   }));

@@ -30,6 +30,11 @@ import {
   listComposioTools,
   listComposioToolkitTools,
 } from "@/lib/composio";
+import { getAppDocsForRequest } from "@/lib/apps-docs";
+import {
+  isGmailToTelegramAutomationRequest,
+  provisionGmailToTelegramAutomation,
+} from "@/lib/automations/gmail-telegram";
 import { connectorCatalog } from "@/lib/connectors/catalog";
 
 export const runtime = "nodejs";
@@ -913,10 +918,12 @@ async function loadGitHubLatestPushContext({
 }
 
 function buildToolPrompt({
+  appDocsContext,
   appKey,
   conversationContext,
   content,
 }: {
+  appDocsContext?: string;
   appKey: string;
   conversationContext?: string;
   content: string;
@@ -926,6 +933,7 @@ function buildToolPrompt({
     "Use the connected app only for the user's explicit request. Do not perform unrelated actions.",
     `User request: ${content}`,
     conversationContext ? `Recent conversation context:\n${conversationContext}` : "",
+    appDocsContext ? `App docs from public/Apps-docs:\n${appDocsContext}` : "",
     "Resolve the latest user message together with the recent conversation. If Atmet asked for missing subject/body/recipient and the user now provides it, continue the original app action.",
     "Use any action exposed by the connected Composio toolkit when it matches the request and the connected account has permission.",
     "Do not downgrade write requests to read-only or drafts when a send/create/update/delete/post action is available and the user explicitly asked for it.",
@@ -1015,8 +1023,29 @@ async function loadConnectedAppToolContext({
     const connectedAccountId = stringValue(userConnection.connectedAccountId);
     const composioUserId = getComposioUserId(workspaceId, userId);
     const intentContent = [conversationContext, content].filter(Boolean).join("\n");
+    const directToolErrors: string[] = [];
+    const appDocs = await getAppDocsForRequest({
+      appKey,
+      content: intentContent,
+    });
 
     try {
+      contextItems.push(
+        `### ${connector.name} Connection\n${connector.name} is connected for this user via Composio.`,
+      );
+      metadata.push({ appKey, status: "connected" });
+
+      if (appDocs?.context) {
+        contextItems.push(`### ${connector.name} Docs\n${appDocs.context}`);
+        metadata.push({
+          appKey,
+          docsFile: appDocs.fileName,
+          documentedTools: appDocs.toolSlugs,
+          documentedTriggers: appDocs.triggerSlugs,
+          status: "docs_loaded",
+        });
+      }
+
       if (
         (appKey === "gmail" || appKey === "email") &&
         hasEmailSendIntent(intentContent)
@@ -1082,12 +1111,14 @@ async function loadConnectedAppToolContext({
           });
           continue;
         } catch (gmailProxyError) {
+          const errorMessage =
+            gmailProxyError instanceof Error
+              ? gmailProxyError.message
+              : "Gmail proxy lookup failed";
+          directToolErrors.push(`Gmail direct proxy read failed: ${errorMessage}`);
           metadata.push({
             appKey,
-            error:
-              gmailProxyError instanceof Error
-                ? gmailProxyError.message
-                : "Gmail proxy lookup failed",
+            error: errorMessage,
             status: "proxy_fallback",
           });
         }
@@ -1119,12 +1150,14 @@ async function loadConnectedAppToolContext({
           });
           continue;
         } catch (outlookProxyError) {
+          const errorMessage =
+            outlookProxyError instanceof Error
+              ? outlookProxyError.message
+              : "Outlook proxy lookup failed";
+          directToolErrors.push(`Outlook direct proxy read failed: ${errorMessage}`);
           metadata.push({
             appKey,
-            error:
-              outlookProxyError instanceof Error
-                ? outlookProxyError.message
-                : "Outlook proxy lookup failed",
+            error: errorMessage,
             status: "proxy_fallback",
           });
         }
@@ -1173,8 +1206,11 @@ async function loadConnectedAppToolContext({
         listComposioToolkitTools(toolkitSlug),
       ]);
       const intentTools = getIntentComposioTools(appKey, intentContent);
+      const documentedTools =
+        appDocs?.toolSlugs.map((slug) => ({ slug, version: "latest" })) ?? [];
       const allTools = uniqueToolsBySlug([
         ...intentTools,
+        ...documentedTools,
         ...allToolkitTools,
         ...searchedTools,
         ...getFallbackComposioTools(toolkitSlug),
@@ -1207,7 +1243,12 @@ async function loadConnectedAppToolContext({
         try {
           const result = await executeComposioToolWithText({
             connectedAccountId,
-            text: buildToolPrompt({ appKey, content, conversationContext }),
+            text: buildToolPrompt({
+              appDocsContext: appDocs?.context,
+              appKey,
+              content,
+              conversationContext,
+            }),
             toolSlug,
             userId: composioUserId,
             version: stringValue(tool.version, "latest"),
@@ -1244,12 +1285,22 @@ async function loadConnectedAppToolContext({
       }
 
       if (!toolWasUsed) {
-        throw new Error(lastToolError || "Could not read app context");
+        throw new Error(
+          [...directToolErrors, lastToolError || "Could not read app context"]
+            .filter(Boolean)
+            .join("\n"),
+        );
       }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Could not read app context";
-      contextItems.push(`### ${connector.name}\nCould not read app context: ${message}`);
+      contextItems.push(
+        [
+          `### ${connector.name}`,
+          `Could not read app context: ${message}`,
+          "Do not infer missing OAuth scopes or partial access unless the error above explicitly says that. Report this exact tool error and ask the user to reconnect only if the error says authorization, scope, or account access is missing.",
+        ].join("\n"),
+      );
       metadata.push({ appKey, error: message, status: "error" });
     }
   }
@@ -1260,6 +1311,8 @@ async function loadConnectedAppToolContext({
         ? [
             "Connected App Tool Results",
             "Use these results to answer the user. Only claim an app action happened when the result explicitly shows it.",
+            "For connected apps, do not invent permission limitations. If a tool failed, state the exact error shown below. Only say the user lacks read/send/admin access when the tool error explicitly names that missing access.",
+            "If an app section says the app is connected, do not say it needs to be enabled or connected. For workflow requests, distinguish connected app access from actual trigger/automation registration.",
             ...contextItems,
           ].join("\n\n")
         : "",
@@ -1272,15 +1325,16 @@ export async function POST(request: Request) {
     const body = await readJson(request);
     const chatId = stringValue(body.chatId);
     const workspaceId = stringValue(body.workspaceId);
-    const modelKey = stringValue(body.modelKey, "atmet") || "atmet";
-    const content = stringValue(body.content);
+    let modelKey = stringValue(body.modelKey, "atmet") || "atmet";
+    let content = stringValue(body.content);
+    const regenerateMessageId = stringValue(body.regenerateMessageId);
     const selectedAppKeys = stringArray(body.appKeys);
-    const mentions = getChatMessageMentions(body.mentions);
+    let mentions = getChatMessageMentions(body.mentions);
     const parsedAttachments = await parseChatAttachments(body.attachments);
     const attachmentMetadata = serializeAttachmentMetadata(parsedAttachments);
     const attachmentContext = buildAttachmentContext(parsedAttachments);
 
-    if (!chatId || !workspaceId || !content) {
+    if (!chatId || !workspaceId || (!content && !regenerateMessageId)) {
       return badRequest("Missing chat, workspace, or message content.");
     }
 
@@ -1308,6 +1362,37 @@ export async function POST(request: Request) {
 
     if (chatRecord.workspace_id !== workspaceId) {
       return badRequest("Chat does not belong to this workspace.");
+    }
+
+    let regeneratedUserMessage: Record<string, unknown> | null = null;
+    if (regenerateMessageId) {
+      const { data: currentMessage, error: currentMessageError } = await auth.admin
+        .from("chat_messages")
+        .select("id, role, content, created_at, metadata")
+        .eq("id", regenerateMessageId)
+        .eq("chat_id", chatId)
+        .single();
+
+      if (currentMessageError) {
+        throw currentMessageError;
+      }
+
+      const currentMessageRecord = asRecord(currentMessage);
+      if (currentMessageRecord.role !== "user") {
+        return badRequest("Only user messages can be regenerated.");
+      }
+
+      content = stringValue(currentMessageRecord.content);
+      const currentMetadata = asRecord(currentMessageRecord.metadata);
+      mentions = getChatMessageMentions(currentMetadata.mentions);
+      modelKey = stringValue(currentMetadata.modelKey, modelKey) || modelKey;
+      regeneratedUserMessage = currentMessageRecord;
+
+      await auth.admin
+        .from("chat_messages")
+        .delete()
+        .eq("chat_id", chatId)
+        .gt("created_at", stringValue(currentMessageRecord.created_at));
     }
 
     const userConnectionId = userConnectionIdFromModelKey(modelKey);
@@ -1344,10 +1429,16 @@ export async function POST(request: Request) {
           .select("personalization, business_details, output_style")
           .eq("workspace_id", workspaceId)
           .maybeSingle(),
-        auth.admin
-          .from("chat_messages")
-          .select("id, role, content, created_at, metadata")
-          .eq("chat_id", chatId)
+        (regeneratedUserMessage
+          ? auth.admin
+              .from("chat_messages")
+              .select("id, role, content, created_at, metadata")
+              .eq("chat_id", chatId)
+              .lt("created_at", stringValue(regeneratedUserMessage.created_at))
+          : auth.admin
+              .from("chat_messages")
+              .select("id, role, content, created_at, metadata")
+              .eq("chat_id", chatId))
           .order("created_at", { ascending: false })
           .limit(20),
         modelQuery,
@@ -1387,19 +1478,24 @@ export async function POST(request: Request) {
       .map(mapProviderMessage)
       .filter((message): message is AtmetChatMessage => Boolean(message));
 
-    const { data: userMessage, error: userMessageError } = await auth.admin
-      .from("chat_messages")
-      .insert({
-        chat_id: chatId,
-        content,
-        metadata: { attachments: attachmentMetadata, mentions, modelKey },
-        role: "user",
-      })
-      .select("id, role, content, created_at, metadata")
-      .single();
+    let userMessage: Record<string, unknown> | null = regeneratedUserMessage;
+    if (!userMessage) {
+      const { data: insertedUserMessage, error: userMessageError } = await auth.admin
+        .from("chat_messages")
+        .insert({
+          chat_id: chatId,
+          content,
+          metadata: { attachments: attachmentMetadata, mentions, modelKey },
+          role: "user",
+        })
+        .select("id, role, content, created_at, metadata")
+        .single();
 
-    if (userMessageError) {
-      throw userMessageError;
+      if (userMessageError) {
+        throw userMessageError;
+      }
+
+      userMessage = asRecord(insertedUserMessage);
     }
 
     const model = normalizeModelConfig(
@@ -1410,16 +1506,98 @@ export async function POST(request: Request) {
     );
     const connectionRows = (connectionsResult.data ?? []).map(asRecord);
     const recentMessageRows = recentMessagesResult.data ?? [];
+    const recentConversationContext = buildRecentConversationContext(providerMessages);
     const appKeysForContext = uniqueStrings([
       ...selectedAppKeys,
       ...getMentionedAppKeys(content),
       ...getRecentMessageAppKeys(recentMessageRows),
     ]);
+    const intentContent = [recentConversationContext, content].filter(Boolean).join("\n");
+
+    if (
+      isGmailToTelegramAutomationRequest({
+        appKeys: appKeysForContext,
+        content: intentContent,
+      })
+    ) {
+      const automationResult = await provisionGmailToTelegramAutomation({
+        admin: auth.admin,
+        chatId,
+        connections: connectionRows,
+        content: intentContent,
+        request,
+        userId: auth.user.id,
+        workspaceId,
+      });
+      const { data: assistantMessage, error: assistantMessageError } =
+        await auth.admin
+          .from("chat_messages")
+          .insert({
+            chat_id: chatId,
+            content: automationResult.message,
+            metadata: {
+              automationActivated: automationResult.activated,
+              connectedAppContext: [
+                {
+                  appKey: "gmail",
+                  status: automationResult.activated ? "trigger_registered" : "required",
+                },
+                {
+                  appKey: "telegram",
+                  status: automationResult.activated ? "action_registered" : "required",
+                },
+              ],
+              modelKey: model.key,
+            },
+            role: "assistant",
+          })
+          .select("id, role, content, created_at")
+          .single();
+
+      if (assistantMessageError) {
+        throw assistantMessageError;
+      }
+
+      await auth.admin
+        .from("chats")
+        .update({ last_message_at: new Date().toISOString() })
+        .eq("id", chatId)
+        .eq("user_id", auth.user.id);
+
+      await recordActivityLog(auth.admin, {
+        action: automationResult.activated
+          ? "automation.gmail_telegram.activated"
+          : "automation.gmail_telegram.pending",
+        actorId: auth.user.id,
+        metadata: {
+          appKeys: appKeysForContext,
+          chatTitle: stringValue(chatRecord.title),
+        },
+        request,
+        targetId: chatId,
+        targetType: "chat",
+        workspaceId,
+      });
+
+      return ok({
+        assistantMessage,
+        chatTitle: stringValue(chatRecord.title),
+        model: {
+          configured: true,
+          displayName: model.displayName,
+          key: model.key,
+          modelId: model.modelId,
+          providerKey: model.providerKey,
+        },
+        userMessage,
+      });
+    }
+
     const appContext = await loadConnectedAppToolContext({
       appKeys: appKeysForContext,
       connections: connectionRows,
       content,
-      conversationContext: buildRecentConversationContext(providerMessages),
+      conversationContext: recentConversationContext,
       userId: auth.user.id,
       workspaceId,
     });

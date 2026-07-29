@@ -1,10 +1,94 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { isRouteResponse, requireWorkspacePermission } from "@/lib/api/auth";
 import { recordActivityLog } from "@/lib/api/audit";
 import { badRequest, created, ok, readJson, serverError, stringValue } from "@/lib/api/http";
+import { deriveAppKeysFromChatMessages } from "@/lib/agents/app-keys";
 
 type RouteContext = {
   params: Promise<{ workspaceId: string }>;
 };
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+async function hydrateMissingNodeAppKeys(
+  admin: SupabaseClient,
+  agents: unknown[],
+) {
+  const sourceChatIds = Array.from(
+    new Set(
+      agents.flatMap((agent) => {
+        const workflowNodes = asRecord(agent).workflow_nodes;
+        const nodes: unknown[] = Array.isArray(workflowNodes)
+          ? workflowNodes
+          : [];
+
+        return nodes
+          .filter((node: unknown) => {
+            const record = asRecord(node);
+            return (
+              stringValue(record.source_chat_id) &&
+              (!Array.isArray(record.app_keys) || record.app_keys.length === 0)
+            );
+          })
+          .map((node: unknown) => stringValue(asRecord(node).source_chat_id));
+      }),
+    ),
+  ).filter(Boolean);
+
+  if (sourceChatIds.length === 0) {
+    return agents;
+  }
+
+  const { data: chatMessages, error } = await admin
+    .from("chat_messages")
+    .select("chat_id, content, metadata")
+    .in("chat_id", sourceChatIds)
+    .order("created_at", { ascending: false })
+    .limit(sourceChatIds.length * 200);
+
+  if (error) {
+    throw error;
+  }
+
+  const appKeysByChatId = new Map<string, string[]>();
+  for (const chatId of sourceChatIds) {
+    const messages = (chatMessages ?? []).filter(
+      (message) => stringValue(message.chat_id) === chatId,
+    );
+    appKeysByChatId.set(chatId, deriveAppKeysFromChatMessages(messages));
+  }
+
+  return agents.map((agent) => {
+    const agentRecord = asRecord(agent);
+    const workflowNodes = Array.isArray(agentRecord.workflow_nodes)
+      ? agentRecord.workflow_nodes
+      : [];
+
+    return {
+      ...agentRecord,
+      workflow_nodes: workflowNodes.map((node: unknown) => {
+        const nodeRecord = asRecord(node);
+        const sourceChatId = stringValue(nodeRecord.source_chat_id);
+        const currentAppKeys = Array.isArray(nodeRecord.app_keys)
+          ? nodeRecord.app_keys
+          : [];
+
+        if (currentAppKeys.length > 0 || !sourceChatId) {
+          return nodeRecord;
+        }
+
+        return {
+          ...nodeRecord,
+          app_keys: appKeysByChatId.get(sourceChatId) ?? [],
+        };
+      }),
+    };
+  });
+}
 
 export async function GET(_request: Request, context: RouteContext) {
   try {
@@ -26,7 +110,9 @@ export async function GET(_request: Request, context: RouteContext) {
       throw error;
     }
 
-    return ok({ agents: data });
+    const agents = await hydrateMissingNodeAppKeys(auth.admin, data ?? []);
+
+    return ok({ agents });
   } catch (error) {
     return serverError(error);
   }

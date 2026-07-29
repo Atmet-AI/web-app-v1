@@ -1,6 +1,10 @@
 import { forbidden, ok, serverError } from "@/lib/api/http";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { isWorkflowScheduleDue, runWorkflowAgent } from "@/lib/agents/runner";
+import {
+  isGmailToTelegramPollingAgent,
+  pollGmailToTelegramAutomation,
+} from "@/lib/automations/gmail-telegram";
 
 export const runtime = "nodejs";
 
@@ -24,7 +28,7 @@ export async function POST(request: Request) {
     const admin = createSupabaseAdminClient();
     const { data: agents, error } = await admin
       .from("workflow_agents")
-      .select("id, schedule")
+      .select("id, schedule, settings")
       .eq("runtime_state", "running")
       .is("deleted_at", null)
       .not("schedule", "is", null);
@@ -33,7 +37,7 @@ export async function POST(request: Request) {
       throw error;
     }
 
-    const dueAgents: Array<{ id: string; schedule: string }> = [];
+    const dueAgents: Array<Record<string, unknown> & { id: string; schedule: string }> = [];
 
     for (const agent of agents ?? []) {
       const agentId = typeof agent.id === "string" ? agent.id : "";
@@ -61,20 +65,28 @@ export async function POST(request: Request) {
           : null;
 
       if (isWorkflowScheduleDue(schedule, latestRunAt)) {
-        dueAgents.push({ id: agentId, schedule });
+        dueAgents.push({ ...agent, id: agentId, schedule });
       }
     }
 
     const results = [];
     for (const agent of dueAgents) {
       try {
-        const result = await runWorkflowAgent({
-          admin,
-          agentId: agent.id,
-          startedBy: null,
-          trigger: "schedule",
-        });
-        results.push({ agentId: agent.id, ok: true, runId: result.runId });
+        if (isGmailToTelegramPollingAgent(agent)) {
+          const result = await pollGmailToTelegramAutomation({
+            admin,
+            agent,
+          });
+          results.push({ agentId: agent.id, ...result });
+        } else {
+          const result = await runWorkflowAgent({
+            admin,
+            agentId: agent.id,
+            startedBy: null,
+            trigger: "schedule",
+          });
+          results.push({ agentId: agent.id, ok: true, runId: result.runId });
+        }
       } catch (error) {
         results.push({
           agentId: agent.id,

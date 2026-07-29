@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildAtmetSystemPrompt } from "@/lib/ai/system";
 import { normalizeModelConfig, runAtmetChat } from "@/lib/ai/providers";
 import type { AtmetChatMessage } from "@/lib/ai/types";
+import { getAppDocsForRequest } from "@/lib/apps-docs";
 
 type WorkflowRunTrigger = "manual" | "node" | "schedule";
 
@@ -68,8 +69,8 @@ function mapProviderMessage(row: unknown): AtmetChatMessage | null {
 
 function sortNodesByPosition(nodes: WorkflowNodeRow[]) {
   return [...nodes].sort((a, b) => {
-    const yDiff = numberValue(a.position_y) - numberValue(b.position_y);
-    return yDiff || numberValue(a.position_x) - numberValue(b.position_x);
+    const xDiff = numberValue(a.position_x) - numberValue(b.position_x);
+    return xDiff || numberValue(a.position_y) - numberValue(b.position_y);
   });
 }
 
@@ -154,11 +155,13 @@ async function addRunEvent({
 
 function buildNodePrompt({
   agent,
+  appDocsContext,
   node,
   previousOutputs,
   trigger,
 }: {
   agent: WorkflowAgentRow;
+  appDocsContext?: string;
   node: WorkflowNodeRow;
   previousOutputs: Array<{ nodeTitle: string; output: string }>;
   trigger: WorkflowRunTrigger;
@@ -179,6 +182,7 @@ function buildNodePrompt({
     `Run workflow agent "${agent.name}" for node "${node.title}".`,
     `Trigger: ${trigger}.`,
     appKeys.length ? `Connected app context for this node: ${appKeys.join(", ")}.` : "",
+    appDocsContext ? `Connected app docs:\n${appDocsContext}` : "",
     instruction ? `Node instruction:\n${instruction}` : "",
     "Use the linked chat history and previous node outputs. Produce the concrete result for this node only.",
     "If this node should hand work to the next node, end with a short handoff summary.",
@@ -186,6 +190,36 @@ function buildNodePrompt({
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+async function buildNodeAppDocsContext(node: WorkflowNodeRow) {
+  const appKeys = Array.isArray(node.app_keys) ? node.app_keys.filter(Boolean) : [];
+
+  if (appKeys.length === 0) {
+    return "";
+  }
+
+  const config = asRecord(node.config);
+  const content = [
+    node.title,
+    stringValue(config.instruction),
+    stringValue(config.prompt),
+    JSON.stringify(config),
+  ].join("\n");
+  const docs = await Promise.all(
+    appKeys.slice(0, 6).map(async (appKey) => {
+      const doc = await getAppDocsForRequest({
+        appKey,
+        content,
+        maxTools: 12,
+        maxTriggers: 8,
+      });
+
+      return doc ? `### ${appKey}\n${doc.context}` : "";
+    }),
+  );
+
+  return docs.filter(Boolean).join("\n\n");
 }
 
 async function loadChatHistory(admin: SupabaseClient, chatId: string) {
@@ -322,8 +356,10 @@ export async function runWorkflowAgent({
         type: "node_started",
       });
 
+      const appDocsContext = await buildNodeAppDocsContext(node);
       const prompt = buildNodePrompt({
         agent,
+        appDocsContext,
         node,
         previousOutputs: completedOutputs,
         trigger,

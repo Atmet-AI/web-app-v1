@@ -2,6 +2,7 @@ import { isRouteResponse } from "@/lib/api/auth";
 import { recordActivityLog } from "@/lib/api/audit";
 import { requireAgentPermission, requireChatPermission } from "@/lib/api/permissions";
 import { created, ok, readJson, serverError, stringValue, numberValue } from "@/lib/api/http";
+import { deriveAppKeysFromChatMessages } from "@/lib/agents/app-keys";
 
 type RouteContext = {
   params: Promise<{ agentId: string }>;
@@ -18,10 +19,28 @@ export async function POST(request: Request, context: RouteContext) {
 
     const body = await readJson(request);
     const sourceChatId = stringValue(body.sourceChatId);
+    let appKeys = Array.isArray(body.appKeys)
+      ? body.appKeys.map((item) => stringValue(item)).filter(Boolean)
+      : [];
     if (sourceChatId) {
       const chatAuth = await requireChatPermission(sourceChatId, "chats.manage");
       if (isRouteResponse(chatAuth)) {
         return chatAuth;
+      }
+
+      if (appKeys.length === 0) {
+        const { data: chatMessages, error: chatMessagesError } = await auth.admin
+          .from("chat_messages")
+          .select("content, metadata")
+          .eq("chat_id", sourceChatId)
+          .order("created_at", { ascending: false })
+          .limit(200);
+
+        if (chatMessagesError) {
+          throw chatMessagesError;
+        }
+
+        appKeys = deriveAppKeysFromChatMessages(chatMessages ?? []);
       }
     }
 
@@ -33,7 +52,7 @@ export async function POST(request: Request, context: RouteContext) {
         runtime_state: stringValue(body.runtimeState, "paused"),
         status: stringValue(body.status, "ready"),
         source_chat_id: sourceChatId || null,
-        app_keys: Array.isArray(body.appKeys) ? body.appKeys : [],
+        app_keys: appKeys,
         position_x: numberValue(body.x, 120),
         position_y: numberValue(body.y, 120),
         config: body.config ?? {},

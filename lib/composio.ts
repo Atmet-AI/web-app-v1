@@ -92,6 +92,12 @@ const fallbackComposioTools = {
     "OUTLOOK_LIST_MAIL_FOLDERS",
   ],
   slack: ["SLACK_SEARCH_MESSAGES", "SLACK_LIST_CHANNELS"],
+  telegram: [
+    "TELEGRAM_SEND_MESSAGE",
+    "TELEGRAM_GET_CHAT",
+    "TELEGRAM_GET_ME",
+    "TELEGRAM_GET_UPDATES",
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 function getComposioApiKey() {
@@ -166,10 +172,15 @@ async function composioRequest<T>(path: string, init: RequestInit = {}): Promise
   const payload = (await response.json().catch(() => ({}))) as ComposioApiError;
 
   if (!response.ok) {
+    const details = [
+      payload.error?.message,
+      payload.error?.suggested_fix,
+      ...(payload.error?.errors ?? []),
+    ]
+      .filter(Boolean)
+      .join(" ");
     const message =
-      payload.error?.message ||
-      payload.error?.suggested_fix ||
-      payload.error?.errors?.[0] ||
+      details ||
       `Composio request failed with ${response.status}`;
     throw new Error(message);
   }
@@ -482,6 +493,33 @@ export async function executeComposioToolWithText({
   );
 }
 
+export async function executeComposioToolWithArguments({
+  arguments: toolArguments,
+  connectedAccountId,
+  toolSlug,
+  userId,
+  version,
+}: {
+  arguments: JsonRecord;
+  connectedAccountId?: string;
+  toolSlug: string;
+  userId?: string;
+  version?: string;
+}) {
+  return composioRequest<JsonRecord>(
+    `/tools/execute/${encodeURIComponent(toolSlug)}`,
+    {
+      body: JSON.stringify({
+        arguments: toolArguments,
+        ...(connectedAccountId ? { connected_account_id: connectedAccountId } : {}),
+        ...(userId ? { user_id: userId } : {}),
+        ...(version ? { version } : { version: "latest" }),
+      }),
+      method: "POST",
+    },
+  );
+}
+
 export async function executeComposioProxy({
   body,
   connectedAccountId,
@@ -506,6 +544,61 @@ export async function executeComposioProxy({
       endpoint,
       method,
       parameters,
+    }),
+    method: "POST",
+  });
+}
+
+export async function upsertComposioTriggerInstance({
+  connectedAccountId,
+  triggerConfig = {},
+  triggerSlug,
+  userId,
+}: {
+  connectedAccountId?: string;
+  triggerConfig?: JsonRecord;
+  triggerSlug: string;
+  userId?: string;
+}) {
+  return composioRequest<JsonRecord>(
+    `/trigger_instances/${encodeURIComponent(triggerSlug)}/upsert`,
+    {
+      body: JSON.stringify({
+        ...(connectedAccountId ? { connected_account_id: connectedAccountId } : {}),
+        ...(userId ? { user_id: userId } : {}),
+        trigger_config: triggerConfig,
+      }),
+      method: "POST",
+    },
+  );
+}
+
+export async function ensureComposioWebhookSubscription(webhookUrl: string) {
+  if (!webhookUrl || !isComposioConfigured()) {
+    return null;
+  }
+
+  const subscriptionsPayload = await composioRequest<{ items?: JsonRecord[] }>(
+    "/webhook_subscriptions",
+  ).catch(() => ({ items: [] }));
+  const subscriptions = Array.isArray(subscriptionsPayload.items)
+    ? subscriptionsPayload.items
+    : [];
+  const existing = subscriptions.find(
+    (subscription) =>
+      String(
+        subscription.webhook_url ?? subscription.webhookUrl ?? subscription.url ?? "",
+      ) === webhookUrl,
+  );
+
+  if (existing) {
+    return existing;
+  }
+
+  return composioRequest<JsonRecord>("/webhook_subscriptions", {
+    body: JSON.stringify({
+      enabled_events: ["composio.trigger.message", "composio.connected_account.expired"],
+      webhook_url: webhookUrl,
     }),
     method: "POST",
   });
