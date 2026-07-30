@@ -3,6 +3,7 @@ import { buildAtmetSystemPrompt } from "@/lib/ai/system";
 import { normalizeModelConfig, runAtmetChat } from "@/lib/ai/providers";
 import type { AtmetChatMessage } from "@/lib/ai/types";
 import { getAppDocsForRequest } from "@/lib/apps-docs";
+import { executeComposioProxy, getComposioUserConnection } from "@/lib/composio";
 
 type WorkflowRunTrigger = "manual" | "node" | "schedule";
 
@@ -22,6 +23,7 @@ type WorkflowEdgeRow = {
 };
 
 type WorkflowAgentRow = {
+  created_by?: string | null;
   id: string;
   name: string;
   runtime_state?: string | null;
@@ -55,6 +57,25 @@ function numberValue(value: unknown, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function getNodeAppKeys(node: WorkflowNodeRow) {
+  const keys = Array.isArray(node.app_keys) ? node.app_keys.filter(Boolean) : [];
+  const content = [node.title, JSON.stringify(asRecord(node.config))].join("\n").toLowerCase();
+
+  if (/\bgmail\b|\bemail\b|\bmail\b/.test(content)) {
+    keys.push("gmail");
+  }
+
+  if (/\btelegram\b/.test(content)) {
+    keys.push("telegram");
+  }
+
+  return uniqueStrings(keys);
+}
+
 function mapProviderMessage(row: unknown): AtmetChatMessage | null {
   const record = asRecord(row);
   const role = stringValue(record.role);
@@ -65,6 +86,117 @@ function mapProviderMessage(row: unknown): AtmetChatMessage | null {
   }
 
   return { content, role };
+}
+
+function buildRecentConversationContext(messages: AtmetChatMessage[]) {
+  return messages
+    .map((message) => {
+      const content =
+        typeof message.content === "string"
+          ? message.content
+          : JSON.stringify(message.content);
+      return `${message.role}: ${content}`;
+    })
+    .join("\n\n");
+}
+
+function cleanEmailBody(value: string) {
+  return value
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => !/^(gmail|outlook|email)$/i.test(line.trim()))
+    .join("\n")
+    .trim();
+}
+
+function extractEmailSendDetails(content: string, conversationContext?: string) {
+  const combined = [conversationContext, content].filter(Boolean).join("\n");
+  const emailMatches = Array.from(
+    combined.matchAll(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi),
+  ).map((match) => match[0]);
+  const recipient = emailMatches[emailMatches.length - 1] ?? "";
+  const subject =
+    /(?:^|\n)\s*subject\s*[:\-]\s*([^\n]+)/i.exec(combined)?.[1]?.trim() ??
+    /(?:^|\n)\s*title\s*[:\-]\s*([^\n]+)/i.exec(combined)?.[1]?.trim() ??
+    "";
+  const explicitBody =
+    /(?:^|\n)\s*(?:message|body|email body|says?)\s*[:\-]\s*([\s\S]+)/i.exec(combined)?.[1] ??
+    "";
+  const fallbackBody = content
+    .replace(/\bcan you\s+/i, "")
+    .replace(/\bsend an email to\s+\S+/i, "")
+    .replace(/\bvia\s+gmail\b/i, "")
+    .replace(/\bgmail\b/i, "")
+    .trim();
+  const body = cleanEmailBody(explicitBody || fallbackBody);
+
+  return {
+    body,
+    recipient,
+    subject: subject || body.split(/\s+/).slice(0, 8).join(" ") || "Message from Atmet",
+  };
+}
+
+function buildGmailRawEmail({
+  body,
+  recipient,
+  subject,
+}: {
+  body: string;
+  recipient: string;
+  subject: string;
+}) {
+  const raw = [
+    `To: ${recipient}`,
+    `Subject: ${subject}`,
+    "MIME-Version: 1.0",
+    "Content-Type: text/plain; charset=UTF-8",
+    "",
+    body,
+  ].join("\r\n");
+
+  return Buffer.from(raw).toString("base64url");
+}
+
+async function sendGmailMessage({
+  connectedAccountId,
+  content,
+  conversationContext,
+}: {
+  connectedAccountId?: string;
+  content: string;
+  conversationContext?: string;
+}) {
+  const details = extractEmailSendDetails(content, conversationContext);
+
+  if (!details.recipient || !details.body) {
+    return null;
+  }
+
+  const body = { raw: buildGmailRawEmail(details) };
+  const result = await executeComposioProxy({
+    body,
+    connectedAccountId,
+    endpoint: "/gmail/v1/users/me/messages/send",
+    method: "POST",
+  }).catch(() =>
+    executeComposioProxy({
+      body,
+      connectedAccountId,
+      endpoint: "/users/me/messages/send",
+      method: "POST",
+    }),
+  );
+
+  return {
+    ...details,
+    result,
+  };
+}
+
+function isWorkflowGeneratedMessage(row: unknown) {
+  const metadata = asRecord(asRecord(row).metadata);
+  return stringValue(metadata.kind).startsWith("workflow_node_");
 }
 
 function sortNodesByPosition(nodes: WorkflowNodeRow[]) {
@@ -222,13 +354,38 @@ async function buildNodeAppDocsContext(node: WorkflowNodeRow) {
   return docs.filter(Boolean).join("\n\n");
 }
 
-async function loadChatHistory(admin: SupabaseClient, chatId: string) {
+async function loadLastRealUserMessage(admin: SupabaseClient, chatId: string) {
   const { data, error } = await admin
     .from("chat_messages")
-    .select("role, content")
+    .select("id, role, content, created_at, metadata")
     .eq("chat_id", chatId)
+    .eq("role", "user")
     .order("created_at", { ascending: false })
-    .limit(14);
+    .limit(50);
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).find((message) => !isWorkflowGeneratedMessage(message)) ?? null;
+}
+
+async function loadChatHistoryThroughMessage({
+  admin,
+  chatId,
+  messageCreatedAt,
+}: {
+  admin: SupabaseClient;
+  chatId: string;
+  messageCreatedAt: string;
+}) {
+  const { data, error } = await admin
+    .from("chat_messages")
+    .select("role, content, created_at, metadata")
+    .eq("chat_id", chatId)
+    .lte("created_at", messageCreatedAt)
+    .order("created_at", { ascending: false })
+    .limit(20);
 
   if (error) {
     throw error;
@@ -236,8 +393,140 @@ async function loadChatHistory(admin: SupabaseClient, chatId: string) {
 
   return [...(data ?? [])]
     .reverse()
+    .filter((message) => !isWorkflowGeneratedMessage(message))
     .map(mapProviderMessage)
     .filter((message): message is AtmetChatMessage => Boolean(message));
+}
+
+async function getWorkflowUserId({
+  admin,
+  agent,
+  chatId,
+  startedBy,
+}: {
+  admin: SupabaseClient;
+  agent: WorkflowAgentRow;
+  chatId: string;
+  startedBy?: string | null;
+}) {
+  if (startedBy) {
+    return startedBy;
+  }
+
+  const { data: chat, error } = await admin
+    .from("chats")
+    .select("user_id")
+    .eq("id", chatId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return stringValue(asRecord(chat).user_id) || stringValue(agent.created_by);
+}
+
+function getConnectionUserStatus(connection: Record<string, unknown>, userId: string) {
+  const settings = asRecord(connection.settings);
+  const users = asRecord(settings.users);
+  return stringValue(asRecord(users[userId]).status).toLowerCase();
+}
+
+async function runNodeConnectedAppActions({
+  admin,
+  agent,
+  chatId,
+  content,
+  conversationContext,
+  node,
+  startedBy,
+}: {
+  admin: SupabaseClient;
+  agent: WorkflowAgentRow;
+  chatId: string;
+  content: string;
+  conversationContext: string;
+  node: WorkflowNodeRow;
+  startedBy?: string | null;
+}) {
+  const appKeys = getNodeAppKeys(node);
+  const metadata: Record<string, unknown>[] = [];
+  const contextItems: string[] = [];
+
+  if (!appKeys.includes("gmail")) {
+    return { context: "", metadata };
+  }
+
+  const userId = await getWorkflowUserId({ admin, agent, chatId, startedBy });
+  if (!userId) {
+    metadata.push({ appKey: "gmail", status: "missing_user" });
+    return { context: "", metadata };
+  }
+
+  const { data: connection, error } = await admin
+    .from("workspace_connectors")
+    .select("app_key, settings")
+    .eq("workspace_id", agent.workspace_id)
+    .eq("app_key", "gmail")
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  const connectionRecord = asRecord(connection);
+  if (!connection || getConnectionUserStatus(connectionRecord, userId) !== "connected") {
+    metadata.push({ appKey: "gmail", status: "not_connected" });
+    contextItems.push("### Gmail\nGmail is linked to this node, but the user has not connected Gmail yet.");
+    return { context: contextItems.join("\n\n"), metadata };
+  }
+
+  const connectedAccountId = stringValue(
+    asRecord(getComposioUserConnection(connectionRecord.settings, userId)).connectedAccountId,
+  );
+
+  try {
+    const gmailResult = await sendGmailMessage({
+      connectedAccountId,
+      content,
+      conversationContext,
+    });
+
+    if (!gmailResult) {
+      metadata.push({ appKey: "gmail", status: "missing_email_fields" });
+      return { context: "", metadata };
+    }
+
+    metadata.push({
+      appKey: "gmail",
+      status: "used",
+      toolSlug: "gmail_proxy_send_message",
+    });
+    contextItems.push(
+      [
+        "### Gmail",
+        "Tool: Gmail proxy /gmail/v1/users/me/messages/send",
+        "Result:",
+        JSON.stringify(
+          {
+            body: gmailResult.body,
+            recipient: gmailResult.recipient,
+            subject: gmailResult.subject,
+          },
+          null,
+          2,
+        ),
+      ].join("\n"),
+    );
+  } catch (error) {
+    metadata.push({
+      appKey: "gmail",
+      error: error instanceof Error ? error.message : "Gmail send failed",
+      status: "failed",
+    });
+  }
+
+  return { context: contextItems.join("\n\n"), metadata };
 }
 
 export async function runWorkflowAgent({
@@ -364,34 +653,59 @@ export async function runWorkflowAgent({
         previousOutputs: completedOutputs,
         trigger,
       });
-      const { data: userMessage, error: userMessageError } = await admin
-        .from("chat_messages")
-        .insert({
-          chat_id: node.source_chat_id,
-          content: prompt,
-          metadata: {
-            agentId,
-            kind: "workflow_node_input",
-            nodeId: node.id,
-            runId,
-            trigger,
-          },
-          role: "user",
-        })
-        .select("*")
-        .single();
+      const lastUserMessage = await loadLastRealUserMessage(admin, node.source_chat_id);
 
-      if (userMessageError) {
-        throw userMessageError;
+      if (!lastUserMessage) {
+        await addRunEvent({
+          admin,
+          message: `Skipped "${node.title}" because the linked chat has no user message to rerun.`,
+          metadata: { chatId: node.source_chat_id },
+          nodeId: node.id,
+          runId,
+          type: "node_skipped",
+        });
+        await admin
+          .from("workflow_nodes")
+          .update({ runtime_state: "paused", status: "ready" })
+          .eq("id", node.id);
+        continue;
       }
 
-      const history = await loadChatHistory(admin, node.source_chat_id);
+      const history = await loadChatHistoryThroughMessage({
+        admin,
+        chatId: node.source_chat_id,
+        messageCreatedAt: stringValue(asRecord(lastUserMessage).created_at),
+      });
+      const lastUserContent = stringValue(asRecord(lastUserMessage).content);
+      const connectedAppAction = await runNodeConnectedAppActions({
+        admin,
+        agent,
+        chatId: node.source_chat_id,
+        content: lastUserContent,
+        conversationContext: buildRecentConversationContext(history),
+        node,
+        startedBy,
+      });
       const result = await runAtmetChat({
-        messages: history,
+        messages: [
+          {
+            content: prompt,
+            role: "system",
+          },
+          ...(connectedAppAction.context
+            ? [
+                {
+                  content: connectedAppAction.context,
+                  role: "system" as const,
+                },
+              ]
+            : []),
+          ...history,
+        ],
         model,
         systemPrompt: [
           baseSystemPrompt,
-          "You are executing a workflow node. Be direct, complete the node work, and keep a concise handoff for downstream nodes.",
+          "You are executing a workflow node by rerunning the linked chat from its latest real user message. Be direct, complete the node work, and keep a concise handoff for downstream nodes.",
         ].join("\n\n"),
       });
       const nodeStatus = result.configured ? "ready" : "failed";
@@ -408,7 +722,8 @@ export async function runWorkflowAgent({
             nodeId: node.id,
             providerKey: result.providerKey,
             runId,
-            sourceMessageId: stringValue(asRecord(userMessage).id),
+            sourceMessageId: stringValue(asRecord(lastUserMessage).id),
+            connectedAppContext: connectedAppAction.metadata,
             trigger,
           },
           role: "assistant",

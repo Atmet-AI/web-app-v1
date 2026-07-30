@@ -42,6 +42,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     const body = await readJson(request);
+    const schedule = stringValue(body.schedule);
     const { data, error } = await auth.admin
       .from("workflow_agents")
       .update({
@@ -49,7 +50,10 @@ export async function PATCH(request: Request, context: RouteContext) {
         status: stringValue(body.status) || undefined,
         runtime_state: stringValue(body.runtimeState) || undefined,
         tone: stringValue(body.tone) || undefined,
-        schedule: stringValue(body.schedule) || undefined,
+        schedule:
+          body.schedule === null || schedule === "manual"
+            ? null
+            : schedule || undefined,
         settings: body.settings ?? undefined,
       })
       .eq("id", agentId)

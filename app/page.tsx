@@ -356,6 +356,76 @@ const connectorCatalogKeySet = new Set<string>(connectorCatalogKeys);
 
 const defaultConnectorCatalog = connectorCatalog satisfies DatabaseRecord[];
 
+function getConnectorForLogo(logo?: string | null) {
+  const raw = asString(logo).toLowerCase();
+  if (!raw) {
+    return null;
+  }
+
+  return connectorCatalog.find((connector) => {
+    const labels = [connector.key, connector.logo, connector.name]
+      .filter(Boolean)
+      .map((label) => label.toLowerCase());
+
+    return labels.includes(raw);
+  }) ?? null;
+}
+
+function normalizeAppLogoKeys(logos: readonly string[]) {
+  const keys = new Set<string>();
+
+  for (const logo of logos) {
+    const value = asString(logo);
+    if (!value) {
+      continue;
+    }
+
+    const connector = getConnectorForLogo(value);
+    keys.add(connector?.key ?? value);
+  }
+
+  return Array.from(keys);
+}
+
+function getAppLogoKeysFromText(text: string) {
+  const content = asString(text).toLowerCase();
+  if (!content) {
+    return [];
+  }
+
+  const matches = new Set<string>();
+  const appMatchers = [
+    { key: "gmail", pattern: /\bgmail\b|\bgoogle\s+mail\b|\bemail\b|\bmail\b/ },
+    { key: "telegram", pattern: /\btelegram\b/ },
+    { key: "google-sheets", pattern: /\bgoogle\s+sheets?\b|\bsheets?\b|\bspreadsheet\b/ },
+    { key: "calendar", pattern: /\bcalendar\b|\bgoogle\s+calendar\b/ },
+    { key: "drive", pattern: /\bgoogle\s+drive\b|\bdrive\b/ },
+    { key: "instagram", pattern: /\binstagram\b|\binsta\b/ },
+    { key: "outlook", pattern: /\boutlook\b|\bmicrosoft\s+mail\b/ },
+    { key: "slack", pattern: /\bslack\b/ },
+    { key: "github", pattern: /\bgithub\b|\bgit\s*hub\b/ },
+    { key: "chatgpt", pattern: /\bchatgpt\b|\bopenai\b|\bgpt\b/ },
+    { key: "claude", pattern: /\bclaude\b|\banthropic\b/ },
+  ] satisfies { key: string; pattern: RegExp }[];
+
+  appMatchers.forEach((matcher) => {
+    if (matcher.pattern.test(content)) {
+      matches.add(matcher.key);
+    }
+  });
+
+  return Array.from(matches);
+}
+
+function getAgentNodeAppLogoKeys(title: string, appKeys: readonly string[]) {
+  const normalizedAppKeys = normalizeAppLogoKeys(appKeys);
+  return mergeAppLogoKeys(normalizedAppKeys, getAppLogoKeysFromText(title));
+}
+
+function mergeAppLogoKeys(current: readonly string[], next: readonly string[]) {
+  return normalizeAppLogoKeys([...current, ...next]);
+}
+
 const settingsTabs = [
   { value: "profile", label: "Profile", icon: UserRound },
   { value: "workspace", label: "Workspace", icon: BuildingIcon },
@@ -801,11 +871,13 @@ const pageDescriptions = {
 
 type SidebarChat = {
   id: string;
+  appKeys?: string[];
   pinned: boolean;
   title: string;
 };
 
 type WorkflowChatNode = {
+  appKeys?: string[];
   chatId: string;
   nodeId?: string;
   title: string;
@@ -1348,11 +1420,18 @@ function mapWorkspace(value: unknown): WorkspaceSummary | null {
 function mapChat(row: unknown): SidebarChat | null {
   const record = asRecord(row);
   const id = asString(record.id);
+  const metadata = asRecord(record.metadata);
+  const appKeys = Array.isArray(metadata.appKeys)
+    ? metadata.appKeys.map((item) => asString(item)).filter(Boolean)
+    : Array.isArray(metadata.app_keys)
+      ? metadata.app_keys.map((item) => asString(item)).filter(Boolean)
+      : [];
   if (!id) {
     return null;
   }
 
   return {
+    appKeys: normalizeAppLogoKeys(appKeys),
     id,
     pinned: asBoolean(record.pinned),
     title: asString(record.title, "Untitled chat"),
@@ -1503,10 +1582,16 @@ function mapAgent(row: unknown, index: number): Agent | null {
   const status = asString(record.status, "Draft");
   const nodeRows = asRecordArray(record.workflow_nodes);
   const edgeRows = asRecordArray(record.workflow_edges);
-  const appLogos = nodeRows
-    .flatMap((node) => (Array.isArray(node.app_keys) ? node.app_keys : []))
-    .map((key) => asString(key))
-    .filter(Boolean);
+  const appLogos = normalizeAppLogoKeys(nodeRows
+    .flatMap((node) => {
+      const record = asRecord(node);
+      const title = asString(record.title);
+      const appKeys = Array.isArray(record.app_keys)
+        ? record.app_keys.map((key) => asString(key)).filter(Boolean)
+        : [];
+
+      return getAgentNodeAppLogoKeys(title, appKeys);
+    }));
   const workflowCards = nodeRows
     .map((node, nodeIndex) => {
       const nodeId = asString(node.id);
@@ -1514,9 +1599,13 @@ function mapAgent(row: unknown, index: number): Agent | null {
         return null;
       }
 
-      const appKeys = Array.isArray(node.app_keys)
-        ? node.app_keys.map((item) => String(item))
-        : [];
+      const title = asString(node.title, "Empty chat");
+      const appKeys = getAgentNodeAppLogoKeys(
+        title,
+        Array.isArray(node.app_keys)
+          ? node.app_keys.map((item) => String(item))
+          : [],
+      );
       const sourceChatId = asString(node.source_chat_id);
 
       return {
@@ -1527,7 +1616,7 @@ function mapAgent(row: unknown, index: number): Agent | null {
         ...(sourceChatId ? { chatId: sourceChatId } : {}),
         id: nodeId,
         runtime: mapRuntime(node.runtime_state),
-        title: asString(node.title, "Empty chat"),
+        title,
         x: asNumber(node.position_x, 72 + nodeIndex * 44),
         y: asNumber(node.position_y, 120 + nodeIndex * 36),
       } satisfies PlaygroundCard;
@@ -1897,6 +1986,45 @@ export default function Home() {
       window.removeEventListener("focus", refreshNotifications);
     };
   }, []);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") {
+      return;
+    }
+
+    const hasScheduledRunningAgent = agentList.some(
+      (agent) => agent.runtime === "running" && Boolean(agent.schedule),
+    );
+
+    if (!hasScheduledRunningAgent) {
+      return;
+    }
+
+    let cancelled = false;
+    async function runScheduledAgents() {
+      if (cancelled) {
+        return;
+      }
+
+      try {
+        await fetch("/api/agents/scheduled", {
+          cache: "no-store",
+          method: "POST",
+        });
+      } catch {
+        // Local scheduler polling is best effort; production uses Vercel cron.
+      }
+    }
+
+    const initialTickId = window.setTimeout(runScheduledAgents, 1_000);
+    const intervalId = window.setInterval(runScheduledAgents, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(initialTickId);
+      window.clearInterval(intervalId);
+    };
+  }, [agentList]);
 
   async function handleNotificationAction(
     notificationId: string,
@@ -2301,13 +2429,22 @@ export default function Home() {
   function updateAgentSchedule(agentName: string, schedule: string | null) {
     setAgentList((current) =>
       current.map((agent) =>
-        agent.name === agentName ? { ...agent, schedule } : agent,
+        agent.name === agentName
+          ? {
+              ...agent,
+              schedule,
+              ...(schedule ? { runtime: "running" as const } : {}),
+            }
+          : agent,
       ),
     );
     const agentId = agentList.find((agent) => agent.name === agentName)?.id;
     if (agentId) {
       void fetch(`/api/agents/${agentId}`, {
-        body: JSON.stringify({ schedule: schedule ?? "manual" }),
+        body: JSON.stringify({
+          schedule: schedule ?? "manual",
+          ...(schedule ? { runtimeState: "running" } : {}),
+        }),
         headers: { "Content-Type": "application/json" },
         method: "PATCH",
       }).catch(() => undefined);
@@ -2370,6 +2507,7 @@ export default function Home() {
 
   function addChatToAgentWorkflow(agentName: string, chat: SidebarChat) {
     const existingWorkflowNodes = workflowChatNodesByAgent[agentName] ?? [];
+    const optimisticAppKeys = getAgentNodeAppLogoKeys(chat.title, chat.appKeys ?? []);
     const chatAlreadyInWorkflow = existingWorkflowNodes.some(
       (node) => node.chatId === chat.id,
     );
@@ -2384,13 +2522,14 @@ export default function Home() {
         ...current,
         [agentName]: alreadyAdded
           ? existingNodes
-          : [...existingNodes, { chatId: chat.id, title: chat.title }],
+          : [...existingNodes, { appKeys: optimisticAppKeys, chatId: chat.id, title: chat.title }],
       };
     });
     const agent = agentList.find((item) => item.name === agentName);
     if (agent?.id && !chatAlreadyInWorkflow) {
       void fetch(`/api/agents/${agent.id}/nodes`, {
         body: JSON.stringify({
+          appKeys: optimisticAppKeys,
           sourceChatId: chat.id,
           title: chat.title,
           x: 120,
@@ -2406,9 +2545,13 @@ export default function Home() {
 
           const payload = asRecord(await response.json().catch(() => ({})));
           const node = asRecord(payload.node);
-          const appKeys = Array.isArray(node.app_keys)
-            ? node.app_keys.map((item) => asString(item)).filter(Boolean)
-            : [];
+          const title = asString(node.title, chat.title);
+          const appKeys = getAgentNodeAppLogoKeys(
+            title,
+            Array.isArray(node.app_keys)
+              ? node.app_keys.map((item) => asString(item)).filter(Boolean)
+              : optimisticAppKeys,
+          );
           const nodeId = asString(node.id);
 
           if (!nodeId) {
@@ -2420,7 +2563,7 @@ export default function Home() {
               item.id === agent.id
                 ? {
                     ...item,
-                    appLogos: appKeys.length > 0 ? appKeys.slice(0, 3) : item.appLogos,
+                    appLogos: appKeys.length > 0 ? mergeAppLogoKeys(item.appLogos, appKeys).slice(0, 3) : item.appLogos,
                     workflowCards: [
                       ...(item.workflowCards ?? []).filter(
                         (card) => card.chatId !== chat.id && card.id !== nodeId,
@@ -2430,7 +2573,7 @@ export default function Home() {
                         chatId: chat.id,
                         id: nodeId,
                         runtime: mapRuntime(node.runtime_state),
-                        title: asString(node.title, chat.title),
+                        title,
                         x: asNumber(node.position_x, 120),
                         y: asNumber(node.position_y, 120),
                       },
@@ -3716,11 +3859,11 @@ function AgentWorkflowChoiceLogo({
   return (
     <span className="relative grid size-9 shrink-0 place-items-center">
       <AgentAppLogo
-        className="absolute left-0 top-2 size-6 rounded-md text-[0.5rem] opacity-75"
+        className="absolute left-0 top-2 size-6 rounded-md text-[0.5rem]"
         logo={logos[1]}
       />
       <AgentAppLogo
-        className="absolute right-0 top-2 size-6 rounded-md text-[0.5rem] opacity-75"
+        className="absolute right-0 top-2 size-6 rounded-md text-[0.5rem]"
         logo={logos[2]}
       />
       <AgentAppLogo
@@ -4337,6 +4480,8 @@ function ChatExperience({
   const [userModelOptions, setUserModelOptions] = useState<ChatModelOption[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isSending, setIsSending] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingMessageDraft, setEditingMessageDraft] = useState("");
   const [composerIsEmpty, setComposerIsEmpty] = useState(true);
   const [lastResponseUsedApp, setLastResponseUsedApp] = useState(false);
   const [createAgentDialogOpen, setCreateAgentDialogOpen] = useState(false);
@@ -4616,13 +4761,32 @@ function ChatExperience({
     setComposerIsEmpty(editor.textContent?.trim().length === 0);
   }
 
-  async function editUserMessage(message: ChatMessage) {
+  function startEditingUserMessage(message: ChatMessage) {
+    if (message.role !== "user") {
+      return;
+    }
+
+    setEditingMessageId(message.id);
+    setEditingMessageDraft(message.content);
+  }
+
+  function cancelEditingUserMessage() {
+    setEditingMessageId(null);
+    setEditingMessageDraft("");
+  }
+
+  async function editUserMessage(message: ChatMessage, nextContent: string) {
     if (!activeChatId || message.role !== "user") {
       return;
     }
 
-    const nextContent = window.prompt("Edit message", message.content)?.trim();
-    if (!nextContent || nextContent === message.content) {
+    const trimmedContent = nextContent.trim();
+    if (!trimmedContent) {
+      return;
+    }
+
+    if (trimmedContent === message.content) {
+      cancelEditingUserMessage();
       return;
     }
 
@@ -4630,7 +4794,7 @@ function ChatExperience({
       const response = await fetch(`/api/chats/${activeChatId}/messages`, {
         body: JSON.stringify({
           action: "edit",
-          content: nextContent,
+          content: trimmedContent,
           messageId: message.id,
         }),
         headers: { "Content-Type": "application/json" },
@@ -4650,9 +4814,10 @@ function ChatExperience({
 
         return [
           ...current.slice(0, index),
-          editedMessage ?? { ...message, content: nextContent },
+          editedMessage ?? { ...message, content: trimmedContent },
         ];
       });
+      cancelEditingUserMessage();
     } catch (error) {
       void playAtmetSound("error");
       window.alert(error instanceof Error ? error.message : "Could not edit message.");
@@ -5247,11 +5412,20 @@ function ChatExperience({
                       messageId={message.id}
                     >
                       <ChatMessageBubble
+                        editValue={
+                          editingMessageId === message.id
+                            ? editingMessageDraft
+                            : undefined
+                        }
+                        isEditing={editingMessageId === message.id}
                         message={message}
+                        onCancelEdit={cancelEditingUserMessage}
                         onCopy={copyMessageContent}
-                        onEdit={editUserMessage}
+                        onEdit={startEditingUserMessage}
+                        onEditValueChange={setEditingMessageDraft}
                         onFeedback={setMessageFeedback}
                         onRegenerate={regenerateFromMessage}
+                        onSaveEdit={(nextContent) => editUserMessage(message, nextContent)}
                         onTypingFrame={keepChatAtEndOnNextPaint}
                         onTypingComplete={(messageId) => {
                           setMessages((current) =>
@@ -5734,19 +5908,29 @@ function ChatModelMark({
 }
 
 function ChatMessageBubble({
+  editValue,
+  isEditing = false,
   message,
+  onCancelEdit,
   onCopy,
   onEdit,
+  onEditValueChange,
   onFeedback,
   onRegenerate,
+  onSaveEdit,
   onTypingFrame,
   onTypingComplete,
 }: {
+  editValue?: string;
+  isEditing?: boolean;
   message: ChatMessage;
+  onCancelEdit?: () => void;
   onCopy?: (message: ChatMessage) => void;
   onEdit?: (message: ChatMessage) => void;
+  onEditValueChange?: (value: string) => void;
   onFeedback?: (message: ChatMessage, feedback: "dislike" | "like") => void;
   onRegenerate?: (message: ChatMessage) => void;
+  onSaveEdit?: (value: string) => void;
   onTypingFrame?: () => void;
   onTypingComplete?: (messageId: string) => void;
 }) {
@@ -5761,18 +5945,29 @@ function ChatMessageBubble({
             />
           ) : null}
           <div className="max-w-[80%] rounded-xl bg-secondary px-3 py-2 text-sm leading-6 text-secondary-foreground">
-            <UserMessageContent
-              content={message.content}
-              mentions={message.mentions ?? []}
-            />
+            {isEditing ? (
+              <InlineMessageEditor
+                onCancel={onCancelEdit}
+                onChange={onEditValueChange}
+                onSave={onSaveEdit}
+                value={editValue ?? message.content}
+              />
+            ) : (
+              <UserMessageContent
+                content={message.content}
+                mentions={message.mentions ?? []}
+              />
+            )}
           </div>
-          <MessageActionBar
-            message={message}
-            onCopy={onCopy}
-            onEdit={onEdit}
-            onFeedback={onFeedback}
-            onRegenerate={onRegenerate}
-          />
+          {isEditing ? null : (
+            <MessageActionBar
+              message={message}
+              onCopy={onCopy}
+              onEdit={onEdit}
+              onFeedback={onFeedback}
+              onRegenerate={onRegenerate}
+            />
+          )}
         </div>
       </div>
     );
@@ -5801,6 +5996,71 @@ function ChatMessageBubble({
             onRegenerate={onRegenerate}
           />
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+function InlineMessageEditor({
+  onCancel,
+  onChange,
+  onSave,
+  value,
+}: {
+  onCancel?: () => void;
+  onChange?: (value: string) => void;
+  onSave?: (value: string) => void;
+  value: string;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    textarea.focus();
+    textarea.selectionStart = textarea.value.length;
+    textarea.selectionEnd = textarea.value.length;
+  }, []);
+
+  return (
+    <div className="min-w-[min(22rem,70vw)]">
+      <textarea
+        aria-label="Edit message"
+        className="block max-h-72 min-h-24 w-full resize-y rounded-lg border border-black/10 bg-background/80 px-3 py-2 text-sm leading-6 text-foreground outline-none transition-[border-color,box-shadow] focus:border-foreground/25 focus:ring-2 focus:ring-ring/30 dark:border-white/10 dark:bg-background/70"
+        onChange={(event) => onChange?.(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel?.();
+          }
+
+          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+            event.preventDefault();
+            onSave?.(value);
+          }
+        }}
+        ref={textareaRef}
+        value={value}
+      />
+      <div className="mt-2 flex justify-end gap-2">
+        <button
+          className="inline-flex h-8 items-center rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-[background-color,color,scale] hover:bg-muted hover:text-foreground active:scale-[0.96]"
+          onClick={onCancel}
+          type="button"
+        >
+          Cancel
+        </button>
+        <button
+          className="inline-flex h-8 items-center rounded-md bg-foreground px-2.5 text-xs font-medium text-background transition-[opacity,scale] hover:opacity-90 active:scale-[0.96] disabled:pointer-events-none disabled:opacity-40"
+          disabled={!value.trim()}
+          onClick={() => onSave?.(value)}
+          type="button"
+        >
+          Save
+        </button>
       </div>
     </div>
   );
@@ -5932,7 +6192,7 @@ function MessageActionBar({
           onClick={() => onEdit?.(message)}
           type="button"
         >
-          <Icon className="size-3.5" icon={Edit02Icon} />
+          <EditMessageGlyph className="size-4" />
         </button>
       ) : null}
       <button
@@ -5941,12 +6201,12 @@ function MessageActionBar({
         onClick={() => onRegenerate?.(message)}
         type="button"
       >
-        <Icon className="size-3.5" icon={AiMagicIcon} />
+        <RegenerateGlyph className="size-4" />
       </button>
       <button
         aria-label="Like"
         className={cn(
-          "grid size-8 place-items-center rounded-md text-xs font-semibold transition-[background-color,color,scale] active:scale-[0.96]",
+          "grid size-8 place-items-center rounded-md transition-[background-color,color,scale] active:scale-[0.96]",
           message.feedback === "like"
             ? "bg-success/15 text-success-foreground"
             : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -5954,12 +6214,12 @@ function MessageActionBar({
         onClick={() => onFeedback?.(message, "like")}
         type="button"
       >
-        +1
+        <LikeGlyph className="size-4" />
       </button>
       <button
         aria-label="Dislike"
         className={cn(
-          "grid size-8 place-items-center rounded-md text-xs font-semibold transition-[background-color,color,scale] active:scale-[0.96]",
+          "grid size-8 place-items-center rounded-md transition-[background-color,color,scale] active:scale-[0.96]",
           message.feedback === "dislike"
             ? "bg-destructive/15 text-destructive"
             : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -5967,7 +6227,7 @@ function MessageActionBar({
         onClick={() => onFeedback?.(message, "dislike")}
         type="button"
       >
-        -1
+        <DislikeGlyph className="size-4" />
       </button>
       <button
         aria-label="Copy"
@@ -5975,9 +6235,81 @@ function MessageActionBar({
         onClick={() => onCopy?.(message)}
         type="button"
       >
-        <Icon className="size-3.5" icon={ClipboardCopyIcon} />
+        <CopyMessageGlyph className="size-4" />
       </button>
     </div>
+  );
+}
+
+function MessageGlyph({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.85"
+      viewBox="0 0 24 24"
+    >
+      {children}
+    </svg>
+  );
+}
+
+function EditMessageGlyph({ className }: { className?: string }) {
+  return (
+    <MessageGlyph className={className}>
+      <path d="M5 19h4.5L18 10.5a2.1 2.1 0 0 0-3-3L6.5 16 5 19Z" />
+      <path d="m13.5 9 1.5 1.5" />
+    </MessageGlyph>
+  );
+}
+
+function RegenerateGlyph({ className }: { className?: string }) {
+  return (
+    <MessageGlyph className={className}>
+      <path d="M19 7v5h-5" />
+      <path d="M5 17v-5h5" />
+      <path d="M18 12a6 6 0 0 0-10.2-4.2L5 10" />
+      <path d="M6 12a6 6 0 0 0 10.2 4.2L19 14" />
+    </MessageGlyph>
+  );
+}
+
+function LikeGlyph({ className }: { className?: string }) {
+  return (
+    <MessageGlyph className={className}>
+      <path d="M7 10v9" />
+      <path d="M7 18.5H5.5A2.5 2.5 0 0 1 3 16v-3.5A2.5 2.5 0 0 1 5.5 10H7" />
+      <path d="M7 10l4.2-5.2a1.5 1.5 0 0 1 2.6 1.2L13 10h4.6a2 2 0 0 1 2 2.3l-.7 4.5a2.5 2.5 0 0 1-2.5 2.2H7" />
+    </MessageGlyph>
+  );
+}
+
+function DislikeGlyph({ className }: { className?: string }) {
+  return (
+    <MessageGlyph className={className}>
+      <path d="M17 14V5" />
+      <path d="M17 5.5h1.5A2.5 2.5 0 0 1 21 8v3.5a2.5 2.5 0 0 1-2.5 2.5H17" />
+      <path d="m17 14-4.2 5.2a1.5 1.5 0 0 1-2.6-1.2L11 14H6.4a2 2 0 0 1-2-2.3l.7-4.5A2.5 2.5 0 0 1 7.6 5H17" />
+    </MessageGlyph>
+  );
+}
+
+function CopyMessageGlyph({ className }: { className?: string }) {
+  return (
+    <MessageGlyph className={className}>
+      <rect height="11" rx="2" width="11" x="8" y="5" />
+      <path d="M5 8v9a2 2 0 0 0 2 2h9" />
+    </MessageGlyph>
   );
 }
 
@@ -7490,11 +7822,11 @@ function AgentLogoStack({ logos }: { logos: readonly string[] }) {
   return (
     <div className="relative z-10 my-2 grid h-20 w-32 place-items-center">
       <AgentAppLogo
-        className="absolute left-4 top-5 size-10 rotate-[-8deg] opacity-80"
+        className="absolute left-4 top-5 size-10 rotate-[-8deg]"
         logo={logos[1]}
       />
       <AgentAppLogo
-        className="absolute right-4 top-5 size-10 rotate-[8deg] opacity-80"
+        className="absolute right-4 top-5 size-10 rotate-[8deg]"
         logo={logos[2]}
       />
       <AgentAppLogo
@@ -7512,19 +7844,19 @@ function AgentAppLogo({
   className?: string;
   logo: string;
 }) {
-  const connector = connectorCatalog.find((item) => item.key === logo);
+  const connector = getConnectorForLogo(logo);
 
   return (
     <div
       className={cn(
-        "relative grid place-items-center overflow-hidden rounded-xl bg-white/88 text-xs font-semibold text-stone-900 shadow-xs/5 ring-1 ring-black/8 backdrop-blur-[1px] dark:bg-stone-950/76 dark:text-stone-100 dark:ring-white/10",
+        "relative grid place-items-center overflow-hidden rounded-xl bg-white text-xs font-semibold text-stone-900 shadow-xs/5 ring-1 ring-black/8 dark:bg-stone-950 dark:text-stone-100 dark:ring-white/10",
         className,
       )}
     >
-      <span className="relative z-10 grid min-h-5 min-w-5 place-items-center rounded-md px-1">
+      <span className="relative z-10 grid size-full place-items-center rounded-md p-[18%]">
         {connector ? (
           <ConnectorLogo
-            className="size-5"
+            className="size-full"
             connector={{
               key: connector.key,
               logo: connector.logo,
@@ -7669,7 +8001,9 @@ function AgentPlayground({
   const [cards, setCards] = useState<PlaygroundCard[]>(() => [
     ...(agent.workflowCards ?? []).map((card) => ({ ...card, apps: [...card.apps] })),
     ...workflowChatNodes.map((node, index) => ({
-      apps: ["AT"],
+      apps: node.appKeys && node.appKeys.length > 0
+        ? normalizeAppLogoKeys(node.appKeys)
+        : ["AT"],
       chatId: node.chatId,
       id: getWorkflowChatCardId(node.chatId),
       runtime: "paused" as const,
@@ -8467,14 +8801,18 @@ function AgentSettingsSheet({
       return;
     }
 
-    setCustomEveryCount(nextScheduleMatch[1] ?? "15");
-    setCustomEveryUnit(
-      nextScheduleMatch[2]?.startsWith("hour")
-        ? "hours"
-        : nextScheduleMatch[2]?.startsWith("day")
-          ? "days"
-          : "minutes",
-    );
+    const timeoutId = window.setTimeout(() => {
+      setCustomEveryCount(nextScheduleMatch[1] ?? "15");
+      setCustomEveryUnit(
+        nextScheduleMatch[2]?.startsWith("hour")
+          ? "hours"
+          : nextScheduleMatch[2]?.startsWith("day")
+            ? "days"
+            : "minutes",
+      );
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [agent.schedule]);
   const selectedScheduleValue =
     agent.schedule &&
@@ -8483,11 +8821,19 @@ function AgentSettingsSheet({
       : agent.schedule
         ? "custom"
         : "manual";
+  const scheduleOptions = [
+    { label: "Manual", value: "manual" },
+    { label: "Hourly", value: "hourly" },
+    { label: "Daily", value: "daily" },
+    { label: "Every weekday", value: "weekdays" },
+    { label: "Weekly", value: "weekly" },
+  ] as const;
 
   function applyCustomSchedule() {
     const count = Math.max(1, Math.min(999, Number.parseInt(customEveryCount, 10) || 1));
     const unit = count === 1 ? customEveryUnit.replace(/s$/, "") : customEveryUnit;
     onAgentScheduleChange(`every ${count} ${unit}`);
+    onAgentRunningChange(true);
   }
 
   return (
@@ -8496,29 +8842,34 @@ function AgentSettingsSheet({
         <Icon icon={Settings01Icon} />
         Settings
       </SheetTrigger>
-      <SheetPopup side="right" variant="inset">
-        <SheetHeader>
-          <SheetTitle>{agent.name}</SheetTitle>
-          <SheetDescription>
+      <SheetPopup
+        className="w-[calc(100vw-1rem)] max-w-[38rem] overflow-hidden sm:w-[min(92vw,38rem)] sm:max-w-none"
+        side="right"
+        variant="inset"
+      >
+        <SheetHeader className="min-w-0">
+          <SheetTitle className="min-w-0 truncate pr-8">{agent.name}</SheetTitle>
+          <SheetDescription className="max-w-prose text-pretty">
             Configure how this agent runs, shares context, and exposes its
             playground.
           </SheetDescription>
         </SheetHeader>
-        <SheetPanel className="grid gap-5">
+        <SheetPanel className="grid min-w-0 gap-5 overflow-x-hidden">
           <AgentSheetSection
             icon={PlayIcon}
             title="Run state"
           >
-            <div className="flex items-center justify-between rounded-lg border border-border p-3">
-              <div>
+            <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border p-3">
+              <div className="min-w-0">
                 <p className="text-sm font-medium">
                   {agentRunning ? "Agent is running" : "Agent is paused"}
                 </p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-pretty text-xs text-muted-foreground">
                   Toggle temporary execution for the playground.
                 </p>
               </div>
               <Switch
+                className="shrink-0"
                 checked={agentRunning}
                 onCheckedChange={onAgentRunningChange}
               />
@@ -8527,40 +8878,48 @@ function AgentSettingsSheet({
 
           <AgentSheetSection icon={CalendarClockIcon} title="Run scheduling">
             <div className="grid gap-2">
-              <div className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
+              <div className="grid gap-2 rounded-lg border border-border p-3">
                 <div>
-                  <p className="text-sm font-medium">Schedule</p>
+                  <p className="text-sm font-medium">Schedule mode</p>
                   <p className="text-xs text-muted-foreground">
                     Runs only while the agent is enabled.
                   </p>
                 </div>
-                <Select
-                  onValueChange={(value) =>
-                    value === "custom"
-                      ? applyCustomSchedule()
-                      : onAgentScheduleChange(value === "manual" ? null : value)
-                  }
-                  value={selectedScheduleValue}
-                >
-                  <SelectTrigger className="w-40" size="sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectPopup>
-                    <SelectItem value="manual">Manual</SelectItem>
-                    <SelectItem value="hourly">Hourly</SelectItem>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekdays">Weekdays</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="custom">Custom</SelectItem>
-                  </SelectPopup>
-                </Select>
+                <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
+                {scheduleOptions.map((option) => {
+                  const isSelected = selectedScheduleValue === option.value;
+
+                  return (
+                    <button
+                      aria-pressed={isSelected}
+                      className={cn(
+                        "flex min-h-10 w-full cursor-pointer items-center justify-center rounded-lg border border-border bg-background px-3 py-2 text-center text-xs font-semibold transition-[background-color,border-color,box-shadow,transform] hover:border-foreground/20 hover:bg-muted/60 active:scale-[0.96]",
+                        isSelected &&
+                          "border-foreground/18 bg-muted shadow-[inset_0_0_0_1px_rgb(0_0_0/0.04)] dark:shadow-[inset_0_0_0_1px_rgb(255_255_255/0.06)]",
+                      )}
+                      key={option.value}
+                      onClick={() => {
+                        const nextSchedule =
+                          option.value === "manual" ? null : option.value;
+                        onAgentScheduleChange(nextSchedule);
+                        if (nextSchedule) {
+                          onAgentRunningChange(true);
+                        }
+                      }}
+                      type="button"
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+                </div>
               </div>
               <div className="grid gap-2 rounded-lg border border-border p-3">
                 <p className="text-sm font-medium">Custom interval</p>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 sm:flex sm:flex-wrap sm:items-center">
                   <Input
                     aria-label="Custom schedule count"
-                    className="w-24"
+                    className="min-w-0 sm:w-24"
                     min={1}
                     onChange={(event) => setCustomEveryCount(event.target.value)}
                     type="number"
@@ -8574,7 +8933,7 @@ function AgentSettingsSheet({
                     }}
                     value={customEveryUnit}
                   >
-                    <SelectTrigger className="w-32" size="sm">
+                    <SelectTrigger className="min-w-0 sm:w-32" size="sm">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectPopup>
@@ -8583,25 +8942,37 @@ function AgentSettingsSheet({
                       <SelectItem value="days">Days</SelectItem>
                     </SelectPopup>
                   </Select>
-                  <Button onClick={applyCustomSchedule} size="sm" type="button" variant="outline">
-                    Apply
+                  <Button
+                    aria-pressed={selectedScheduleValue === "custom"}
+                    className="col-span-2 cursor-pointer sm:col-span-1"
+                    onClick={applyCustomSchedule}
+                    size="sm"
+                    type="button"
+                    variant={selectedScheduleValue === "custom" ? "default" : "outline"}
+                  >
+                    Use custom
                   </Button>
                 </div>
               </div>
-              <AgentSettingRow
-                label="Status"
-                value={agentRunning ? "Enabled" : "Paused"}
-              />
+              <AgentSettingRow label="Status" value={agentRunning ? "Enabled" : "Paused"} />
               <AgentSettingRow label="Timezone" value="Asia/Amman" />
             </div>
           </AgentSheetSection>
 
           <AgentSheetSection icon={CopyLinkIcon} title="Share link">
-            <div className="flex items-center gap-2 rounded-lg border border-border p-2">
+            <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border p-2">
               <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                 {agentUrl}
               </p>
-              <Button size="sm" variant="outline">
+              <Button
+                className="shrink-0"
+                onClick={() => {
+                  navigator.clipboard?.writeText(agentUrl).catch(() => undefined);
+                }}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
                 <Icon icon={CopyLinkIcon} />
                 Copy
               </Button>
@@ -8652,10 +9023,10 @@ function AgentSheetSection({
   title: string;
 }) {
   return (
-    <section className="grid gap-3">
-      <div className="flex items-center gap-2 text-sm font-semibold">
-        <Icon className="text-muted-foreground" icon={icon} />
-        {title}
+    <section className="grid min-w-0 gap-3">
+      <div className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+        <Icon className="shrink-0 text-muted-foreground" icon={icon} />
+        <span className="min-w-0 truncate">{title}</span>
       </div>
       {children}
     </section>
@@ -8664,9 +9035,9 @@ function AgentSheetSection({
 
 function AgentSettingRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium">{value}</span>
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-border px-3 py-2">
+      <span className="min-w-0 truncate text-sm text-muted-foreground">{label}</span>
+      <span className="min-w-0 truncate text-right text-sm font-medium">{value}</span>
     </div>
   );
 }
@@ -8681,12 +9052,12 @@ function AgentToggleRow({
   const [checked, setChecked] = useState(true);
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
-      <div>
+    <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border p-3">
+      <div className="min-w-0">
         <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs leading-5 text-muted-foreground">{description}</p>
+        <p className="text-pretty text-xs leading-5 text-muted-foreground">{description}</p>
       </div>
-      <Switch checked={checked} onCheckedChange={setChecked} />
+      <Switch className="shrink-0" checked={checked} onCheckedChange={setChecked} />
     </div>
   );
 }

@@ -129,6 +129,7 @@ export async function POST(request: Request, context: RouteContext) {
 
     const body = await readJson(request);
     const name = stringValue(body.name);
+    const schedule = stringValue(body.schedule);
 
     if (!name) {
       return badRequest("Agent name is required");
@@ -143,7 +144,7 @@ export async function POST(request: Request, context: RouteContext) {
         runtime_state: stringValue(body.runtimeState, "paused"),
         gradient: stringValue(body.gradient) || null,
         tone: stringValue(body.tone) || null,
-        schedule: stringValue(body.schedule) || null,
+        schedule: schedule === "manual" ? null : schedule || null,
         settings: body.settings ?? {},
         created_by: auth.user.id,
       })
