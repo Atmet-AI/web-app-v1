@@ -243,6 +243,7 @@
   }
   body {
     @apply bg-background text-foreground;
+    overflow-x: hidden;
     text-rendering: optimizeLegibility;
   }
   code, kbd, samp, pre {
@@ -251,7 +252,11 @@
   html {
     @apply font-sans;
     -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
     text-wrap: pretty;
+  }
+  *::-webkit-scrollbar:horizontal {
+    display: none;
   }
   h1, h2, h3 {
     text-wrap: balance;

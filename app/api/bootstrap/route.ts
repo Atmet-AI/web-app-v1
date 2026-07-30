@@ -377,6 +377,11 @@ export async function GET() {
       }, { headers: noStoreHeaders });
     }
 
+    const usageMonthStart = new Date(
+      new Date().getFullYear(),
+      new Date().getMonth(),
+      1,
+    ).toISOString();
     const [
       { data: workspaceSettings, error: workspaceSettingsError },
       { data: members, error: membersError },
@@ -388,7 +393,9 @@ export async function GET() {
       { data: brain, error: brainError },
       { data: subscription, error: subscriptionError },
       { data: usageEvents, error: usageEventsError },
+      { data: aiModelRuns, error: aiModelRunsError },
       { data: userLimits, error: userLimitsError },
+      { data: usageControls, error: usageControlsError },
       { data: notifications, error: notificationsError },
     ] = await Promise.all([
       auth.supabase.from("workspace_settings").select("*").eq("workspace_id", workspaceId).maybeSingle(),
@@ -429,11 +436,20 @@ export async function GET() {
         .from("usage_events")
         .select("*")
         .eq("workspace_id", workspaceId)
-        .gte("created_at", new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
+        .gte("created_at", usageMonthStart),
+      auth.supabase
+        .from("ai_model_runs")
+        .select("chat_id, input_tokens, output_tokens")
+        .eq("workspace_id", workspaceId)
+        .gte("created_at", usageMonthStart),
       auth.supabase
         .from("user_usage_limits")
         .select("*, profiles(full_name, email, avatar_url)")
         .eq("workspace_id", workspaceId),
+      auth.supabase
+        .from("workspace_usage_controls")
+        .select("*")
+        .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`),
       notificationsPromise,
     ]);
 
@@ -448,7 +464,9 @@ export async function GET() {
       brainError,
       subscriptionError,
       usageEventsError,
+      aiModelRunsError,
       userLimitsError,
+      usageControlsError,
       notificationsError,
     ].filter(Boolean);
 
@@ -463,9 +481,50 @@ export async function GET() {
       acc[resource] = (acc[resource] ?? 0) + Number(event.quantity ?? 0);
       return acc;
     }, {});
+    const tokensByChatId = (aiModelRuns ?? []).reduce<Record<string, number>>(
+      (acc, run) => {
+        const chatId = String(run.chat_id ?? "");
+        if (!chatId) {
+          return acc;
+        }
+
+        acc[chatId] =
+          (acc[chatId] ?? 0) +
+          Number(run.input_tokens ?? 0) +
+          Number(run.output_tokens ?? 0);
+        return acc;
+      },
+      {},
+    );
+    totals.tokens = (aiModelRuns ?? []).reduce(
+      (sum, run) =>
+        sum + Number(run.input_tokens ?? 0) + Number(run.output_tokens ?? 0),
+      0,
+    );
+    const workspaceUsageControls =
+      (usageControls ?? []).find((control) => control.workspace_id === workspaceId) ??
+      {};
+    const globalUsageControls =
+      (usageControls ?? []).find((control) => !control.workspace_id) ?? {};
+    const agentsWithTokenUsage = (agents ?? []).map((agent) => {
+      const workflowNodes = Array.isArray(agent.workflow_nodes)
+        ? agent.workflow_nodes as Array<Record<string, unknown>>
+        : [];
+      const sourceChatIds = new Set(
+        workflowNodes
+          .map((node) => String(node.source_chat_id ?? ""))
+          .filter(Boolean),
+      );
+      const tokenUsage = Array.from(sourceChatIds).reduce(
+        (sum, chatId) => sum + (tokensByChatId[chatId] ?? 0),
+        0,
+      );
+
+      return { ...agent, token_usage: tokenUsage };
+    });
 
     return ok({
-      agents,
+      agents: agentsWithTokenUsage,
       apps,
       brain,
       changelogs,
@@ -478,7 +537,29 @@ export async function GET() {
       profile,
       skills,
       subscription,
-      usage: { events: usageEvents, totals, userLimits },
+      usage: {
+        events: usageEvents,
+        totals: {
+          ...totals,
+          agent_limit:
+            workspaceUsageControls.agent_limit ??
+            globalUsageControls.agent_limit ??
+            25,
+          monthly_token_limit:
+            workspaceUsageControls.monthly_token_limit ??
+            globalUsageControls.monthly_token_limit ??
+            50000,
+          storage_limit_gb:
+            workspaceUsageControls.storage_limit_gb ??
+            globalUsageControls.storage_limit_gb ??
+            25,
+          token_limit:
+            workspaceUsageControls.monthly_token_limit ??
+            globalUsageControls.monthly_token_limit ??
+            50000,
+        },
+        userLimits,
+      },
       workspace,
       workspaceSettings,
       workspaces: memberships?.map((membership) => membership.workspaces).filter(Boolean) ?? [],

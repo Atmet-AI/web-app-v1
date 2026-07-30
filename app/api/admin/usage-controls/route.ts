@@ -2,6 +2,11 @@ import { isRouteResponse, requireSuperAdmin } from "@/lib/api/auth";
 import { recordActivityLog } from "@/lib/api/audit";
 import { ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
+function numberOrDefault(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 export async function GET() {
   try {
     const auth = await requireSuperAdmin();
@@ -35,18 +40,55 @@ export async function PATCH(request: Request) {
 
     const body = await readJson(request);
     const workspaceId = stringValue(body.workspaceId);
-    const { data, error } = await auth.supabase
-      .from("workspace_usage_controls")
-      .upsert({
-        workspace_id: workspaceId || null,
-        enforce_workspace_limits: body.enforceWorkspaceLimits,
-        monthly_run_limit: body.monthlyRunLimit,
-        connector_limit: body.connectorLimit,
-        require_write_approvals: body.requireWriteApprovals,
-        usage_alert_threshold: body.usageAlertThreshold,
-      })
-      .select("*")
-      .single();
+    const values = {
+      agent_limit: numberOrDefault(body.agentLimit, 25),
+      connector_limit: numberOrDefault(body.connectorLimit, 10),
+      enforce_workspace_limits: body.enforceWorkspaceLimits !== false,
+      monthly_run_limit: numberOrDefault(body.monthlyRunLimit, 12000),
+      monthly_token_limit: numberOrDefault(body.monthlyTokenLimit, 50000),
+      require_write_approvals: body.requireWriteApprovals !== false,
+      storage_limit_gb: numberOrDefault(body.storageLimitGb, 25),
+      usage_alert_threshold: numberOrDefault(body.usageAlertThreshold, 80),
+      workspace_id: workspaceId || null,
+    };
+
+    let result;
+
+    if (workspaceId) {
+      result = await auth.supabase
+        .from("workspace_usage_controls")
+        .upsert(values, { onConflict: "workspace_id" })
+        .select("*")
+        .single();
+    } else {
+      const { data: existingGlobal, error: existingGlobalError } =
+        await auth.supabase
+          .from("workspace_usage_controls")
+          .select("id")
+          .is("workspace_id", null)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+      if (existingGlobalError) {
+        throw existingGlobalError;
+      }
+
+      result = existingGlobal?.id
+        ? await auth.supabase
+            .from("workspace_usage_controls")
+            .update(values)
+            .eq("id", existingGlobal.id)
+            .select("*")
+            .single()
+        : await auth.supabase
+            .from("workspace_usage_controls")
+            .insert(values)
+            .select("*")
+            .single();
+    }
+
+    const { data, error } = result;
 
     if (error) {
       throw error;
@@ -56,9 +98,12 @@ export async function PATCH(request: Request) {
       action: "admin.usage_controls.updated",
       actorId: auth.user.id,
       metadata: {
+        agentLimit: data.agent_limit,
         connectorLimit: data.connector_limit,
+        monthlyTokenLimit: data.monthly_token_limit,
         monthlyRunLimit: data.monthly_run_limit,
         requireWriteApprovals: data.require_write_approvals,
+        storageLimitGb: data.storage_limit_gb,
         usageAlertThreshold: data.usage_alert_threshold,
       },
       request,

@@ -135,6 +135,49 @@ export async function POST(request: Request, context: RouteContext) {
       return badRequest("Agent name is required");
     }
 
+    const [
+      { count: currentAgentCount, error: countError },
+      { data: usageControls, error: usageControlsError },
+    ] = await Promise.all([
+      auth.admin
+        .from("workflow_agents")
+        .select("*", { count: "exact", head: true })
+        .eq("workspace_id", workspaceId)
+        .is("deleted_at", null),
+      auth.admin
+        .from("workspace_usage_controls")
+        .select("*")
+        .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`),
+    ]);
+
+    if (countError || usageControlsError) {
+      throw countError ?? usageControlsError;
+    }
+
+    const workspaceControls =
+      (usageControls ?? []).find((control) => control.workspace_id === workspaceId) ??
+      {};
+    const globalControls =
+      (usageControls ?? []).find((control) => !control.workspace_id) ?? {};
+    const enforceLimits =
+      typeof workspaceControls.enforce_workspace_limits === "boolean"
+        ? workspaceControls.enforce_workspace_limits
+        : typeof globalControls.enforce_workspace_limits === "boolean"
+          ? globalControls.enforce_workspace_limits
+          : true;
+    const agentLimit = Number(
+      workspaceControls.agent_limit ?? globalControls.agent_limit ?? 25,
+    );
+
+    if (
+      enforceLimits &&
+      Number.isFinite(agentLimit) &&
+      agentLimit > 0 &&
+      (currentAgentCount ?? 0) >= agentLimit
+    ) {
+      return badRequest(`This workspace has reached its ${agentLimit} agent limit.`);
+    }
+
     const { data, error } = await auth.admin
       .from("workflow_agents")
       .insert({

@@ -25,17 +25,21 @@ export async function GET() {
       dataClient.from("workspaces").select("*", { count: "exact", head: true }).is("deleted_at", null),
       dataClient.from("profiles").select("*", { count: "exact", head: true }),
       dataClient.from("waitlist_requests").select("*", { count: "exact", head: true }).eq("status", "pending"),
-      dataClient.from("usage_events").select("*").order("created_at", { ascending: false }).limit(200),
+      dataClient
+        .from("usage_events")
+        .select("*, profiles:profiles!usage_events_user_id_fkey(full_name, email), workspaces(name, slug)")
+        .order("created_at", { ascending: false })
+        .limit(1000),
       dataClient
         .from("admin_audit_logs")
-        .select("*, profiles:profiles!admin_audit_logs_actor_id_fkey(full_name, email)")
+        .select("*, profiles:profiles!admin_audit_logs_actor_id_fkey(full_name, email), workspaces(name, slug)")
         .order("created_at", { ascending: false })
-        .limit(500),
+        .limit(1000),
       dataClient
         .from("session_logs")
-        .select("*, profiles:profiles!session_logs_user_id_fkey(full_name, email)")
+        .select("*, profiles:profiles!session_logs_user_id_fkey(full_name, email), workspaces(name, slug)")
         .order("created_at", { ascending: false })
-        .limit(500),
+        .limit(1000),
       dataClient
         .from("chat_messages")
         .select("id, role, metadata, created_at")
@@ -43,7 +47,7 @@ export async function GET() {
         .limit(1000),
       dataClient
         .from("ai_model_runs")
-        .select("status, latency_ms, input_tokens, output_tokens, provider_key, model_key, created_at")
+        .select("*, profiles:profiles!ai_model_runs_user_id_fkey(full_name, email), workspaces(name, slug)")
         .order("created_at", { ascending: false })
         .limit(1000),
     ]);
@@ -161,7 +165,9 @@ export async function GET() {
         successRate,
       },
       auditLogs,
+      modelRunLogs: modelRuns,
       sessionLogs,
+      usageLogs: usageEvents,
     });
   } catch (error) {
     return serverError(error);

@@ -24,6 +24,7 @@ import {
   CheckIcon,
   ClipboardCopyIcon,
   CodeIcon,
+  Copy01Icon,
   CopyLinkIcon,
   CreditCardIcon,
   DatabaseIcon,
@@ -51,6 +52,7 @@ import {
   PlugIcon,
   PlusSignIcon,
   QuoteUpIcon,
+  RefreshIcon,
   SaveIcon,
   Search01Icon,
   SendHorizontal,
@@ -62,6 +64,8 @@ import {
   TextBoldIcon,
   TextItalicIcon,
   TextNumberSignIcon,
+  ThumbsDownIcon,
+  ThumbsUpIcon,
   Unlink01Icon,
   UserAdd01Icon,
   UserRound,
@@ -142,6 +146,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import {
   Sheet,
   SheetDescription,
@@ -252,10 +257,12 @@ type Agent = {
   id?: string;
   appLogos: string[];
   gradient: string;
+  modelKey: string;
   name: string;
   runtime: "paused" | "running";
   schedule?: string | null;
   status: string;
+  tokenUsage: number;
   tone: "info" | "outline" | "success" | "warning";
   workflowCards?: PlaygroundCard[];
   workflowConnections?: PlaygroundConnection[];
@@ -275,6 +282,7 @@ type PlaygroundCard = {
   apps: string[];
   chatId?: string;
   id: string;
+  modelKey: string;
   runtime: "paused" | "running";
   title: string;
   x: number;
@@ -621,10 +629,11 @@ type AdminLogRow = {
   detail: string;
   event: string;
   sortTime: string;
-  source: "Activity" | "Session";
+  source: "AI" | "Activity" | "Session" | "Usage";
   status: string;
   time: string;
   user: string;
+  workspace: string;
 };
 type AdminUserRow = [string, string, string, string, string, string, string];
 type AdminRoleRow = [string, string, string];
@@ -765,11 +774,23 @@ function mapAdminRequest(row: unknown): AdminRequestRow | null {
   };
 }
 
-function mapAdminLog(row: unknown, source: "Activity" | "Session"): AdminLogRow | null {
+function mapAdminLog(
+  row: unknown,
+  source: AdminLogRow["source"],
+): AdminLogRow | null {
   const record = asRecord(row);
   const profile = getRecordByKey(record, "profiles");
+  const workspace = getRecordByKey(record, "workspaces");
   const createdAt = asString(record.created_at);
   const metadata = asRecord(record.metadata);
+  const user = asString(
+    profile.full_name,
+    asString(profile.email, asString(metadata.email, "System")),
+  );
+  const workspaceName = asString(
+    workspace.name,
+    asString(metadata.workspaceName, "All workspaces"),
+  );
 
   if (source === "Session") {
     return {
@@ -783,10 +804,52 @@ function mapAdminLog(row: unknown, source: "Activity" | "Session"): AdminLogRow 
       source,
       status: formatStatusLabel(asString(record.event, "Active")),
       time: formatDateTimeLabel(createdAt) || "",
-      user: asString(
-        profile.full_name,
-        asString(profile.email, asString(metadata.email, "Unknown user")),
-      ),
+      user,
+      workspace: workspaceName,
+    };
+  }
+
+  if (source === "Usage") {
+    const resource = asString(record.resource, "usage");
+    const quantity = asNumber(record.quantity);
+
+    return {
+      detail: formatAdminLogDetail({
+        fallback: `${quantity.toLocaleString()} ${resource}`,
+        metadata,
+        primary: `${quantity.toLocaleString()} ${resource}`,
+      }),
+      event: `usage.${resource}`,
+      sortTime: createdAt,
+      source,
+      status: "Recorded",
+      time: formatDateTimeLabel(createdAt) || "",
+      user,
+      workspace: workspaceName,
+    };
+  }
+
+  if (source === "AI") {
+    const inputTokens = asNumber(record.input_tokens);
+    const outputTokens = asNumber(record.output_tokens);
+    const totalTokens = inputTokens + outputTokens;
+
+    return {
+      detail: [
+        asString(record.provider_key),
+        asString(record.model_key),
+        totalTokens > 0 ? `${totalTokens.toLocaleString()} tokens` : "",
+        asString(record.error),
+      ]
+        .filter(Boolean)
+        .join(" / "),
+      event: `ai.model.${asString(record.status, "run")}`,
+      sortTime: createdAt,
+      source,
+      status: formatStatusLabel(asString(record.status, "Recorded")),
+      time: formatDateTimeLabel(createdAt) || "",
+      user,
+      workspace: workspaceName,
     };
   }
 
@@ -803,7 +866,8 @@ function mapAdminLog(row: unknown, source: "Activity" | "Session"): AdminLogRow 
     source,
     status: "Recorded",
     time: formatDateTimeLabel(createdAt) || "",
-    user: asString(profile.full_name, asString(profile.email, "System")),
+    user,
+    workspace: workspaceName,
   };
 }
 
@@ -1003,6 +1067,21 @@ const setupModelOptions = [
   },
 ] satisfies ChatModelOption[];
 
+function getChatModelOption(modelKey?: string | null): ChatModelOption {
+  const key = modelKey || "atmet";
+
+  return (
+    modelOptions.find((model) => model.id === key) ??
+    setupModelOptions.find((model) => model.id === key) ?? {
+      description: "Workspace model",
+      icon: AiChatIcon,
+      id: key,
+      name: key,
+      providerKey: "custom",
+    }
+  );
+}
+
 type ComposerOption = {
   id: string;
   kind: "apps" | "skills";
@@ -1131,10 +1210,12 @@ type NotificationItem = {
 };
 
 type UsageData = {
+  agentLimit: number;
   automations: number;
   chats: number;
   files: number;
   storage: number;
+  storageLimit: number;
   tokenLimit: number;
   tokens: number;
   userLimits: DatabaseRecord[];
@@ -1580,6 +1661,8 @@ function mapAgent(row: unknown, index: number): Agent | null {
   }
 
   const status = asString(record.status, "Draft");
+  const settings = asRecord(record.settings);
+  const modelKey = asString(settings.modelKey, "atmet");
   const nodeRows = asRecordArray(record.workflow_nodes);
   const edgeRows = asRecordArray(record.workflow_edges);
   const appLogos = normalizeAppLogoKeys(nodeRows
@@ -1600,6 +1683,7 @@ function mapAgent(row: unknown, index: number): Agent | null {
       }
 
       const title = asString(node.title, "Empty chat");
+      const config = asRecord(node.config);
       const appKeys = getAgentNodeAppLogoKeys(
         title,
         Array.isArray(node.app_keys)
@@ -1615,6 +1699,7 @@ function mapAgent(row: unknown, index: number): Agent | null {
             : ["AT"],
         ...(sourceChatId ? { chatId: sourceChatId } : {}),
         id: nodeId,
+        modelKey: asString(config.modelKey, modelKey),
         runtime: mapRuntime(node.runtime_state),
         title,
         x: asNumber(node.position_x, 72 + nodeIndex * 44),
@@ -1642,10 +1727,12 @@ function mapAgent(row: unknown, index: number): Agent | null {
       skillGradientOptions[index % skillGradientOptions.length],
     ),
     id,
+    modelKey,
     name,
     runtime: mapRuntime(record.runtime_state ?? record.runtime),
     schedule: asString(record.schedule) || null,
     status,
+    tokenUsage: asNumber(record.token_usage),
     tone: mapTone(status),
     workflowCards,
     workflowConnections,
@@ -1711,10 +1798,12 @@ function mapUsage(value: unknown, chatsCount: number, agentsCount: number): Usag
   const record = asRecord(value);
   const totals = asRecord(record.totals);
   return {
+    agentLimit: asNumber(totals.agent_limit, 25),
     automations: asNumber(totals.automation_runs, agentsCount),
     chats: asNumber(totals.chats, chatsCount),
     files: asNumber(totals.files),
     storage: asNumber(totals.storage_gb),
+    storageLimit: asNumber(totals.storage_limit_gb, 25),
     tokenLimit: asNumber(totals.token_limit, 50000),
     tokens: asNumber(totals.tokens),
     userLimits: asRecordArray(record.userLimits),
@@ -2301,10 +2390,12 @@ export default function Home() {
         appLogos: [getInitialsFromText(name)],
         gradient:
           "from-stone-100 via-stone-50 to-emerald-100 dark:from-stone-900 dark:via-stone-950 dark:to-emerald-950/40",
+        modelKey: "atmet",
         name,
         runtime: "paused",
         schedule: null,
         status: "Draft",
+        tokenUsage: 0,
         tone: "warning",
       },
     ]);
@@ -2572,6 +2663,7 @@ export default function Home() {
                         apps: appKeys.length > 0 ? appKeys : ["AT"],
                         chatId: chat.id,
                         id: nodeId,
+                        modelKey: agent.modelKey,
                         runtime: mapRuntime(node.runtime_state),
                         title,
                         x: asNumber(node.position_x, 120),
@@ -2906,6 +2998,7 @@ export default function Home() {
               activeChatId={activePage === "chat" ? activeSidebarChatId : null}
               chats={sidebarChats}
               onDeleteChat={deleteSidebarChat}
+              onJumpToAgentWorkflow={openAgentPlayground}
               onOpenChange={setChatHistoryOpen}
               onOpenChat={openSidebarChat}
               onRenameChat={renameSidebarChat}
@@ -3043,7 +3136,9 @@ export default function Home() {
                   workspaceId={activeWorkspaceId}
                 />
               )}
-              {activePage === "usage" && <UsagePage usage={usageData} />}
+              {activePage === "usage" && (
+                <UsagePage usage={usageData} workspaceId={activeWorkspaceId} />
+              )}
               {activePage === "changelogs" && (
                 <EmptyPage
                   description={pageDescriptions.changelogs}
@@ -3839,8 +3934,6 @@ function AgentWorkflowChoice({
             )}
           />
           {running ? "Running" : "Paused"}
-          <span className="text-muted-foreground/45">/</span>
-          {agent.status}
         </span>
       </span>
       <Icon
@@ -4260,6 +4353,7 @@ function SidebarChatHistory({
   activeChatId,
   chats,
   onDeleteChat,
+  onJumpToAgentWorkflow,
   onOpenChange,
   onOpenChat,
   onRenameChat,
@@ -4270,6 +4364,7 @@ function SidebarChatHistory({
   activeChatId: string | null;
   chats: SidebarChat[];
   onDeleteChat: (chatId: string) => void;
+  onJumpToAgentWorkflow: (agentName: string) => void;
   onOpenChange: (open: boolean) => void;
   onOpenChat: (chatId: string) => void;
   onRenameChat: (chatId: string) => void;
@@ -4336,6 +4431,19 @@ function SidebarChatHistory({
                       <Icon className="size-3.5" icon={MoreHorizontalIcon} />
                     </MenuTrigger>
                     <MenuPopup align="end" className="min-w-36" sideOffset={6}>
+                      {workflowMeta ? (
+                        <>
+                          <MenuItem
+                            onClick={() =>
+                              onJumpToAgentWorkflow(workflowMeta.agentName)
+                            }
+                          >
+                            <Icon icon={ArrowRight01Icon} />
+                            Jump to agent
+                          </MenuItem>
+                          <MenuSeparator />
+                        </>
+                      ) : null}
                       <MenuItem onClick={() => onTogglePin(chat.id)}>
                         <Icon icon={chat.pinned ? PinOffIcon : PinIcon} />
                         {chat.pinned ? "Unpin" : "Pin"}
@@ -6192,7 +6300,7 @@ function MessageActionBar({
           onClick={() => onEdit?.(message)}
           type="button"
         >
-          <EditMessageGlyph className="size-4" />
+          <Icon className="size-4" icon={PencilEdit02Icon} />
         </button>
       ) : null}
       <button
@@ -6201,7 +6309,7 @@ function MessageActionBar({
         onClick={() => onRegenerate?.(message)}
         type="button"
       >
-        <RegenerateGlyph className="size-4" />
+        <Icon className="size-4" icon={RefreshIcon} />
       </button>
       <button
         aria-label="Like"
@@ -6214,7 +6322,7 @@ function MessageActionBar({
         onClick={() => onFeedback?.(message, "like")}
         type="button"
       >
-        <LikeGlyph className="size-4" />
+        <Icon className="size-4" icon={ThumbsUpIcon} />
       </button>
       <button
         aria-label="Dislike"
@@ -6227,7 +6335,7 @@ function MessageActionBar({
         onClick={() => onFeedback?.(message, "dislike")}
         type="button"
       >
-        <DislikeGlyph className="size-4" />
+        <Icon className="size-4" icon={ThumbsDownIcon} />
       </button>
       <button
         aria-label="Copy"
@@ -6235,81 +6343,9 @@ function MessageActionBar({
         onClick={() => onCopy?.(message)}
         type="button"
       >
-        <CopyMessageGlyph className="size-4" />
+        <Icon className="size-4" icon={Copy01Icon} />
       </button>
     </div>
-  );
-}
-
-function MessageGlyph({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.85"
-      viewBox="0 0 24 24"
-    >
-      {children}
-    </svg>
-  );
-}
-
-function EditMessageGlyph({ className }: { className?: string }) {
-  return (
-    <MessageGlyph className={className}>
-      <path d="M5 19h4.5L18 10.5a2.1 2.1 0 0 0-3-3L6.5 16 5 19Z" />
-      <path d="m13.5 9 1.5 1.5" />
-    </MessageGlyph>
-  );
-}
-
-function RegenerateGlyph({ className }: { className?: string }) {
-  return (
-    <MessageGlyph className={className}>
-      <path d="M19 7v5h-5" />
-      <path d="M5 17v-5h5" />
-      <path d="M18 12a6 6 0 0 0-10.2-4.2L5 10" />
-      <path d="M6 12a6 6 0 0 0 10.2 4.2L19 14" />
-    </MessageGlyph>
-  );
-}
-
-function LikeGlyph({ className }: { className?: string }) {
-  return (
-    <MessageGlyph className={className}>
-      <path d="M7 10v9" />
-      <path d="M7 18.5H5.5A2.5 2.5 0 0 1 3 16v-3.5A2.5 2.5 0 0 1 5.5 10H7" />
-      <path d="M7 10l4.2-5.2a1.5 1.5 0 0 1 2.6 1.2L13 10h4.6a2 2 0 0 1 2 2.3l-.7 4.5a2.5 2.5 0 0 1-2.5 2.2H7" />
-    </MessageGlyph>
-  );
-}
-
-function DislikeGlyph({ className }: { className?: string }) {
-  return (
-    <MessageGlyph className={className}>
-      <path d="M17 14V5" />
-      <path d="M17 5.5h1.5A2.5 2.5 0 0 1 21 8v3.5a2.5 2.5 0 0 1-2.5 2.5H17" />
-      <path d="m17 14-4.2 5.2a1.5 1.5 0 0 1-2.6-1.2L11 14H6.4a2 2 0 0 1-2-2.3l.7-4.5A2.5 2.5 0 0 1 7.6 5H17" />
-    </MessageGlyph>
-  );
-}
-
-function CopyMessageGlyph({ className }: { className?: string }) {
-  return (
-    <MessageGlyph className={className}>
-      <rect height="11" rx="2" width="11" x="8" y="5" />
-      <path d="M5 8v9a2 2 0 0 0 2 2h9" />
-    </MessageGlyph>
   );
 }
 
@@ -7579,7 +7615,7 @@ function placeCaretAtEnd(element: HTMLElement | null) {
   selection?.addRange(range);
 }
 
-type AgentFilter = "active" | "all" | "beta" | "draft" | "paused" | "running";
+type AgentFilter = "all" | "paused" | "running";
 
 function AgentsPage({
   agents,
@@ -7615,16 +7651,13 @@ function AgentsPage({
     ? agents.find((agent) => agent.name === selectedAgentName) ?? null
     : null;
   const visibleAgents = agents.filter((agent) => {
-    const normalizedStatus = agent.status.toLowerCase();
     const matchesFilter =
       agentFilter === "all" ||
-      agent.runtime === agentFilter ||
-      normalizedStatus === agentFilter;
+      agent.runtime === agentFilter;
     const search = agentSearch.trim().toLowerCase();
     const matchesSearch =
       !search ||
       agent.name.toLowerCase().includes(search) ||
-      agent.status.toLowerCase().includes(search) ||
       agent.appLogos.some((logo) => logo.toLowerCase().includes(search));
 
     return matchesFilter && matchesSearch;
@@ -7703,11 +7736,11 @@ function AgentsPage({
                 <AgentLogoStack logos={agent.appLogos} />
               </CardPanel>
               <CardPanel className="border-t border-border p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <CardTitle>{agent.name}</CardTitle>
-                  <Badge variant={agent.tone}>{agent.status}</Badge>
-                </div>
-                <AgentRuntimeStatus runtime={agent.runtime} />
+                <CardTitle>{agent.name}</CardTitle>
+                <AgentRuntimeStatus
+                  runtime={agent.runtime}
+                  tokenUsage={agent.tokenUsage}
+                />
               </CardPanel>
             </button>
           </Card>
@@ -7725,10 +7758,7 @@ function AgentFilterMenu({
   onFilterChange: (filter: AgentFilter) => void;
 }) {
   const labels = {
-    active: "Active",
     all: "All agents",
-    beta: "Beta",
-    draft: "Draft",
     paused: "Paused",
     running: "Running",
   } satisfies Record<AgentFilter, string>;
@@ -7747,9 +7777,7 @@ function AgentFilterMenu({
         }
       />
       <MenuPopup align="end" className="min-w-40" sideOffset={8}>
-        {(
-          ["all", "running", "paused", "active", "draft", "beta"] satisfies AgentFilter[]
-        ).map((value) => (
+        {(["all", "running", "paused"] satisfies AgentFilter[]).map((value) => (
           <MenuItem key={value} onClick={() => onFilterChange(value)}>
             <Icon
               className={cn(filter === value ? "opacity-100" : "opacity-0")}
@@ -7873,25 +7901,40 @@ function AgentAppLogo({
 
 function AgentRuntimeStatus({
   runtime,
+  tokenUsage = 0,
 }: {
   runtime: "paused" | "running";
+  tokenUsage?: number;
 }) {
   const running = runtime === "running";
 
   return (
-    <div
-      className={cn(
-        "mt-3 inline-flex items-center gap-1.5 text-xs font-medium",
-        running ? "text-success-foreground" : "text-muted-foreground",
-      )}
-    >
-      <Icon
-        className="size-3.5"
-        icon={running ? PlayIcon : PauseCircleIcon}
-      />
-      {running ? "Running" : "Paused"}
+    <div className="mt-3 grid gap-1">
+      <div
+        className={cn(
+          "inline-flex items-center gap-1.5 text-xs font-medium",
+          running ? "text-success-foreground" : "text-muted-foreground",
+        )}
+      >
+        <Icon
+          className="size-3.5"
+          icon={running ? PlayIcon : PauseCircleIcon}
+        />
+        {running ? "Running" : "Paused"}
+      </div>
+      <p className="text-xs leading-none text-muted-foreground">
+        {formatTokenUsage(tokenUsage)} tokens this month
+      </p>
     </div>
   );
+}
+
+function formatTokenUsage(value: number) {
+  return new Intl.NumberFormat("en", {
+    compactDisplay: "short",
+    maximumFractionDigits: value >= 1000 ? 1 : 0,
+    notation: value >= 1000 ? "compact" : "standard",
+  }).format(Math.max(0, Math.round(value)));
 }
 
 function clearRunTimeouts(ref: React.MutableRefObject<number[]>) {
@@ -8006,6 +8049,7 @@ function AgentPlayground({
         : ["AT"],
       chatId: node.chatId,
       id: getWorkflowChatCardId(node.chatId),
+      modelKey: agent.modelKey,
       runtime: "paused" as const,
       title: node.title,
       x: 72 + index * 44,
@@ -8291,6 +8335,7 @@ function AgentPlayground({
         apps: [],
         chatId: workflowNode?.chatId,
         id,
+        modelKey: agent.modelKey,
         runtime: "paused",
         title: workflowNode?.title ?? title,
         ...position,
@@ -8471,8 +8516,10 @@ function AgentPlayground({
           <h1 className="mt-2 truncate text-lg font-semibold">{agent.name}</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={agent.tone}>{agent.status}</Badge>
-          <AgentRuntimeStatus runtime={agentRunning ? "running" : "paused"} />
+          <AgentRuntimeStatus
+            runtime={agentRunning ? "running" : "paused"}
+            tokenUsage={agent.tokenUsage}
+          />
           <Button
             disabled={isWorkflowRunPending}
             onClick={() => {
@@ -8751,7 +8798,11 @@ function AgentNodeChatSheet({
 }) {
   return (
     <Sheet onOpenChange={onOpenChange} open={open}>
-      <SheetPopup className="sm:max-w-2xl" side="right" variant="inset">
+      <SheetPopup
+        className="bg-background sm:max-w-2xl dark:border-white/10 dark:bg-[#211f1d]"
+        side="right"
+        variant="inset"
+      >
         <div className="flex min-h-0 flex-1 flex-col p-4 pt-12">
           <ChatExperience
             activeChatId={card?.chatId ?? null}
@@ -9185,6 +9236,7 @@ function AgentChatCard({
             runState={runState}
             runtime={card.runtime}
           />
+          <AgentNodeModelBadge modelKey={card.modelKey} />
         </div>
         <button
           aria-label={`Open ${card.title} chat`}
@@ -9208,6 +9260,17 @@ function AgentChatCard({
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+function AgentNodeModelBadge({ modelKey }: { modelKey: string }) {
+  const model = getChatModelOption(modelKey);
+
+  return (
+    <div className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-md border border-black/8 bg-muted/55 px-1.5 py-1 text-[0.68rem] font-medium leading-none text-muted-foreground dark:border-white/8 dark:bg-white/[0.045]">
+      <ChatModelMark className="size-3.5" model={model} />
+      <span className="truncate">{model.name}</span>
     </div>
   );
 }
@@ -10333,63 +10396,167 @@ const usageChartBarClasses = [
   "bg-rose-500",
 ] as const;
 
-function UsagePage({ usage }: { usage: UsageData | null }) {
+function UsagePage({
+  usage,
+  workspaceId,
+}: {
+  usage: UsageData | null;
+  workspaceId: string | null;
+}) {
   const [period, setPeriod] = useState<UsagePeriod>("month");
   const [scope, setScope] = useState<UsageScope>("my");
-  const tokenLimit = usage?.tokenLimit ?? 0;
-  const [tokenCap, setTokenCap] = useState(String(tokenLimit || ""));
-  const [savedTokenCap, setSavedTokenCap] = useState(String(tokenLimit || ""));
-  const [refreshedAt, setRefreshedAt] = useState("10:42");
-  const limitsChanged = tokenCap !== savedTokenCap;
-  const tokenPercent = tokenLimit > 0 ? Math.min(100, ((usage?.tokens ?? 0) / tokenLimit) * 100) : 0;
+  const [liveUsage, setLiveUsage] = useState<UsageData | null>(usage);
+  const [isRefreshingUsage, setIsRefreshingUsage] = useState(false);
+  const [refreshedAt, setRefreshedAt] = useState(() =>
+    new Date().toLocaleTimeString("en", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+  );
+  const currentUsage = liveUsage ?? usage;
+  const tokenLimit = currentUsage?.tokenLimit ?? 0;
+  const storageLimit = currentUsage?.storageLimit ?? 0;
+  const agentLimit = currentUsage?.agentLimit ?? 0;
+  const tokenPercent = tokenLimit > 0 ? Math.min(100, ((currentUsage?.tokens ?? 0) / tokenLimit) * 100) : 0;
+  const storagePercent = storageLimit > 0 ? Math.min(100, ((currentUsage?.storage ?? 0) / storageLimit) * 100) : 0;
+  const agentPercent = agentLimit > 0 ? Math.min(100, ((currentUsage?.automations ?? 0) / agentLimit) * 100) : 0;
   const metricRows = [
-    { label: "Tokens", value: `${(usage?.tokens ?? 0).toLocaleString()} / ${tokenLimit.toLocaleString()}` },
-    { label: "Files", value: `${(usage?.files ?? 0).toLocaleString()}` },
-    { label: "Storage", value: `${usage?.storage ?? 0}GB` },
-    { label: "Automations", value: `${usage?.automations ?? 0}` },
-    { label: "Chats", value: `${usage?.chats ?? 0}` },
+    { label: "Tokens", value: `${(currentUsage?.tokens ?? 0).toLocaleString()} / ${tokenLimit.toLocaleString()}` },
+    { label: "Files", value: `${(currentUsage?.files ?? 0).toLocaleString()}` },
+    { label: "Storage", value: `${currentUsage?.storage ?? 0}GB` },
+    { label: "Automations", value: `${currentUsage?.automations ?? 0}` },
+    { label: "Chats", value: `${currentUsage?.chats ?? 0}` },
   ];
   const resourceRows = [
     {
       limit: tokenLimit.toLocaleString(),
+      limitValue: tokenLimit,
       percent: tokenPercent,
       resource: "Tokens",
-      usage: (usage?.tokens ?? 0).toLocaleString(),
+      usage: (currentUsage?.tokens ?? 0).toLocaleString(),
+      usageValue: currentUsage?.tokens ?? 0,
     },
     {
       limit: "No file upload limit set",
+      limitValue: null,
       percent: 0,
       resource: "Files",
-      usage: (usage?.files ?? 0).toLocaleString(),
+      usage: (currentUsage?.files ?? 0).toLocaleString(),
+      usageValue: currentUsage?.files ?? 0,
     },
     {
-      limit: "No storage limit set",
-      percent: 0,
+      limit: storageLimit > 0 ? `${storageLimit.toLocaleString()} GB` : "No storage limit set",
+      limitValue: storageLimit > 0 ? storageLimit : null,
+      percent: storagePercent,
       resource: "Storage",
-      usage: `${usage?.storage ?? 0} GB`,
+      usage: `${currentUsage?.storage ?? 0} GB`,
+      usageValue: currentUsage?.storage ?? 0,
+    },
+    {
+      limit: agentLimit > 0 ? `${agentLimit.toLocaleString()} agents` : "No agent limit set",
+      limitValue: agentLimit > 0 ? agentLimit : null,
+      percent: agentPercent,
+      resource: "Workflow agents",
+      usage: (currentUsage?.automations ?? 0).toLocaleString(),
+      usageValue: currentUsage?.automations ?? 0,
     },
   ];
   const chartGroups = [
     {
       bars: [
-        { className: usageChartBarClasses[0], striped: true, value: Math.max(1, tokenPercent) },
-        { className: usageChartBarClasses[1], value: Math.max(1, tokenPercent) },
+        {
+          className: usageChartBarClasses[0],
+          detail: tokenLimit > 0
+            ? `${(currentUsage?.tokens ?? 0).toLocaleString()} of ${tokenLimit.toLocaleString()} tokens`
+            : `${(currentUsage?.tokens ?? 0).toLocaleString()} tokens used`,
+          name: "Token usage",
+          percent: tokenPercent,
+          striped: true,
+          value: Math.max(1, tokenPercent),
+        },
+        {
+          className: usageChartBarClasses[1],
+          detail: tokenLimit > 0
+            ? `${Math.round(tokenPercent)}% of monthly limit`
+            : "No token limit set",
+          name: "Token limit share",
+          percent: tokenPercent,
+          value: Math.max(1, tokenPercent),
+        },
       ],
       label: "Tokens",
     },
     {
-      bars: [{ className: usageChartBarClasses[2], value: Math.max(1, usage?.files ?? 0) }],
+      bars: [{
+        className: usageChartBarClasses[2],
+        detail: `${(currentUsage?.files ?? 0).toLocaleString()} uploaded files`,
+        name: "Files",
+        value: Math.max(1, currentUsage?.files ?? 0),
+      }],
       label: "Files",
     },
     {
-      bars: [{ className: usageChartBarClasses[3], value: Math.max(1, usage?.automations ?? 0) }],
+      bars: [{
+        className: usageChartBarClasses[3],
+        detail: agentLimit > 0
+          ? `${(currentUsage?.automations ?? 0).toLocaleString()} of ${agentLimit.toLocaleString()} agents`
+          : `${(currentUsage?.automations ?? 0).toLocaleString()} agents`,
+        name: "Workflow agents",
+        percent: agentPercent,
+        value: Math.max(1, currentUsage?.automations ?? 0),
+      }],
       label: "Automations",
     },
     {
-      bars: [{ className: usageChartBarClasses[4], value: Math.max(1, usage?.chats ?? 0) }],
+      bars: [{
+        className: usageChartBarClasses[4],
+        detail: `${(currentUsage?.chats ?? 0).toLocaleString()} chats in this period`,
+        name: "Chats",
+        value: Math.max(1, currentUsage?.chats ?? 0),
+      }],
       label: "Chats",
     },
   ];
+
+  async function refreshUsage() {
+    if (!workspaceId || isRefreshingUsage) {
+      return;
+    }
+
+    setIsRefreshingUsage(true);
+    try {
+      const params = new URLSearchParams({ period, scope });
+      const response = await fetch(
+        `/api/workspaces/${workspaceId}/usage?${params.toString()}`,
+        { cache: "no-store" },
+      );
+
+      if (!response.ok) {
+        throw new Error(await getResponseError(response, "Could not refresh usage"));
+      }
+
+      setLiveUsage(mapUsage(await response.json(), currentUsage?.chats ?? 0, currentUsage?.automations ?? 0));
+      setRefreshedAt(
+        new Date().toLocaleTimeString("en", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      );
+    } catch (error) {
+      void playAtmetSound("error");
+      window.alert(error instanceof Error ? error.message : "Could not refresh usage.");
+    } finally {
+      setIsRefreshingUsage(false);
+    }
+  }
+
+  useEffect(() => {
+    setLiveUsage(usage);
+  }, [usage]);
+
+  useEffect(() => {
+    void refreshUsage();
+  }, [period, scope, workspaceId]);
 
   return (
     <>
@@ -10429,7 +10596,8 @@ function UsagePage({ usage }: { usage: UsageData | null }) {
           />
           <Button
             className="active:scale-[0.96]"
-            onClick={() => setRefreshedAt("now")}
+            loading={isRefreshingUsage}
+            onClick={() => void refreshUsage()}
             size="sm"
             variant="outline"
           >
@@ -10445,14 +10613,12 @@ function UsagePage({ usage }: { usage: UsageData | null }) {
         ))}
       </div>
 
-      <UsageSnapshotCard chartGroups={chartGroups} refreshedAt={refreshedAt} />
+      <UsageSnapshotCard chartGroups={chartGroups} refreshedAt={refreshedAt} scope={scope} />
       <UsageResourcesTable resources={resourceRows} />
       <PerUserLimitsCard
-        limitsChanged={limitsChanged}
-        onSave={() => setSavedTokenCap(tokenCap)}
-        onTokenCapChange={setTokenCap}
-        tokenCap={tokenCap}
-        userLimits={usage?.userLimits ?? []}
+        onLimitsSaved={refreshUsage}
+        userLimits={currentUsage?.userLimits ?? []}
+        workspaceId={workspaceId}
       />
     </>
   );
@@ -10531,12 +10697,21 @@ function UsageMetricCard({
 function UsageSnapshotCard({
   chartGroups,
   refreshedAt,
+  scope,
 }: {
   chartGroups: {
-    bars: { className: string; striped?: boolean; value: number }[];
+    bars: {
+      className: string;
+      detail: string;
+      name: string;
+      percent?: number;
+      striped?: boolean;
+      value: number;
+    }[];
     label: string;
   }[];
   refreshedAt: string;
+  scope: UsageScope;
 }) {
   return (
     <CardFrame className="mt-4 overflow-hidden">
@@ -10544,7 +10719,9 @@ function UsageSnapshotCard({
         <CardFrameTitle>
           <span className="inline-flex items-center gap-2">
             Usage snapshot
-            <Badge variant="info">My usage</Badge>
+            <Badge variant="info">
+              {scope === "workspace" ? "Workspace usage" : "My usage"}
+            </Badge>
           </span>
         </CardFrameTitle>
         <CardFrameDescription>
@@ -10553,27 +10730,31 @@ function UsageSnapshotCard({
       </CardFrameHeader>
       <Card className="rounded-xl shadow-none before:hidden">
         <CardPanel className="p-4">
-          <div className="flex h-80 items-end justify-around gap-6">
+          <div className="flex min-h-80 items-stretch justify-around gap-6">
             {chartGroups.map((group) => (
               <div
-                className="flex h-full min-w-24 flex-1 flex-col justify-end gap-3"
+                className="flex min-h-80 min-w-24 flex-1 flex-col gap-3"
                 key={group.label}
               >
-                <div className="flex h-64 items-end justify-center gap-1.5">
+                <p className="text-center text-xs font-semibold text-foreground">
+                  {group.label}
+                </p>
+                <div className="flex min-h-64 flex-1 items-end justify-center gap-2">
                   {group.bars.map((bar, index) => (
                     <div
-                      className={cn(
-                        "w-16 min-w-1 rounded-t-md transition-[height,opacity]",
-                        bar.className,
-                      )}
+                      className="flex h-full min-w-16 flex-col items-center justify-end gap-2"
                       key={`${group.label}-${index}`}
-                      style={{
-                        backgroundImage: bar.striped
-                          ? "repeating-linear-gradient(135deg, rgba(14, 165, 233, 0.34) 0, rgba(14, 165, 233, 0.34) 2px, transparent 2px, transparent 6px)"
-                          : undefined,
-                        height: `${Math.max(bar.value, 1)}%`,
-                      }}
-                    />
+                    >
+                      <p className="min-h-8 max-w-24 text-center text-[0.68rem] font-medium leading-4 text-muted-foreground">
+                        {bar.name}
+                      </p>
+                      <div className="flex h-52 items-end">
+                        <UsageSnapshotBar
+                          bar={bar}
+                          groupLabel={group.label}
+                        />
+                      </div>
+                    </div>
                   ))}
                 </div>
                 <p className="text-center text-xs font-medium text-muted-foreground">
@@ -10588,18 +10769,70 @@ function UsageSnapshotCard({
   );
 }
 
+function UsageSnapshotBar({
+  bar,
+  groupLabel,
+}: {
+  bar: {
+    className: string;
+    detail: string;
+    name: string;
+    percent?: number;
+    striped?: boolean;
+    value: number;
+  };
+  groupLabel: string;
+}) {
+  const percentLabel =
+    typeof bar.percent === "number" ? `${Math.round(bar.percent)}%` : null;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            aria-label={`${groupLabel}: ${bar.detail}`}
+            className={cn(
+              "w-16 min-w-1 rounded-t-md outline-none transition-[height,opacity,scale,box-shadow] hover:scale-[1.03] focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]",
+              bar.className,
+            )}
+            style={{
+              backgroundImage: bar.striped
+                ? "repeating-linear-gradient(135deg, rgba(14, 165, 233, 0.34) 0, rgba(14, 165, 233, 0.34) 2px, transparent 2px, transparent 6px)"
+                : undefined,
+              height: `${Math.max(bar.value, 1)}%`,
+            }}
+            type="button"
+          />
+        }
+      />
+      <TooltipPopup className="max-w-56">
+        <div className="grid gap-1">
+          <p className="font-medium text-foreground">{bar.name}</p>
+          <p className="text-muted-foreground">{bar.detail}</p>
+          {percentLabel ? (
+            <p className="text-muted-foreground">{percentLabel}</p>
+          ) : null}
+        </div>
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
 function UsageResourcesTable({
   resources,
 }: {
   resources: {
     limit: string;
+    limitValue: number | null;
     percent: number;
     resource: string;
     usage: string;
+    usageValue: number;
   }[];
 }) {
   return (
-    <CardFrame className="mt-3 overflow-hidden">
+    <CardFrame className="mt-3 min-h-[22rem] overflow-hidden">
       <CardFrameHeader>
         <CardFrameTitle>Resource limits</CardFrameTitle>
         <CardFrameDescription>
@@ -10616,37 +10849,61 @@ function UsageResourcesTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {resources.map((resource) => (
-            <TableRow key={resource.resource}>
-              <TableCell className="font-medium">{resource.resource}</TableCell>
-              <TableCell>
-                <div className="max-w-80">
-                  <span className="tabular-nums text-muted-foreground">
-                    {resource.usage}
-                  </span>
-                  <UsageProgressBar percent={resource.percent} />
-                </div>
-              </TableCell>
-              <TableCell className="tabular-nums text-muted-foreground">
-                {resource.limit}
-              </TableCell>
-              <TableCell>
-                <Badge variant="success">Within limit</Badge>
-              </TableCell>
-            </TableRow>
-          ))}
+          {resources.map((resource) => {
+            const limitValue = resource.limitValue;
+            const hasLimit = typeof limitValue === "number" && limitValue > 0;
+            const exceeded = hasLimit && resource.usageValue > limitValue;
+
+            return (
+              <TableRow key={resource.resource}>
+                <TableCell className="font-medium">{resource.resource}</TableCell>
+                <TableCell>
+                  <div className="max-w-80">
+                    <span className="tabular-nums text-muted-foreground">
+                      {resource.usage}
+                    </span>
+                    <UsageProgressBar
+                      exceeded={exceeded}
+                      percent={resource.percent}
+                    />
+                  </div>
+                </TableCell>
+                <TableCell className="tabular-nums text-muted-foreground">
+                  {resource.limit}
+                </TableCell>
+                <TableCell>
+                  {hasLimit ? (
+                    <Badge variant={exceeded ? "destructive" : "success"}>
+                      {exceeded ? "Exceeded limit" : "Within limit"}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline">No limit</Badge>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </CardFrame>
   );
 }
 
-function UsageProgressBar({ percent }: { percent: number }) {
+function UsageProgressBar({
+  exceeded = false,
+  percent,
+}: {
+  exceeded?: boolean;
+  percent: number;
+}) {
   return (
     <Progress className="mt-2" max={100} value={percent}>
       <ProgressTrack>
         <ProgressIndicator
-          className="h-full rounded-full bg-sky-500"
+          className={cn(
+            "h-full rounded-full",
+            exceeded ? "bg-destructive" : "bg-sky-500",
+          )}
           style={{ width: `${Math.max(percent, 1)}%` }}
         />
       </ProgressTrack>
@@ -10655,20 +10912,79 @@ function UsageProgressBar({ percent }: { percent: number }) {
 }
 
 function PerUserLimitsCard({
-  limitsChanged,
-  onSave,
-  onTokenCapChange,
-  tokenCap,
+  onLimitsSaved,
   userLimits,
+  workspaceId,
 }: {
-  limitsChanged: boolean;
-  onSave: () => void;
-  onTokenCapChange: (value: string) => void;
-  tokenCap: string;
+  onLimitsSaved: () => void | Promise<void>;
   userLimits: DatabaseRecord[];
+  workspaceId: string | null;
 }) {
+  const [draftCaps, setDraftCaps] = useState<Record<string, string>>({});
+  const [savingLimits, setSavingLimits] = useState(false);
+
+  useEffect(() => {
+    setDraftCaps(
+      Object.fromEntries(
+        userLimits.map((limit) => {
+          const userId = asString(limit.user_id);
+          const cap = asNumber(limit.monthly_token_cap);
+          return [userId, cap > 0 ? String(cap) : ""];
+        }),
+      ),
+    );
+  }, [userLimits]);
+
+  const changedLimits = userLimits.filter((limit) => {
+    const userId = asString(limit.user_id);
+    const currentCap = asNumber(limit.monthly_token_cap);
+    const draftCap = draftCaps[userId] ?? "";
+    return draftCap !== (currentCap > 0 ? String(currentCap) : "");
+  });
+  const limitsChanged = changedLimits.length > 0;
+  const maxSliderCap = Math.max(
+    50000,
+    ...userLimits.flatMap((limit) => [
+      asNumber(limit.monthly_token_cap),
+      asNumber(limit.tokens_used),
+    ]),
+  );
+
+  async function saveLimits() {
+    if (!workspaceId || !limitsChanged || savingLimits) {
+      return;
+    }
+
+    setSavingLimits(true);
+    try {
+      await Promise.all(
+        changedLimits.map(async (limit) => {
+          const userId = asString(limit.user_id);
+          const response = await fetch(`/api/workspaces/${workspaceId}/usage`, {
+            body: JSON.stringify({
+              monthlyTokenCap: draftCaps[userId] ?? "",
+              userId,
+            }),
+            headers: { "Content-Type": "application/json" },
+            method: "PATCH",
+          });
+
+          if (!response.ok) {
+            throw new Error(await getResponseError(response, "Could not save usage limit"));
+          }
+        }),
+      );
+      await onLimitsSaved();
+    } catch (error) {
+      void playAtmetSound("error");
+      window.alert(error instanceof Error ? error.message : "Could not save limits.");
+    } finally {
+      setSavingLimits(false);
+    }
+  }
+
   return (
-    <CardFrame className="mt-3 overflow-hidden">
+    <CardFrame className="mt-3 min-h-[34rem] overflow-hidden">
       <CardFrameHeader>
         <CardFrameTitle>Per-user limits</CardFrameTitle>
         <CardFrameDescription>
@@ -10678,7 +10994,8 @@ function PerUserLimitsCard({
           <Button
             className="active:scale-[0.96]"
             disabled={!limitsChanged}
-            onClick={onSave}
+            loading={savingLimits}
+            onClick={() => void saveLimits()}
             size="sm"
           >
             <Icon icon={SaveIcon} />
@@ -10692,6 +11009,8 @@ function PerUserLimitsCard({
             <TableHead>User</TableHead>
             <TableHead>Role</TableHead>
             <TableHead>Tokens used</TableHead>
+            <TableHead>Files</TableHead>
+            <TableHead>Storage</TableHead>
             <TableHead className="text-right">Monthly token cap</TableHead>
           </TableRow>
         </TableHeader>
@@ -10702,6 +11021,8 @@ function PerUserLimitsCard({
             const avatarUrl = asString(profile.avatar_url);
             const monthlyCap = asNumber(limit.monthly_token_cap);
             const tokensUsed = asNumber(limit.tokens_used);
+            const filesUsed = asNumber(limit.files_used);
+            const storageGb = asNumber(limit.storage_gb);
 
             return (
               <TableRow key={asString(limit.user_id, name)}>
@@ -10724,25 +11045,106 @@ function PerUserLimitsCard({
                   <Badge variant="info">{asString(limit.role, "Member")}</Badge>
                 </TableCell>
                 <TableCell className="tabular-nums text-muted-foreground">
-                  {tokensUsed.toLocaleString()} / {monthlyCap.toLocaleString()}
+                  {tokensUsed.toLocaleString()}
+                  {monthlyCap > 0 ? ` / ${monthlyCap.toLocaleString()}` : ""}
+                </TableCell>
+                <TableCell className="tabular-nums text-muted-foreground">
+                  {filesUsed.toLocaleString()}
+                </TableCell>
+                <TableCell className="tabular-nums text-muted-foreground">
+                  {storageGb.toLocaleString()} GB
                 </TableCell>
                 <TableCell className="text-right">
-                  <Input
-                    aria-label="Monthly token cap"
-                    className="ml-auto w-40"
-                    min="0"
-                    onChange={(event) => onTokenCapChange(event.target.value)}
-                    size="sm"
-                    type="number"
-                    value={tokenCap}
+                  <UserTokenLimitSlider
+                    max={maxSliderCap}
+                    onChange={(value) =>
+                      setDraftCaps((current) => ({
+                        ...current,
+                        [asString(limit.user_id)]: value,
+                      }))
+                    }
+                    tokensUsed={tokensUsed}
+                    value={draftCaps[asString(limit.user_id)] ?? ""}
                   />
                 </TableCell>
               </TableRow>
             );
           })}
+          {userLimits.length === 0 ? (
+            <TableRow>
+              <TableCell
+                className="py-8 text-center text-muted-foreground"
+                colSpan={6}
+              >
+                No workspace members found.
+              </TableCell>
+            </TableRow>
+          ) : null}
         </TableBody>
       </Table>
     </CardFrame>
+  );
+}
+
+function UserTokenLimitSlider({
+  max,
+  onChange,
+  tokensUsed,
+  value,
+}: {
+  max: number;
+  onChange: (value: string) => void;
+  tokensUsed: number;
+  value: string;
+}) {
+  const parsedValue = Number.parseInt(value, 10);
+  const sliderMax = Math.max(max, parsedValue || 0, tokensUsed, 50000);
+  const sliderValue = Number.isFinite(parsedValue) && parsedValue > 0
+    ? Math.min(parsedValue, sliderMax)
+    : 0;
+  const exceeded = sliderValue > 0 && tokensUsed > sliderValue;
+
+  return (
+    <div className="ml-auto grid w-72 max-w-full gap-2 text-left">
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className={cn(
+            "text-xs tabular-nums",
+            exceeded ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {sliderValue > 0 ? `${sliderValue.toLocaleString()} tokens` : "Workspace default"}
+        </span>
+        {exceeded ? (
+          <Badge size="sm" variant="destructive">
+            Exceeded
+          </Badge>
+        ) : null}
+      </div>
+      <div className="grid grid-cols-[minmax(0,1fr)_7rem] items-center gap-2">
+        <Slider
+          aria-label="Monthly token cap"
+          max={sliderMax}
+          min={0}
+          onValueChange={(nextValue) => {
+            const next = Array.isArray(nextValue) ? nextValue[0] : nextValue;
+            onChange(next && next > 0 ? String(Math.round(next)) : "");
+          }}
+          step={1000}
+          value={[sliderValue]}
+        />
+        <Input
+          aria-label="Monthly token cap value"
+          className="h-8 text-xs tabular-nums"
+          min="0"
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Default"
+          size="sm"
+          type="number"
+          value={value}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -13230,7 +13632,15 @@ function AdminPage() {
             },
             activityLogs: asRecordArray(overview.auditLogs)
               .map((log) => mapAdminLog(log, "Activity"))
-              .filter((item): item is AdminLogRow => Boolean(item)),
+              .filter((item): item is AdminLogRow => Boolean(item))
+              .concat(
+                asRecordArray(overview.usageLogs)
+                  .map((log) => mapAdminLog(log, "Usage"))
+                  .filter((item): item is AdminLogRow => Boolean(item)),
+                asRecordArray(overview.modelRunLogs)
+                  .map((log) => mapAdminLog(log, "AI"))
+                  .filter((item): item is AdminLogRow => Boolean(item)),
+              ),
             requests: asRecordArray(requests.requests)
               .map(mapAdminRequest)
               .filter((item): item is AdminRequestRow => Boolean(item)),
@@ -13602,9 +14012,15 @@ function AdminLogsTable({
   rows: readonly AdminLogRow[];
   title: string;
 }) {
+  const defaultVisibleLogRows = 50;
   const [logFilter, setLogFilter] = useState("all");
   const [logSourceFilter, setLogSourceFilter] = useState("all");
+  const [logWorkspaceFilter, setLogWorkspaceFilter] = useState("all");
+  const [logUserFilter, setLogUserFilter] = useState("all");
+  const [logEventFilter, setLogEventFilter] = useState("all");
   const [logSearch, setLogSearch] = useState("");
+  const [logUserSearch, setLogUserSearch] = useState("");
+  const [visibleLogLimit, setVisibleLogLimit] = useState(defaultVisibleLogRows);
   const logFilterOptions = getTableFilterOptions(
     rows.map((row) => row.status),
     "All statuses",
@@ -13613,9 +14029,38 @@ function AdminLogsTable({
     rows.map((row) => row.source),
     "All types",
   );
+  const logWorkspaceFilterOptions = getTableTextFilterOptions(
+    rows.map((row) => row.workspace),
+    "All workspaces",
+  );
+  const logEventFilterOptions = getTableTextFilterOptions(
+    rows.map((row) => row.event),
+    "All events",
+  );
+  const logUserFilterOptions = getTableTextFilterOptions(
+    rows.map((row) => row.user),
+    "All users",
+  );
+  const searchedLogUserFilterOptions = logUserFilterOptions.filter((option) => {
+    if (option.value === "all") {
+      return true;
+    }
+
+    return matchesTableSearch([option.label], logUserSearch);
+  });
+  const selectedLogUserOption = logUserFilterOptions.find(
+    (option) => option.value === logUserFilter,
+  );
+  const visibleLogUserFilterOptions =
+    selectedLogUserOption &&
+    !searchedLogUserFilterOptions.some(
+      (option) => option.value === selectedLogUserOption.value,
+    )
+      ? [...searchedLogUserFilterOptions, selectedLogUserOption]
+      : searchedLogUserFilterOptions;
   const visibleRows = rows.filter((row) => {
     const matchesSearch = matchesTableSearch(
-      [row.time, row.source, row.user, row.event, row.detail, row.status],
+      [row.time, row.source, row.workspace, row.user, row.event, row.detail, row.status],
       logSearch,
     );
     const matchesFilter =
@@ -13623,16 +14068,54 @@ function AdminLogsTable({
     const matchesSource =
       logSourceFilter === "all" ||
       normalizeFilterValue(row.source) === logSourceFilter;
+    const matchesWorkspace =
+      logWorkspaceFilter === "all" ||
+      normalizeFilterValue(row.workspace) === logWorkspaceFilter;
+    const matchesUser =
+      logUserFilter === "all" ||
+      normalizeFilterValue(row.user) === logUserFilter;
+    const matchesEvent =
+      logEventFilter === "all" ||
+      normalizeFilterValue(row.event) === logEventFilter;
 
-    return matchesSearch && matchesFilter && matchesSource;
+    return (
+      matchesSearch &&
+      matchesFilter &&
+      matchesSource &&
+      matchesWorkspace &&
+      matchesUser &&
+      matchesEvent
+    );
   });
+  const displayedRows = visibleRows.slice(0, visibleLogLimit);
+  const canShowMoreLogs = visibleRows.length > displayedRows.length;
+  const activeFilterCount = [
+    logFilter,
+    logSourceFilter,
+    logWorkspaceFilter,
+    logUserFilter,
+    logEventFilter,
+  ].filter((value) => value !== "all").length + (logSearch.trim() ? 1 : 0);
+
+  useEffect(() => {
+    setVisibleLogLimit(defaultVisibleLogRows);
+  }, [
+    logEventFilter,
+    logFilter,
+    logSearch,
+    logSourceFilter,
+    logUserFilter,
+    logWorkspaceFilter,
+  ]);
+
   const exportVisibleLogs = () => {
     downloadCsv(
       `atmet-system-logs-${new Date().toISOString().slice(0, 10)}.csv`,
-      ["Time", "Type", "User", "Event", "Details", "Status"],
+      ["Time", "Type", "Workspace", "User", "Event", "Details", "Status"],
       visibleRows.map((row) => [
         row.time,
         row.source,
+        row.workspace,
         row.user,
         row.event,
         row.detail,
@@ -13658,31 +14141,92 @@ function AdminLogsTable({
       icon={File01Icon}
       title={title}
     >
-      <div className="border-b border-border/70 px-4 py-3">
-        <TableFilterControls
-          filterLabel="Filter logs"
-          filterOptions={logFilterOptions}
-          filterValue={logFilter}
-          filters={[
-            {
-              label: "Filter log type",
-              onChange: setLogSourceFilter,
-              options: logSourceFilterOptions,
-              value: logSourceFilter,
-            },
-          ]}
-          onFilterChange={setLogFilter}
-          onSearchChange={setLogSearch}
-          searchPlaceholder="Search logs..."
-          searchValue={logSearch}
-        />
+      <div className="grid gap-3 border-b border-border/70 px-4 py-3">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+          <Input
+            aria-label="Search logs"
+            className="lg:max-w-sm"
+            onChange={(event) => setLogSearch(event.target.value)}
+            placeholder="Search logs, details, users..."
+            size="sm"
+            value={logSearch}
+          />
+          <div className="flex flex-wrap gap-2">
+            <AdminLogsSelectFilter
+              label="Filter status"
+              onChange={setLogFilter}
+              options={logFilterOptions}
+              value={logFilter}
+            />
+            <AdminLogsSelectFilter
+              label="Filter type"
+              onChange={setLogSourceFilter}
+              options={logSourceFilterOptions}
+              value={logSourceFilter}
+            />
+            <AdminLogsSelectFilter
+              label="Filter workspace"
+              onChange={setLogWorkspaceFilter}
+              options={logWorkspaceFilterOptions}
+              value={logWorkspaceFilter}
+            />
+            <AdminLogsSelectFilter
+              label="Filter event"
+              onChange={setLogEventFilter}
+              options={logEventFilterOptions}
+              value={logEventFilter}
+            />
+          </div>
+        </div>
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              aria-label="Search users"
+              className="sm:w-56"
+              onChange={(event) => setLogUserSearch(event.target.value)}
+              placeholder="Search user..."
+              size="sm"
+              value={logUserSearch}
+            />
+            <AdminLogsSelectFilter
+              label="Filter user"
+              onChange={setLogUserFilter}
+              options={visibleLogUserFilterOptions}
+              value={logUserFilter}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span>
+              Showing {displayedRows.length} of {visibleRows.length} logs
+            </span>
+            {activeFilterCount > 0 ? (
+              <Button
+                onClick={() => {
+                  setLogFilter("all");
+                  setLogSourceFilter("all");
+                  setLogWorkspaceFilter("all");
+                  setLogUserFilter("all");
+                  setLogEventFilter("all");
+                  setLogSearch("");
+                  setLogUserSearch("");
+                }}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Clear filters
+              </Button>
+            ) : null}
+          </div>
+        </div>
       </div>
       <div className={tableViewportClassName}>
-        <Table className="min-w-[920px]">
+        <Table className="min-w-[1080px]">
           <TableHeader>
             <TableRow>
               <TableHead>Time</TableHead>
               <TableHead>Type</TableHead>
+              <TableHead>Workspace</TableHead>
               <TableHead>User</TableHead>
               <TableHead>Event</TableHead>
               <TableHead>Details</TableHead>
@@ -13690,15 +14234,16 @@ function AdminLogsTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {visibleRows.length > 0 ? (
-              visibleRows.map((row) => (
+            {displayedRows.length > 0 ? (
+              displayedRows.map((row) => (
                 <TableRow key={`${row.source}-${row.sortTime}-${row.user}-${row.event}`}>
                   <TableCell className="text-muted-foreground">{row.time}</TableCell>
                   <TableCell>
-                    <Badge variant={row.source === "Session" ? "info" : "outline"}>
+                    <Badge variant={row.source === "Session" ? "info" : row.source === "AI" ? "warning" : "outline"}>
                       {row.source}
                     </Badge>
                   </TableCell>
+                  <TableCell>{row.workspace}</TableCell>
                   <TableCell>{row.user}</TableCell>
                   <TableCell>{row.event}</TableCell>
                   <TableCell className="text-muted-foreground">{row.detail}</TableCell>
@@ -13711,7 +14256,7 @@ function AdminLogsTable({
               <TableRow>
                 <TableCell
                   className="py-6 text-center text-muted-foreground"
-                  colSpan={6}
+                  colSpan={7}
                 >
                   No logs match these filters.
                 </TableCell>
@@ -13720,7 +14265,51 @@ function AdminLogsTable({
           </TableBody>
         </Table>
       </div>
+      {canShowMoreLogs ? (
+        <div className="flex items-center justify-center border-t border-border/70 px-4 py-3">
+          <Button
+            onClick={() =>
+              setVisibleLogLimit((current) =>
+                Math.min(current + defaultVisibleLogRows, visibleRows.length),
+              )
+            }
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Show 50 more
+          </Button>
+        </div>
+      ) : null}
     </SettingsSection>
+  );
+}
+
+function AdminLogsSelectFilter({
+  label,
+  onChange,
+  options,
+  value,
+}: TableSelectFilter) {
+  return (
+    <Select onValueChange={(nextValue) => onChange(nextValue ?? "all")} value={value}>
+      <SelectTrigger aria-label={label} className="sm:w-40" size="sm">
+        <SelectValue placeholder={label} />
+      </SelectTrigger>
+      <SelectPopup>
+        {options.length > 0 ? (
+          options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))
+        ) : (
+          <SelectItem disabled value="none">
+            No matches
+          </SelectItem>
+        )}
+      </SelectPopup>
+    </Select>
   );
 }
 
@@ -14260,132 +14849,71 @@ function AdminUsageControlsTab({
   controls: DatabaseRecord[];
   workspaces: AdminWorkspaceRow[];
 }) {
+  const [localControls, setLocalControls] = useState<DatabaseRecord[]>(controls);
   const firstWorkspace = workspaces[0]?.[0] ?? "No workspace";
   const [selectedWorkspace, setSelectedWorkspace] = useState(
     firstWorkspace,
   );
+
+  useEffect(() => {
+    setLocalControls(controls);
+  }, [controls]);
+
   const selectedWorkspaceName = workspaces.some(
     ([workspace]) => workspace === selectedWorkspace,
   )
     ? selectedWorkspace
     : firstWorkspace;
   const globalControls =
-    controls.find((control) => !asString(control.workspace_id)) ?? {};
+    localControls.find((control) => !asString(control.workspace_id)) ?? {};
   const selectedWorkspaceRow = workspaces.find(
     ([name]) => name === selectedWorkspaceName,
   );
   const selectedWorkspaceId = selectedWorkspaceRow?.[7] ?? "";
   const workspaceControls =
-    controls.find(
+    localControls.find(
       (control) => asString(control.workspace_id) === selectedWorkspaceId,
     ) ?? {};
-  const globalRunLimit = asString(globalControls.monthly_run_limit, "Not set");
-  const globalConnectorLimit = asString(
-    globalControls.connector_limit,
-    "Not set",
-  );
-  const globalAlertThreshold = asString(
-    globalControls.usage_alert_threshold,
-    "Not set",
-  );
-  const workspaceRunLimit = asString(
-    workspaceControls.monthly_run_limit,
-    "Not set",
-  );
-  const workspaceConnectorLimit = asString(
-    workspaceControls.connector_limit,
-    "Not set",
-  );
+
+  function updateSavedControl(nextControl: DatabaseRecord) {
+    setLocalControls((current) => {
+      const nextWorkspaceId = asString(nextControl.workspace_id);
+      const nextId = asString(nextControl.id);
+      const controlExists = current.some((control) => {
+        const controlId = asString(control.id);
+        if (nextId && controlId === nextId) {
+          return true;
+        }
+
+        return asString(control.workspace_id) === nextWorkspaceId;
+      });
+
+      if (!controlExists) {
+        return [nextControl, ...current];
+      }
+
+      return current.map((control) => {
+        const controlId = asString(control.id);
+        if (nextId && controlId === nextId) {
+          return nextControl;
+        }
+
+        return asString(control.workspace_id) === nextWorkspaceId
+          ? nextControl
+          : control;
+      });
+    });
+  }
 
   return (
     <SettingsTabGrid>
-      <SettingsSection
-        description="Control workspace spending, agent execution, and connector usage."
-        icon={DatabaseIcon}
-        title="Usage controls"
-      >
-        <SettingsSwitchRow
-          defaultChecked
-          description="Pause workflow runs when a workspace reaches its monthly limit."
-          title="Enforce workspace limits"
-        />
-        <SettingsRow
-          description="Maximum workflow runs allowed across this workspace each month."
-          title="Monthly run limit"
-        >
-          <SettingsActionDialogButton
-            confirmLabel="Save limit"
-            description="Set the global monthly workflow run limit."
-            title="Monthly run limit"
-            triggerLabel={
-              globalRunLimit === "Not set" ? globalRunLimit : `${globalRunLimit} runs`
-            }
-          >
-            <div className="grid gap-2">
-              <Label>Run limit</Label>
-              <Input
-                defaultValue={globalRunLimit === "Not set" ? "" : globalRunLimit}
-                size="sm"
-              />
-            </div>
-          </SettingsActionDialogButton>
-        </SettingsRow>
-        <SettingsRow
-          description="Maximum connected apps a workspace can enable without admin approval."
-          title="Connector limit"
-        >
-          <SettingsActionDialogButton
-            confirmLabel="Save limit"
-            description="Set the global connector cap for workspaces."
-            title="Connector limit"
-            triggerLabel={
-              globalConnectorLimit === "Not set"
-                ? globalConnectorLimit
-                : `${globalConnectorLimit} apps`
-            }
-          >
-            <div className="grid gap-2">
-              <Label>Connector limit</Label>
-              <Input
-                defaultValue={
-                  globalConnectorLimit === "Not set" ? "" : globalConnectorLimit
-                }
-                size="sm"
-              />
-            </div>
-          </SettingsActionDialogButton>
-        </SettingsRow>
-        <SettingsSwitchRow
-          defaultChecked
-          description="Require admin approval before agents write to connected apps."
-          title="Require write approvals"
-        />
-        <SettingsRow
-          description="Send a summary when usage crosses a configured threshold."
-          title="Usage alert threshold"
-        >
-          <SettingsActionDialogButton
-            confirmLabel="Save threshold"
-            description="Set when admins receive a workspace usage alert."
-            title="Usage alert threshold"
-            triggerLabel={
-              globalAlertThreshold === "Not set"
-                ? globalAlertThreshold
-                : `${globalAlertThreshold}%`
-            }
-          >
-            <div className="grid gap-2">
-              <Label>Threshold percentage</Label>
-              <Input
-                defaultValue={
-                  globalAlertThreshold === "Not set" ? "" : globalAlertThreshold
-                }
-                size="sm"
-              />
-            </div>
-          </SettingsActionDialogButton>
-        </SettingsRow>
-      </SettingsSection>
+      <AdminUsageControlPanel
+        control={globalControls}
+        description="Set the default limits every workspace inherits unless it has a custom override."
+        onSaved={updateSavedControl}
+        title="Workspace default usage limits"
+        workspaceId={null}
+      />
 
       <SettingsSection
         action={
@@ -14422,81 +14950,293 @@ function AdminUsageControlsTab({
         icon={BuildingIcon}
         title="Workspace custom controls"
       >
-        <SettingsRow
-          description="Override the monthly workflow run limit for the selected workspace."
-          title="Custom run limit"
-        >
-          <SettingsActionDialogButton
-            confirmLabel="Save override"
-            description={`Set a custom run limit for ${selectedWorkspaceName}.`}
-            title="Custom run limit"
-            triggerLabel={
-              workspaceRunLimit === "Not set"
-                ? workspaceRunLimit
-                : `${workspaceRunLimit} runs`
-            }
-          >
-            <div className="grid gap-2">
-              <Label>Workspace run limit</Label>
-              <Input
-                defaultValue={
-                  workspaceRunLimit === "Not set" ? "" : workspaceRunLimit
-                }
-                size="sm"
-              />
-            </div>
-          </SettingsActionDialogButton>
-        </SettingsRow>
-        <SettingsRow
-          description="Set how many apps this workspace can connect before review."
-          title="Custom connector limit"
-        >
-          <SettingsActionDialogButton
-            confirmLabel="Save override"
-            description={`Set a custom connector cap for ${selectedWorkspaceName}.`}
-            title="Custom connector limit"
-            triggerLabel={
-              workspaceConnectorLimit === "Not set"
-                ? workspaceConnectorLimit
-                : `${workspaceConnectorLimit} apps`
-            }
-          >
-            <div className="grid gap-2">
-              <Label>Workspace connector limit</Label>
-              <Input
-                defaultValue={
-                  workspaceConnectorLimit === "Not set"
-                    ? ""
-                    : workspaceConnectorLimit
-                }
-                size="sm"
-              />
-            </div>
-          </SettingsActionDialogButton>
-        </SettingsRow>
-        <SettingsSwitchRow
-          defaultChecked
-          description="Require admin confirmation before this workspace can add a new connector."
-          title="Connector approval"
-        />
-        <SettingsSwitchRow
-          description="Temporarily pause all workflow agent runs for this workspace."
-          title="Pause workspace runs"
-        />
-        <SettingsRow
-          description={`Save these overrides for ${selectedWorkspaceName}.`}
-          title="Apply custom controls"
-        >
-          <SettingsActionDialogButton
-            confirmLabel="Apply controls"
-            description={`Apply the custom run, connector, and approval controls to ${selectedWorkspaceName}.`}
-            title="Apply workspace controls"
-            triggerLabel="Apply controls"
-            variant="default"
+        <div className="p-4">
+          <AdminUsageControlForm
+            control={workspaceControls}
+            fallback={globalControls}
+            onSaved={updateSavedControl}
+            submitLabel={`Save ${selectedWorkspaceName}`}
+            workspaceId={selectedWorkspaceId}
           />
-        </SettingsRow>
+        </div>
       </SettingsSection>
     </SettingsTabGrid>
+  );
+}
+
+function getUsageControlValue(
+  control: DatabaseRecord,
+  key: string,
+  fallback: number,
+) {
+  return String(asNumber(control[key], fallback));
+}
+
+function getUsageControlBoolean(
+  control: DatabaseRecord,
+  key: string,
+  fallback: boolean,
+) {
+  const value = control[key];
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function AdminUsageControlPanel({
+  control,
+  description,
+  onSaved,
+  title,
+  workspaceId,
+}: {
+  control: DatabaseRecord;
+  description: string;
+  onSaved: (control: DatabaseRecord) => void;
+  title: string;
+  workspaceId: string | null;
+}) {
+  return (
+    <SettingsSection
+      description={description}
+      icon={DatabaseIcon}
+      title={title}
+    >
+      <div className="p-4">
+        <AdminUsageControlForm
+          control={control}
+          onSaved={onSaved}
+          submitLabel="Save defaults"
+          workspaceId={workspaceId}
+        />
+      </div>
+    </SettingsSection>
+  );
+}
+
+function AdminUsageControlForm({
+  control,
+  fallback,
+  onSaved,
+  submitLabel,
+  workspaceId,
+}: {
+  control: DatabaseRecord;
+  fallback?: DatabaseRecord;
+  onSaved: (control: DatabaseRecord) => void;
+  submitLabel: string;
+  workspaceId: string | null;
+}) {
+  const fallbackControl = fallback ?? {};
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(() => ({
+    agentLimit: getUsageControlValue(control, "agent_limit", asNumber(fallbackControl.agent_limit, 25)),
+    connectorLimit: getUsageControlValue(control, "connector_limit", asNumber(fallbackControl.connector_limit, 10)),
+    enforceWorkspaceLimits: getUsageControlBoolean(
+      control,
+      "enforce_workspace_limits",
+      getUsageControlBoolean(fallbackControl, "enforce_workspace_limits", true),
+    ),
+    monthlyRunLimit: getUsageControlValue(control, "monthly_run_limit", asNumber(fallbackControl.monthly_run_limit, 12000)),
+    monthlyTokenLimit: getUsageControlValue(control, "monthly_token_limit", asNumber(fallbackControl.monthly_token_limit, 50000)),
+    requireWriteApprovals: getUsageControlBoolean(
+      control,
+      "require_write_approvals",
+      getUsageControlBoolean(fallbackControl, "require_write_approvals", true),
+    ),
+    storageLimitGb: getUsageControlValue(control, "storage_limit_gb", asNumber(fallbackControl.storage_limit_gb, 25)),
+    usageAlertThreshold: getUsageControlValue(control, "usage_alert_threshold", asNumber(fallbackControl.usage_alert_threshold, 80)),
+  }));
+
+  useEffect(() => {
+    setForm({
+      agentLimit: getUsageControlValue(control, "agent_limit", asNumber(fallbackControl.agent_limit, 25)),
+      connectorLimit: getUsageControlValue(control, "connector_limit", asNumber(fallbackControl.connector_limit, 10)),
+      enforceWorkspaceLimits: getUsageControlBoolean(
+        control,
+        "enforce_workspace_limits",
+        getUsageControlBoolean(fallbackControl, "enforce_workspace_limits", true),
+      ),
+      monthlyRunLimit: getUsageControlValue(control, "monthly_run_limit", asNumber(fallbackControl.monthly_run_limit, 12000)),
+      monthlyTokenLimit: getUsageControlValue(control, "monthly_token_limit", asNumber(fallbackControl.monthly_token_limit, 50000)),
+      requireWriteApprovals: getUsageControlBoolean(
+        control,
+        "require_write_approvals",
+        getUsageControlBoolean(fallbackControl, "require_write_approvals", true),
+      ),
+      storageLimitGb: getUsageControlValue(control, "storage_limit_gb", asNumber(fallbackControl.storage_limit_gb, 25)),
+      usageAlertThreshold: getUsageControlValue(control, "usage_alert_threshold", asNumber(fallbackControl.usage_alert_threshold, 80)),
+    });
+  }, [control, fallback]);
+
+  function updateForm(key: keyof typeof form, value: string | boolean) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function saveControls() {
+    if (saving) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await fetch("/api/admin/usage-controls", {
+        body: JSON.stringify({
+          ...form,
+          workspaceId,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      });
+
+      if (!response.ok) {
+        throw new Error(await getResponseError(response, "Could not save usage controls"));
+      }
+
+      const payload = asRecord(await response.json());
+      onSaved(asRecord(payload.controls));
+    } catch (error) {
+      void playAtmetSound("error");
+      window.alert(error instanceof Error ? error.message : "Could not save usage controls.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <AdminUsageLimitField
+          description="Monthly AI tokens available to the workspace by default."
+          label="Default token limit"
+          onChange={(value) => updateForm("monthlyTokenLimit", value)}
+          suffix="tokens"
+          value={form.monthlyTokenLimit}
+        />
+        <AdminUsageLimitField
+          description="Total stored attachment data allowed for the workspace."
+          label="Storage limit"
+          onChange={(value) => updateForm("storageLimitGb", value)}
+          suffix="GB"
+          value={form.storageLimitGb}
+        />
+        <AdminUsageLimitField
+          description="Maximum workflow agents this workspace can create."
+          label="Agent limit"
+          onChange={(value) => updateForm("agentLimit", value)}
+          suffix="agents"
+          value={form.agentLimit}
+        />
+        <AdminUsageLimitField
+          description="Maximum scheduled or manual workflow runs per month."
+          label="Run limit"
+          onChange={(value) => updateForm("monthlyRunLimit", value)}
+          suffix="runs"
+          value={form.monthlyRunLimit}
+        />
+        <AdminUsageLimitField
+          description="Maximum connected apps allowed before admin review."
+          label="Connector limit"
+          onChange={(value) => updateForm("connectorLimit", value)}
+          suffix="apps"
+          value={form.connectorLimit}
+        />
+        <AdminUsageLimitField
+          description="When admins should receive usage warnings."
+          label="Alert threshold"
+          max={100}
+          onChange={(value) => updateForm("usageAlertThreshold", value)}
+          suffix="%"
+          value={form.usageAlertThreshold}
+        />
+      </div>
+      <div className="grid gap-2 rounded-xl border border-border/70 bg-muted/25 p-3 sm:grid-cols-2">
+        <AdminUsageSwitch
+          checked={form.enforceWorkspaceLimits}
+          description="Pause runs and creation when configured limits are reached."
+          onCheckedChange={(value) => updateForm("enforceWorkspaceLimits", value)}
+          title="Enforce limits"
+        />
+        <AdminUsageSwitch
+          checked={form.requireWriteApprovals}
+          description="Require approval before agents write to connected apps."
+          onCheckedChange={(value) => updateForm("requireWriteApprovals", value)}
+          title="Require write approvals"
+        />
+      </div>
+      <div className="flex justify-end">
+        <Button loading={saving} onClick={() => void saveControls()} size="sm">
+          <Icon icon={SaveIcon} />
+          {submitLabel}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AdminUsageLimitField({
+  description,
+  label,
+  max,
+  onChange,
+  suffix,
+  value,
+}: {
+  description: string;
+  label: string;
+  max?: number;
+  onChange: (value: string) => void;
+  suffix: string;
+  value: string;
+}) {
+  return (
+    <div className="grid gap-2 rounded-xl border border-border/70 bg-background/55 p-3">
+      <div>
+        <Label>{label}</Label>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+      <Group className="h-8">
+        <Input
+          className="h-full text-sm tabular-nums [&_[data-slot=input]]:h-full [&_[data-slot=input]]:leading-none"
+          max={max}
+          min="0"
+          onChange={(event) => onChange(event.target.value)}
+          size="sm"
+          type="number"
+          value={value}
+        />
+        <GroupSeparator />
+        <span className="px-2 text-xs text-muted-foreground">{suffix}</span>
+      </Group>
+    </div>
+  );
+}
+
+function AdminUsageSwitch({
+  checked,
+  description,
+  onCheckedChange,
+  title,
+}: {
+  checked: boolean;
+  description: string;
+  onCheckedChange: (checked: boolean) => void;
+  title: string;
+}) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg bg-background/50 p-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+      <Switch
+        className="shrink-0"
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+      />
+    </div>
   );
 }
 
@@ -14513,7 +15253,7 @@ type TableSelectFilter = {
 };
 
 const tableViewportClassName =
-  "min-w-0 max-w-full max-h-[32rem] overflow-auto overscroll-contain";
+  "min-w-0 max-w-full overflow-x-auto overflow-y-visible overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden";
 
 function normalizeFilterValue(value: string) {
   return value.trim().toLowerCase() || "unknown";
@@ -14530,6 +15270,26 @@ function getTableFilterOptions(values: string[], allLabel = "All") {
       label: formatStatusLabel(value),
       value,
     })),
+  ];
+}
+
+function getTableTextFilterOptions(values: string[], allLabel = "All") {
+  const optionsByValue = new Map<string, string>();
+
+  for (const value of values) {
+    const label = value.trim() || "Unknown";
+    const normalized = normalizeFilterValue(label);
+
+    if (!optionsByValue.has(normalized)) {
+      optionsByValue.set(normalized, label);
+    }
+  }
+
+  return [
+    { label: allLabel, value: "all" },
+    ...Array.from(optionsByValue.entries())
+      .sort(([, a], [, b]) => a.localeCompare(b))
+      .map(([value, label]) => ({ label, value })),
   ];
 }
 
