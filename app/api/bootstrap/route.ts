@@ -65,6 +65,27 @@ async function enrichWorkspaceMembers(
     return rows;
   }
 
+  const hasProfiles = rows.every((member) => {
+    const profile = toRecord(member.profiles);
+    return profile.email || profile.full_name || profile.avatar_url;
+  });
+
+  if (hasProfiles) {
+    return rows.map((member) => {
+      const userId = typeof member.user_id === "string" ? member.user_id : "";
+      const authProfile: Record<string, unknown> =
+        userId === auth.user.id ? authMetadataProfile(auth.user) : {};
+
+      return {
+        ...member,
+        profiles: {
+          ...authProfile,
+          ...toRecord(member.profiles),
+        },
+      };
+    });
+  }
+
   const { data: profileRows } = await auth.admin
     .from("profiles")
     .select("*")
@@ -100,7 +121,7 @@ async function enrichWorkspaceMembers(
   });
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const auth = await requireUser();
 
@@ -129,19 +150,13 @@ export async function GET() {
     const [
       { data: rawProfile, error: profileError },
       { data: preferences, error: preferencesError },
-      { data: changelogs, error: changelogsError },
     ] = await Promise.all([
       dataClient.from("profiles").select("*").eq("id", auth.user.id).maybeSingle(),
       dataClient.from("user_preferences").select("*").eq("user_id", auth.user.id).maybeSingle(),
-      auth.supabase
-        .from("changelogs")
-        .select("*")
-        .not("published_at", "is", null)
-        .order("published_at", { ascending: false }),
     ]);
 
-    if (profileError || preferencesError || changelogsError) {
-      throw profileError ?? preferencesError ?? changelogsError;
+    if (profileError || preferencesError) {
+      throw profileError ?? preferencesError;
     }
 
     const authProfile = authMetadataProfile(auth.user);
@@ -360,12 +375,13 @@ export async function GET() {
         agents: [],
         apps: [],
         brain: null,
-        changelogs,
+        changelogs: [],
         chats: [],
         connections: [],
         members: [],
         memberships,
         notifications: notifications ?? [],
+        partial: true,
         preferences: userPreferences,
         profile,
         skills: [],
@@ -377,11 +393,56 @@ export async function GET() {
       }, { headers: noStoreHeaders });
     }
 
-    const usageMonthStart = new Date(
-      new Date().getFullYear(),
-      new Date().getMonth(),
-      1,
-    ).toISOString();
+    const mode = new URL(request.url).searchParams.get("mode");
+    if (mode === "core") {
+      const [{ data: chats, error: chatsError }, { data: notifications, error: notificationsError }] =
+        await Promise.all([
+          auth.supabase
+            .from("chats")
+            .select("id, workspace_id, user_id, title, pinned, archived, source, origin_agent_node_id, last_message_at, created_at, updated_at")
+            .eq("workspace_id", workspaceId)
+            .eq("user_id", auth.user.id)
+            .is("deleted_at", null)
+            .order("pinned", { ascending: false })
+            .order("updated_at", { ascending: false }),
+          notificationsPromise,
+        ]);
+
+      if (chatsError || notificationsError) {
+        throw chatsError ?? notificationsError;
+      }
+
+      return ok({
+        agents: [],
+        apps: [],
+        brain: null,
+        changelogs: [],
+        chats,
+        connections: [],
+        members: [],
+        memberships,
+        notifications: notifications ?? [],
+        preferences: userPreferences,
+        profile,
+        skills: [],
+        subscription: null,
+        usage: {
+          events: [],
+          totals: {
+            automations: 0,
+            chats: chats?.length ?? 0,
+            files: 0,
+            storage_gb: 0,
+            tokens: 0,
+          },
+          userLimits: [],
+        },
+        workspace,
+        workspaceSettings: null,
+        workspaces: memberships?.map((membership) => membership.workspaces).filter(Boolean) ?? [],
+      }, { headers: noStoreHeaders });
+    }
+
     const [
       { data: workspaceSettings, error: workspaceSettingsError },
       { data: members, error: membersError },
@@ -392,20 +453,19 @@ export async function GET() {
       { data: agents, error: agentsError },
       { data: brain, error: brainError },
       { data: subscription, error: subscriptionError },
-      { data: usageEvents, error: usageEventsError },
-      { data: aiModelRuns, error: aiModelRunsError },
-      { data: userLimits, error: userLimitsError },
       { data: usageControls, error: usageControlsError },
       { data: notifications, error: notificationsError },
+      { data: agentMemberships, error: agentMembershipsError },
+      { data: isSuperAdmin, error: superAdminError },
     ] = await Promise.all([
       auth.supabase.from("workspace_settings").select("*").eq("workspace_id", workspaceId).maybeSingle(),
       auth.supabase
         .from("workspace_members")
-        .select("*")
+        .select("workspace_id, user_id, role, status, joined_at, created_at, profiles:profiles!workspace_members_user_id_fkey(id, full_name, email, avatar_url)")
         .eq("workspace_id", workspaceId),
       auth.supabase
         .from("chats")
-        .select("*")
+        .select("id, workspace_id, user_id, title, pinned, archived, source, origin_agent_node_id, last_message_at, created_at, updated_at")
         .eq("workspace_id", workspaceId)
         .eq("user_id", auth.user.id)
         .is("deleted_at", null)
@@ -413,16 +473,24 @@ export async function GET() {
         .order("updated_at", { ascending: false }),
       auth.supabase
         .from("skills")
-        .select("*")
+        .select("id, name, description, icon, gradient, source, created_by")
         .or(`source.eq.default,created_by.eq.${auth.user.id}`)
         .is("deleted_at", null)
         .order("source", { ascending: true })
-        .order("name", { ascending: true }),
-      auth.supabase.from("app_catalog").select("*").eq("enabled", true).order("name"),
-      auth.supabase.from("workspace_connectors").select("*").eq("workspace_id", workspaceId),
+        .order("name", { ascending: true })
+        .limit(100),
+      auth.supabase
+        .from("app_catalog")
+        .select("key, name, description, logo, gradient, enabled")
+        .eq("enabled", true)
+        .order("name"),
+      auth.supabase
+        .from("workspace_connectors")
+        .select("id, workspace_id, app_key, status, settings, created_at, updated_at")
+        .eq("workspace_id", workspaceId),
       auth.supabase
         .from("workflow_agents")
-        .select("*, workflow_nodes(*), workflow_edges(*)")
+        .select("id, workspace_id, name, status, runtime_state, gradient, tone, schedule, settings, created_by, created_at, updated_at, workflow_nodes(id, agent_id, title, runtime_state, status, source_chat_id, app_keys, position_x, position_y, config), workflow_edges(id, agent_id, source_node_id, target_node_id, label)")
         .eq("workspace_id", workspaceId)
         .is("deleted_at", null)
         .order("created_at", { ascending: false }),
@@ -433,24 +501,15 @@ export async function GET() {
         .eq("workspace_id", workspaceId)
         .maybeSingle(),
       auth.supabase
-        .from("usage_events")
-        .select("*")
-        .eq("workspace_id", workspaceId)
-        .gte("created_at", usageMonthStart),
-      auth.supabase
-        .from("ai_model_runs")
-        .select("chat_id, input_tokens, output_tokens")
-        .eq("workspace_id", workspaceId)
-        .gte("created_at", usageMonthStart),
-      auth.supabase
-        .from("user_usage_limits")
-        .select("*, profiles(full_name, email, avatar_url)")
-        .eq("workspace_id", workspaceId),
-      auth.supabase
         .from("workspace_usage_controls")
         .select("*")
         .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`),
       notificationsPromise,
+      auth.admin
+        .from("workflow_agent_members")
+        .select("agent_id")
+        .eq("user_id", auth.user.id),
+      auth.supabase.rpc("is_super_admin", { target_user_id: auth.user.id }),
     ]);
 
     const errors = [
@@ -463,11 +522,10 @@ export async function GET() {
       agentsError,
       brainError,
       subscriptionError,
-      usageEventsError,
-      aiModelRunsError,
-      userLimitsError,
       usageControlsError,
       notificationsError,
+      agentMembershipsError,
+      superAdminError,
     ].filter(Boolean);
 
     if (errors[0]) {
@@ -475,52 +533,11 @@ export async function GET() {
     }
 
     const enrichedMembers = await enrichWorkspaceMembers(auth, members);
-
-    const totals = (usageEvents ?? []).reduce<Record<string, number>>((acc, event) => {
-      const resource = String(event.resource);
-      acc[resource] = (acc[resource] ?? 0) + Number(event.quantity ?? 0);
-      return acc;
-    }, {});
-    const tokensByChatId = (aiModelRuns ?? []).reduce<Record<string, number>>(
-      (acc, run) => {
-        const chatId = String(run.chat_id ?? "");
-        if (!chatId) {
-          return acc;
-        }
-
-        acc[chatId] =
-          (acc[chatId] ?? 0) +
-          Number(run.input_tokens ?? 0) +
-          Number(run.output_tokens ?? 0);
-        return acc;
-      },
-      {},
-    );
-    totals.tokens = (aiModelRuns ?? []).reduce(
-      (sum, run) =>
-        sum + Number(run.input_tokens ?? 0) + Number(run.output_tokens ?? 0),
-      0,
-    );
     const workspaceUsageControls =
       (usageControls ?? []).find((control) => control.workspace_id === workspaceId) ??
       {};
     const globalUsageControls =
       (usageControls ?? []).find((control) => !control.workspace_id) ?? {};
-    const [
-      { data: agentMemberships, error: agentMembershipsError },
-      { data: isSuperAdmin, error: superAdminError },
-    ] = await Promise.all([
-      auth.admin
-        .from("workflow_agent_members")
-        .select("agent_id")
-        .eq("user_id", auth.user.id),
-      auth.supabase.rpc("is_super_admin", { target_user_id: auth.user.id }),
-    ]);
-
-    if (agentMembershipsError || superAdminError) {
-      throw agentMembershipsError ?? superAdminError;
-    }
-
     const assignedAgentIds = new Set(
       (agentMemberships ?? [])
         .map((membership) => String(membership.agent_id ?? ""))
@@ -535,27 +552,14 @@ export async function GET() {
               assignedAgentIds.has(String(agent.id ?? "")),
           );
     const agentsWithTokenUsage = visibleAgents.map((agent) => {
-      const workflowNodes = Array.isArray(agent.workflow_nodes)
-        ? agent.workflow_nodes as Array<Record<string, unknown>>
-        : [];
-      const sourceChatIds = new Set(
-        workflowNodes
-          .map((node) => String(node.source_chat_id ?? ""))
-          .filter(Boolean),
-      );
-      const tokenUsage = Array.from(sourceChatIds).reduce(
-        (sum, chatId) => sum + (tokensByChatId[chatId] ?? 0),
-        0,
-      );
-
-      return { ...agent, token_usage: tokenUsage };
+      return { ...agent, token_usage: 0 };
     });
 
     return ok({
       agents: agentsWithTokenUsage,
       apps,
       brain,
-      changelogs,
+      changelogs: [],
       chats,
       connections,
       members: enrichedMembers,
@@ -566,9 +570,13 @@ export async function GET() {
       skills,
       subscription,
       usage: {
-        events: usageEvents,
+        events: [],
         totals: {
-          ...totals,
+          automations: agentsWithTokenUsage.length,
+          chats: chats?.length ?? 0,
+          files: 0,
+          storage_gb: 0,
+          tokens: 0,
           agent_limit:
             workspaceUsageControls.agent_limit ??
             globalUsageControls.agent_limit ??
@@ -586,7 +594,7 @@ export async function GET() {
             globalUsageControls.monthly_token_limit ??
             50000,
         },
-        userLimits,
+        userLimits: [],
       },
       workspace,
       workspaceSettings,

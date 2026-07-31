@@ -257,6 +257,15 @@ const settingsNavigation = {
   icon: Settings01Icon,
 } satisfies NavigationItem;
 
+const backgroundHydrationPageKeys = new Set<PageKey>([
+  "agents",
+  "brain",
+  "skills",
+  "connectors",
+  "usage",
+  "settings",
+]);
+
 type Agent = {
   id?: string;
   appLogos: string[];
@@ -2084,6 +2093,10 @@ export default function Home() {
   const visibleSecondaryNavigation = isSuperAdmin
     ? secondaryNavigation
     : secondaryNavigation.filter((item) => item.key !== "admin");
+  const isBackgroundHydrating = isBootstrapRefreshing && !isBootstrapLoading;
+  const activePageHydrating =
+    (isBootstrapLoading && activePage === "chat") ||
+    (isBackgroundHydrating && backgroundHydrationPageKeys.has(activePage));
   const workflowSidebarChatMeta = new Map<string, WorkflowSidebarChatMeta>();
 
   for (const agent of agentList) {
@@ -2345,6 +2358,7 @@ export default function Home() {
   }, []);
 
   function applyDashboardPayload(payload: DashboardData) {
+    const isPartialPayload = asBoolean(asRecord(payload).partial);
     const profileRecord = asRecord(payload.profile);
     const mappedWorkspaces = asRecordArray(payload.workspaces)
       .map(mapWorkspace)
@@ -2384,7 +2398,9 @@ export default function Home() {
     setWorkspace(mappedWorkspace);
     setWorkspaces(mappedWorkspaces);
     setProfile(profileRecord);
-    setMembers(mappedMembers);
+    if (!isPartialPayload) {
+      setMembers(mappedMembers);
+    }
     setNotifications(mappedNotifications);
     setSidebarChats(mappedChats);
     setActiveSidebarChatId((current) =>
@@ -2392,15 +2408,17 @@ export default function Home() {
         ? current
         : mappedChats[0]?.id ?? null,
     );
-    setAgentList(mappedAgents);
-    setSkillList(mappedSkills);
-    setConnectorList(mappedConnectors);
-    setConnectedConnectorKeys(connectedKeys);
-    setUsageData(mapUsage(payload.usage, mappedChats.length, mappedAgents.length));
-    setBrainData(asRecord(payload.brain));
-    setSubscriptionData(asRecord(payload.subscription));
-    setWorkspaceSettings(mappedWorkspaceSettings);
-    void setAtmetSoundEnabled(asBoolean(mappedWorkspaceSettings.sound_enabled, true));
+    if (!isPartialPayload) {
+      setAgentList(mappedAgents);
+      setSkillList(mappedSkills);
+      setConnectorList(mappedConnectors);
+      setConnectedConnectorKeys(connectedKeys);
+      setUsageData(mapUsage(payload.usage, mappedChats.length, mappedAgents.length));
+      setBrainData(asRecord(payload.brain));
+      setSubscriptionData(asRecord(payload.subscription));
+      setWorkspaceSettings(mappedWorkspaceSettings);
+      void setAtmetSoundEnabled(asBoolean(mappedWorkspaceSettings.sound_enabled, true));
+    }
   }
 
   useEffect(() => {
@@ -2430,7 +2448,7 @@ export default function Home() {
       }
 
       try {
-        const response = await fetch("/api/bootstrap", {
+        const response = await fetch("/api/bootstrap?mode=core", {
           cache: "no-store",
           credentials: "same-origin",
         });
@@ -2467,13 +2485,46 @@ export default function Home() {
 
         applyDashboardPayload(payload);
         setIsBootstrapLoading(false);
-        setIsBootstrapRefreshing(false);
         try {
           window.localStorage.setItem(
             dashboardCacheKey,
             JSON.stringify({
               cachedAt: Date.now(),
               payload: getCacheableDashboardPayload(payload),
+            }),
+          );
+        } catch {
+          window.localStorage.removeItem(dashboardCacheKey);
+        }
+
+        setIsBootstrapRefreshing(true);
+        const secondaryResponse = await fetch("/api/bootstrap", {
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!secondaryResponse.ok) {
+          setIsBootstrapRefreshing(false);
+          return;
+        }
+
+        const secondaryPayload = (await secondaryResponse.json()) as DashboardData;
+        if (cancelled) {
+          return;
+        }
+
+        applyDashboardPayload(secondaryPayload);
+        setIsBootstrapRefreshing(false);
+        try {
+          window.localStorage.setItem(
+            dashboardCacheKey,
+            JSON.stringify({
+              cachedAt: Date.now(),
+              payload: getCacheableDashboardPayload(secondaryPayload),
             }),
           );
         } catch {
@@ -3048,6 +3099,7 @@ export default function Home() {
                   : []
               }
               collapsed={!sidebarOpen}
+              loading={isBootstrapLoading}
               members={members}
               onCreateWorkspace={async (workspaceName) => {
                 try {
@@ -3129,7 +3181,11 @@ export default function Home() {
               onAction={handleNotificationAction}
               onSeeAll={() => void openNotificationsPage()}
             />
-            <UserIdentity onSelectPage={selectPage} profile={profile} />
+            <UserIdentity
+              loading={isBootstrapLoading}
+              onSelectPage={selectPage}
+              profile={profile}
+            />
           </div>
         </div>
 
@@ -3155,7 +3211,6 @@ export default function Home() {
                   key={item.key}
                   active={activePage === item.key}
                   item={item}
-                  loading={item.key === "chat" && creatingChat}
                   onClick={() =>
                     item.key === "chat"
                       ? startBlankChat()
@@ -3232,15 +3287,7 @@ export default function Home() {
               )}
             >
               {bootstrapError && <BootstrapErrorBanner error={bootstrapError} />}
-              {(isBootstrapLoading || isBootstrapRefreshing) && (
-                <LoadingPill
-                  label={
-                    isBootstrapLoading
-                      ? "Loading workspace data"
-                      : "Refreshing workspace data"
-                  }
-                />
-              )}
+              {activePageHydrating && <PageHydrationSpinner />}
               {activePage === "chat" && (
                 <ChatPage
                   activeChat={activeSidebarChat}
@@ -3360,6 +3407,7 @@ function WorkspaceIdentity({
   agents,
   chatParticipantIds,
   collapsed = false,
+  loading = false,
   members,
   onAddChatToAgentWorkflow,
   onCopyChatValue,
@@ -3381,6 +3429,7 @@ function WorkspaceIdentity({
   agents: Agent[];
   chatParticipantIds: string[];
   collapsed?: boolean;
+  loading?: boolean;
   members: WorkspaceUser[];
   onAddChatToAgentWorkflow: (agentName: string, chat: SidebarChat) => void;
   onCopyChatValue: (value: string) => void;
@@ -3402,6 +3451,20 @@ function WorkspaceIdentity({
   const [invitePeopleOpen, setInvitePeopleOpen] = useState(false);
   const workspaceName = selectedWorkspace?.name ?? "Workspace";
   const workspaceAvatarUrl = selectedWorkspace?.avatarUrl;
+
+  if (loading) {
+    return (
+      <div className="flex min-w-0 items-center gap-2">
+        <AtmetLogo className="size-5" plain />
+        <div className="h-4 w-px shrink-0 bg-sidebar-border" />
+        <div className="flex min-w-0 items-center gap-1.5 px-1.5 py-1">
+          <SkeletonBlock className="size-6 rounded-md" />
+          <SkeletonBlock className="hidden h-3 w-24 sm:block" />
+          <SkeletonBlock className="size-3.5 rounded-sm" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-w-0 items-center gap-2">
@@ -4477,15 +4540,27 @@ function NotificationStatusBadge({
 }
 
 function UserIdentity({
+  loading = false,
   onSelectPage,
   profile,
 }: {
+  loading?: boolean;
   onSelectPage: (page: PageKey) => void;
   profile: DatabaseRecord | null;
 }) {
   const displayName = asString(profile?.full_name, asString(profile?.email, "User"));
   const initials = getInitialsFromText(displayName);
   const avatarUrl = asString(profile?.avatar_url);
+
+  if (loading) {
+    return (
+      <div className="flex min-w-0 items-center gap-1.5 px-1.5 py-1">
+        <SkeletonBlock className="size-6 rounded-md" />
+        <SkeletonBlock className="hidden h-3 w-16 sm:block" />
+        <SkeletonBlock className="size-3.5 rounded-sm" />
+      </div>
+    );
+  }
 
   async function signOut() {
     await fetch("/api/auth/sign-out", { method: "POST" }).catch(() => undefined);
@@ -18337,6 +18412,26 @@ function LoadingPill({ label }: { label: string }) {
     <div className="mb-3 flex w-fit items-center gap-2 rounded-lg border border-border/50 bg-muted/45 px-2.5 py-1.5 text-xs text-muted-foreground">
       <Spinner className="size-3.5" />
       <span>{label}</span>
+    </div>
+  );
+}
+
+function SkeletonBlock({ className }: { className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "block shrink-0 animate-pulse rounded bg-sidebar-accent/80",
+        className,
+      )}
+    />
+  );
+}
+
+function PageHydrationSpinner() {
+  return (
+    <div className="mb-2 flex h-5 items-center justify-end">
+      <Spinner className="size-4 text-muted-foreground" />
     </div>
   );
 }

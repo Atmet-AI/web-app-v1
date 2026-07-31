@@ -557,15 +557,22 @@ create table if not exists public.session_logs (
 );
 
 create index if not exists workspace_members_user_id_idx on public.workspace_members(user_id);
+create index if not exists workspace_members_user_status_created_idx on public.workspace_members(user_id, status, created_at);
 create index if not exists chats_workspace_id_idx on public.chats(workspace_id);
 create index if not exists chats_user_id_idx on public.chats(user_id);
+create index if not exists chats_user_workspace_deleted_updated_idx on public.chats(user_id, workspace_id, deleted_at, pinned, updated_at desc);
 create index if not exists skills_workspace_id_idx on public.skills(workspace_id);
 create index if not exists skills_created_by_idx on public.skills(created_by);
+create index if not exists skills_source_created_name_idx on public.skills(source, created_by, name);
 create index if not exists workflow_agents_workspace_id_idx on public.workflow_agents(workspace_id);
 create index if not exists workflow_agents_created_by_idx on public.workflow_agents(created_by);
+create index if not exists workflow_agents_workspace_deleted_created_idx on public.workflow_agents(workspace_id, deleted_at, created_at desc);
 create index if not exists workflow_agent_members_agent_id_idx on public.workflow_agent_members(agent_id);
 create index if not exists workflow_agent_members_user_id_idx on public.workflow_agent_members(user_id);
 create index if not exists workflow_nodes_agent_id_idx on public.workflow_nodes(agent_id);
+create index if not exists workspace_connectors_workspace_id_idx on public.workspace_connectors(workspace_id);
+create index if not exists workspace_usage_controls_workspace_id_idx on public.workspace_usage_controls(workspace_id);
+create index if not exists notifications_user_status_created_idx on public.notifications(user_id, status, created_at desc);
 create index if not exists workflow_approvals_run_idx on public.workflow_approvals(run_id);
 create index if not exists workflow_approvals_workspace_created_idx on public.workflow_approvals(workspace_id, created_at desc);
 create index if not exists workflow_approvals_message_idx on public.workflow_approvals(message_id);
