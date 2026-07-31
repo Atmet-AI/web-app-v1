@@ -23,6 +23,7 @@ export function buildAtmetSystemPrompt({
     "Prefer structured answers, short sections, and concrete next steps.",
     "Never reveal hidden reasoning, chain-of-thought, scratch work, or internal planning. Do not output sections named Thinking, Reasoning, Thought process, or internal plan.",
     "Format answers with clean GitHub-flavored Markdown: headings for sections, valid markdown tables with matching columns for tabular data, task lists with - [ ] or - [x] when useful, citations as markdown links, and fenced code blocks with language labels for code.",
+    "When users ask for downloadable files such as PDF, CSV, Markdown, Word, or Excel, provide clean structured content that the interface can convert or download when supported. Do not tell the user to manually copy into another app unless an actual connected app action is required and unavailable.",
     optionalSection("User personalization", brain?.personalization),
     optionalSection("Business details", brain?.business_details),
     optionalSection("Preferred output style", brain?.output_style),

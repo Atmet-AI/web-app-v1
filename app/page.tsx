@@ -29,6 +29,7 @@ import {
   CreditCardIcon,
   DatabaseIcon,
   Delete02Icon,
+  Download01Icon,
   Edit02Icon,
   EyeIcon,
   File01Icon,
@@ -76,7 +77,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -1033,17 +1034,52 @@ const modelOptions = [
     providerKey: "atmet",
   },
   {
-    description: "OpenAI model",
+    description: "Balanced OpenAI model",
     id: "chatgpt",
     logo: "openai",
-    name: "ChatGPT",
+    name: "ChatGPT Auto",
     providerKey: "openai",
   },
   {
-    description: "Anthropic model",
+    description: "Flagship OpenAI reasoning",
+    id: "gpt-5",
+    logo: "openai",
+    name: "GPT-5",
+    providerKey: "openai",
+  },
+  {
+    description: "Fast OpenAI model",
+    id: "gpt-5-mini",
+    logo: "openai",
+    name: "GPT-5 mini",
+    providerKey: "openai",
+  },
+  {
+    description: "Light OpenAI fallback",
+    id: "gpt-4o-mini",
+    logo: "openai",
+    name: "GPT-4o mini",
+    providerKey: "openai",
+  },
+  {
+    description: "Balanced Anthropic model",
     id: "claude-sonnet",
     logo: "anthropic",
-    name: "Claude",
+    name: "Claude Sonnet",
+    providerKey: "anthropic",
+  },
+  {
+    description: "Stronger Anthropic reasoning",
+    id: "claude-opus",
+    logo: "anthropic",
+    name: "Claude Opus",
+    providerKey: "anthropic",
+  },
+  {
+    description: "Fast Anthropic model",
+    id: "claude-haiku",
+    logo: "anthropic",
+    name: "Claude Haiku",
     providerKey: "anthropic",
   },
 ] satisfies ChatModelOption[];
@@ -1058,7 +1094,7 @@ const setupModelOptions = [
     setupOnly: true,
   },
   {
-    description: "Add a local endpoint in Settings",
+    description: "Coming soon",
     icon: DatabaseIcon,
     id: "setup-local-model",
     name: "Local model",
@@ -4593,6 +4629,7 @@ function ChatExperience({
   const [composerIsEmpty, setComposerIsEmpty] = useState(true);
   const [lastResponseUsedApp, setLastResponseUsedApp] = useState(false);
   const [createAgentDialogOpen, setCreateAgentDialogOpen] = useState(false);
+  const [customModelDialogOpen, setCustomModelDialogOpen] = useState(false);
   const [composerAttachments, setComposerAttachments] = useState<
     ComposerAttachment[]
   >([]);
@@ -4615,20 +4652,21 @@ function ChatExperience({
   const atmetModelOptions = availableModelOptions.filter(
     (model) => model.providerKey === "atmet",
   );
-  const otherModelOptions = availableModelOptions.filter(
-    (model) => model.providerKey !== "atmet",
+  const openaiModelOptions = modelOptions.filter(
+    (model) => model.providerKey === "openai",
   );
-  const visibleSetupModelOptions = setupModelOptions.filter((option) => {
-    if (option.providerKey === "custom") {
-      return !userModelOptions.some((model) => model.providerKey === "custom");
-    }
-
-    if (option.providerKey === "local") {
-      return !userModelOptions.some((model) => model.providerKey === "local");
-    }
-
-    return true;
-  });
+  const anthropicModelOptions = modelOptions.filter(
+    (model) => model.providerKey === "anthropic",
+  );
+  const customModelOptions = userModelOptions.filter(
+    (model) => model.providerKey === "custom",
+  );
+  const customSetupModel = setupModelOptions.find(
+    (option) => option.providerKey === "custom",
+  );
+  const localSetupModel = setupModelOptions.find(
+    (option) => option.providerKey === "local",
+  );
   const mentionOptions = mention
     ? composerOptions.filter(
         (option) =>
@@ -4692,6 +4730,51 @@ function ChatExperience({
     }
   }
 
+  async function loadUserModels(cancelled = false) {
+    try {
+      const response = await fetch("/api/user-model-connections", {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = asRecord(await response.json());
+      const connections = asRecordArray(payload.connections)
+        .filter((connection) => asBoolean(connection.enabled, true))
+        .filter((connection) => asString(connection.providerKey) === "custom")
+        .map((connection) => {
+          const displayName = asString(connection.displayName, "Custom API");
+          return {
+            icon: CodeIcon,
+            description: asString(connection.modelId, "Your connected model"),
+            id: `user-connection:${asString(connection.id)}`,
+            name: displayName,
+            providerKey: "custom",
+          };
+        })
+        .filter((option) => option.id !== "user-connection:");
+
+      if (!cancelled) {
+        setUserModelOptions(connections);
+        try {
+          const storedModelId = window.localStorage.getItem(lastSelectedChatModelKey);
+          const storedModel = [...modelOptions, ...connections].find(
+            (model) => model.id === storedModelId,
+          );
+          if (storedModel) {
+            setSelectedModel(storedModel);
+          }
+        } catch {
+          // Ignore storage failures.
+        }
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   useEffect(() => {
     try {
       const storedModelId = window.localStorage.getItem(lastSelectedChatModelKey);
@@ -4707,58 +4790,7 @@ function ChatExperience({
   useEffect(() => {
     let cancelled = false;
 
-    async function loadUserModels() {
-      try {
-        const response = await fetch("/api/user-model-connections", {
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          return;
-        }
-
-        const payload = asRecord(await response.json());
-        const connections = asRecordArray(payload.connections)
-          .filter((connection) => asBoolean(connection.enabled, true))
-          .map((connection) => {
-            const providerKey = asString(connection.providerKey);
-            const displayName = asString(
-              connection.displayName,
-              providerKey === "local" ? "Local model" : "Custom API",
-            );
-            return {
-              icon: providerKey === "local" ? DatabaseIcon : CodeIcon,
-              description:
-                providerKey === "local"
-                  ? "Your local model endpoint"
-                  : "Your connected model",
-              id: `user-connection:${asString(connection.id)}`,
-              name: displayName,
-              providerKey,
-            };
-          })
-          .filter((option) => option.id !== "user-connection:");
-
-        if (!cancelled) {
-          setUserModelOptions(connections);
-          try {
-            const storedModelId = window.localStorage.getItem(lastSelectedChatModelKey);
-            const storedModel = [...modelOptions, ...connections].find(
-              (model) => model.id === storedModelId,
-            );
-            if (storedModel) {
-              setSelectedModel(storedModel);
-            }
-          } catch {
-            // Ignore storage failures.
-          }
-        }
-      } catch (error) {
-        console.error(error);
-      }
-    }
-
-    void loadUserModels();
+    void loadUserModels(cancelled);
 
     return () => {
       cancelled = true;
@@ -5662,7 +5694,11 @@ function ChatExperience({
                 {selectedModel.name}
                 <Icon className="size-3.5 opacity-70" icon={ChevronDownIcon} />
               </MenuTrigger>
-              <MenuPopup align="start" className="min-w-64" sideOffset={8}>
+              <MenuPopup
+                align="start"
+                className="min-w-64 overflow-visible [&>div]:overflow-visible"
+                sideOffset={8}
+              >
                 {atmetModelOptions.length > 0 ? (
                   <>
                     <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
@@ -5678,13 +5714,33 @@ function ChatExperience({
                     ))}
                   </>
                 ) : null}
-                {otherModelOptions.length > 0 ? (
+                <MenuSeparator />
+                <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                  Other models
+                </div>
+                <ChatModelProviderMenuItem
+                  description="Choose a specific OpenAI model"
+                  logo="openai"
+                  models={openaiModelOptions}
+                  name="ChatGPT"
+                  onSelectModel={selectModel}
+                  selectedModelId={selectedModel.id}
+                />
+                <ChatModelProviderMenuItem
+                  description="Choose a specific Anthropic model"
+                  logo="anthropic"
+                  models={anthropicModelOptions}
+                  name="Claude"
+                  onSelectModel={selectModel}
+                  selectedModelId={selectedModel.id}
+                />
+                {customModelOptions.length > 0 ? (
                   <>
-                    {atmetModelOptions.length > 0 ? <MenuSeparator /> : null}
+                    <MenuSeparator />
                     <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                      Other models
+                      Custom API LLMs
                     </div>
-                    {otherModelOptions.map((model) => (
+                    {customModelOptions.map((model) => (
                       <ChatModelMenuItem
                         key={model.id}
                         model={model}
@@ -5694,27 +5750,28 @@ function ChatExperience({
                     ))}
                   </>
                 ) : null}
-                {visibleSetupModelOptions.length > 0 ? (
-                  <>
-                    <MenuSeparator />
-                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                      Add models
-                    </div>
-                    {visibleSetupModelOptions.map((model) => (
-                      <MenuItem disabled key={model.id}>
-                        <ChatModelMark model={model} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate">{model.name}</span>
-                          <span className="block truncate text-muted-foreground text-xs">
-                            {model.description}
-                          </span>
-                        </span>
-                      </MenuItem>
-                    ))}
-                  </>
+                <MenuSeparator />
+                <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                  Add models
+                </div>
+                {customSetupModel ? (
+                  <ChatModelSetupMenuItem
+                    model={customSetupModel}
+                    onClick={() => setCustomModelDialogOpen(true)}
+                  />
+                ) : null}
+                {localSetupModel ? (
+                  <ChatModelSetupMenuItem model={localSetupModel} soon />
                 ) : null}
               </MenuPopup>
             </Menu>
+            <CustomLlmDialog
+              onOpenChange={setCustomModelDialogOpen}
+              onSaved={async () => {
+                await loadUserModels(false);
+              }}
+              open={customModelDialogOpen}
+            />
 
             <div className="h-5 w-px bg-border" />
 
@@ -5967,6 +6024,341 @@ function ChatModelMenuItem({
   );
 }
 
+function ChatModelProviderMenuItem({
+  description,
+  logo,
+  models,
+  name,
+  onSelectModel,
+  selectedModelId,
+}: {
+  description: string;
+  logo: ChatModelLogo;
+  models: ChatModelOption[];
+  name: string;
+  onSelectModel: (model: ChatModelOption) => void;
+  selectedModelId: string;
+}) {
+  const selected = models.some((model) => model.id === selectedModelId);
+  const representative = models[0] ?? {
+    id: name,
+    logo,
+    name,
+  };
+
+  return (
+    <div className="group/model-provider relative">
+      <MenuItem
+        className="cursor-default"
+        closeOnClick={false}
+        onClick={(event) => event.preventDefault()}
+      >
+        <ChatModelMark model={{ ...representative, logo, name }} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{name}</span>
+          <span className="block truncate text-muted-foreground text-xs">
+            {description}
+          </span>
+        </span>
+        {selected ? <Icon className="text-info" icon={CheckIcon} /> : null}
+        <Icon className="opacity-60" icon={ArrowRight01Icon} />
+      </MenuItem>
+      <div className="absolute left-full top-0 z-50 hidden pl-2 group-hover/model-provider:block group-focus-within/model-provider:block">
+        <div className="absolute left-0 top-0 h-full w-2" />
+        <div className="relative grid w-72 gap-1 rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg/5 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]">
+          {models.map((model) => (
+            <button
+              className={cn(
+                "flex min-h-8 w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-sm transition-[background-color,color] hover:bg-accent hover:text-accent-foreground",
+                selectedModelId === model.id && "bg-accent text-accent-foreground",
+              )}
+              key={model.id}
+              onClick={() => onSelectModel(model)}
+              type="button"
+            >
+              <ChatModelMark model={model} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{model.name}</span>
+                {model.description ? (
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {model.description}
+                  </span>
+                ) : null}
+              </span>
+              {selectedModelId === model.id ? (
+                <Icon className="text-info" icon={CheckIcon} />
+              ) : null}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatModelSetupMenuItem({
+  model,
+  onClick,
+  soon = false,
+}: {
+  model: ChatModelOption;
+  onClick?: () => void;
+  soon?: boolean;
+}) {
+  return (
+    <MenuItem disabled={soon} onClick={onClick}>
+      <ChatModelMark model={model} />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2 truncate">
+          <span className="truncate">{model.name}</span>
+          {soon ? <Badge variant="destructive">Soon</Badge> : null}
+        </span>
+        <span className="block truncate text-muted-foreground text-xs">
+          {model.description}
+        </span>
+      </span>
+    </MenuItem>
+  );
+}
+
+function CustomLlmDialog({
+  onOpenChange,
+  onSaved,
+  open,
+}: {
+  onOpenChange: (open: boolean) => void;
+  onSaved?: () => void | Promise<void>;
+  open: boolean;
+}) {
+  const [connections, setConnections] = useState<DatabaseRecord[]>([]);
+  const [form, setForm] = useState<UserModelConnectionForm>(() =>
+    getDefaultUserModelConnectionForm("custom"),
+  );
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  async function loadConnections() {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/user-model-connections", {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = asRecord(await response.json().catch(() => ({})));
+      setConnections(
+        asRecordArray(payload.connections).filter(
+          (connection) => asString(connection.providerKey) === "custom",
+        ),
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (open) {
+      void loadConnections();
+    }
+  }, [open]);
+
+  function updateForm(key: keyof UserModelConnectionForm, value: string) {
+    setErrorMessage("");
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function saveCustomModel() {
+    setSaving(true);
+    setErrorMessage("");
+    try {
+      const response = await fetch("/api/user-model-connections", {
+        body: JSON.stringify({
+          apiKey: form.apiKey,
+          baseUrl: form.baseUrl,
+          displayName: form.displayName,
+          modelId: form.modelId,
+          providerKey: "custom",
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = asRecord(await response.json().catch(() => ({})));
+      if (!response.ok) {
+        throw new Error(asString(payload.error, "Could not add custom LLM"));
+      }
+
+      setForm(getDefaultUserModelConnectionForm("custom"));
+      await loadConnections();
+      await onSaved?.();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not add custom LLM");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeCustomModel(connectionId: string) {
+    if (!connectionId || deletingId) {
+      return;
+    }
+
+    const connection = connections.find(
+      (item) => asString(item.id) === connectionId,
+    );
+    const confirmed = window.confirm(
+      `Remove ${asString(connection?.displayName, "this custom LLM")}?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingId(connectionId);
+    setErrorMessage("");
+    try {
+      const response = await fetch(
+        `/api/user-model-connections?id=${encodeURIComponent(connectionId)}`,
+        { method: "DELETE" },
+      );
+      const payload = asRecord(await response.json().catch(() => ({})));
+      if (!response.ok) {
+        throw new Error(asString(payload.error, "Could not remove custom LLM"));
+      }
+
+      await loadConnections();
+      await onSaved?.();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not remove custom LLM");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogPopup className="max-w-2xl rounded-2xl">
+        <DialogHeader>
+          <DialogTitle>Custom API LLMs</DialogTitle>
+          <DialogDescription>
+            Add OpenAI-compatible endpoints and choose them from the model picker.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogPanel className="grid gap-4">
+          <div className="rounded-xl border border-border/70">
+            <div className="flex items-center justify-between gap-3 border-b border-border/70 px-3 py-2">
+              <p className="text-sm font-semibold">Your custom API LLMs</p>
+              {loading ? <Spinner className="size-4 text-muted-foreground" /> : null}
+            </div>
+            <div className="grid max-h-48 gap-2 overflow-y-auto p-3">
+              {connections.length > 0 ? (
+                connections.map((connection) => (
+                  <div
+                    className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/70 p-3"
+                    key={asString(connection.id)}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {asString(connection.displayName, "Custom API")}
+                      </p>
+                      <p className="mt-1 truncate text-xs text-muted-foreground">
+                        {asString(connection.modelId)} · {asString(connection.baseUrl)}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {asBoolean(connection.hasApiKey) ? (
+                        <Badge variant="success">Saved key</Badge>
+                      ) : (
+                        <Badge variant="outline">No key</Badge>
+                      )}
+                      <Button
+                        className="h-8 text-red-600 hover:text-red-600 dark:text-red-500 dark:hover:text-red-500"
+                        disabled={Boolean(deletingId)}
+                        loading={deletingId === asString(connection.id)}
+                        onClick={() => void removeCustomModel(asString(connection.id))}
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Icon icon={Delete02Icon} />
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                  No custom API LLMs yet.
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="rounded-xl border border-border/70 p-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">Add custom LLM</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Use any OpenAI-compatible API with your own key.
+                </p>
+              </div>
+              <Badge variant="outline">Custom API</Badge>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <ModelConnectionField
+                label="Display name"
+                onChange={(value) => updateForm("displayName", value)}
+                placeholder="My production LLM"
+                value={form.displayName}
+              />
+              <ModelConnectionField
+                label="Model ID"
+                onChange={(value) => updateForm("modelId", value)}
+                placeholder="gpt-5-mini"
+                value={form.modelId}
+              />
+              <ModelConnectionField
+                description="For OpenAI, keep this default. For another provider, paste its OpenAI-compatible API root, usually ending in /v1."
+                label="Base URL"
+                onChange={(value) => updateForm("baseUrl", value)}
+                placeholder="https://api.openai.com/v1"
+                value={form.baseUrl}
+              />
+              <ModelConnectionField
+                label="API key"
+                onChange={(value) => updateForm("apiKey", value)}
+                placeholder="sk-..."
+                type="password"
+                value={form.apiKey}
+              />
+            </div>
+            {errorMessage ? (
+              <p className="mt-3 text-xs font-medium text-red-600 dark:text-red-500">
+                {errorMessage}
+              </p>
+            ) : null}
+          </div>
+        </DialogPanel>
+        <DialogFooter>
+          <DialogClose render={<Button type="button" variant="outline" />}>
+            Close
+          </DialogClose>
+          <Button
+            loading={saving}
+            onClick={() => void saveCustomModel()}
+            type="button"
+          >
+            <Icon icon={PlusSignIcon} />
+            Add custom LLM
+          </Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
 function ChatModelMark({
   className,
   model,
@@ -6045,14 +6437,26 @@ function ChatMessageBubble({
   if (message.role === "user") {
     return (
       <div className="group flex justify-end px-1 sm:px-2 lg:px-3">
-        <div className="grid justify-items-end gap-1">
+        <div
+          className={cn(
+            "grid justify-items-end gap-1",
+            isEditing ? "max-w-full" : "max-w-full",
+          )}
+        >
           {message.attachments && message.attachments.length > 0 ? (
             <ChatAttachmentGrid
               attachments={message.attachments}
               align="end"
             />
           ) : null}
-          <div className="max-w-[80%] rounded-xl bg-secondary px-3 py-2 text-sm leading-6 text-secondary-foreground">
+          <div
+            className={cn(
+              "rounded-xl bg-secondary px-3 py-2 text-sm leading-6 text-secondary-foreground",
+              isEditing
+                ? "min-w-[min(22rem,80vw)] max-w-[80%]"
+                : "w-fit max-w-[80%]",
+            )}
+          >
             {isEditing ? (
               <InlineMessageEditor
                 onCancel={onCancelEdit}
@@ -6121,6 +6525,15 @@ function InlineMessageEditor({
   value: string;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const syncTextareaHeight = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 240)}px`;
+  }, []);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -6131,14 +6544,22 @@ function InlineMessageEditor({
     textarea.focus();
     textarea.selectionStart = textarea.value.length;
     textarea.selectionEnd = textarea.value.length;
-  }, []);
+    syncTextareaHeight();
+  }, [syncTextareaHeight]);
+
+  useEffect(() => {
+    syncTextareaHeight();
+  }, [syncTextareaHeight, value]);
 
   return (
-    <div className="min-w-[min(22rem,70vw)]">
+    <div className="w-full min-w-0">
       <textarea
         aria-label="Edit message"
-        className="block max-h-72 min-h-24 w-full resize-y rounded-lg border border-black/10 bg-background/80 px-3 py-2 text-sm leading-6 text-foreground outline-none transition-[border-color,box-shadow] focus:border-foreground/25 focus:ring-2 focus:ring-ring/30 dark:border-white/10 dark:bg-background/70"
-        onChange={(event) => onChange?.(event.target.value)}
+        className="block max-h-60 min-h-[1.5rem] w-full min-w-0 resize-none border-0 bg-transparent p-0 text-sm leading-6 text-secondary-foreground outline-none placeholder:text-muted-foreground focus:outline-none focus:ring-0"
+        onChange={(event) => {
+          onChange?.(event.target.value);
+          syncTextareaHeight();
+        }}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();
@@ -6153,16 +6574,16 @@ function InlineMessageEditor({
         ref={textareaRef}
         value={value}
       />
-      <div className="mt-2 flex justify-end gap-2">
+      <div className="mt-2 flex justify-end gap-1">
         <button
-          className="inline-flex h-8 items-center rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-[background-color,color,scale] hover:bg-muted hover:text-foreground active:scale-[0.96]"
+          className="inline-flex h-7 items-center rounded-md px-2 text-xs font-medium text-muted-foreground transition-[color,scale] hover:text-foreground active:scale-[0.96]"
           onClick={onCancel}
           type="button"
         >
           Cancel
         </button>
         <button
-          className="inline-flex h-8 items-center rounded-md bg-foreground px-2.5 text-xs font-medium text-background transition-[opacity,scale] hover:opacity-90 active:scale-[0.96] disabled:pointer-events-none disabled:opacity-40"
+          className="inline-flex h-7 items-center rounded-md bg-foreground px-2.5 text-xs font-medium text-background transition-[opacity,scale] hover:opacity-90 active:scale-[0.96] disabled:pointer-events-none disabled:opacity-40"
           disabled={!value.trim()}
           onClick={() => onSave?.(value)}
           type="button"
@@ -6470,7 +6891,7 @@ function UserMessageContent({
     nodes.splice(0, nodes.length, ...nextNodes);
   });
 
-  return <div className="whitespace-pre-wrap">{nodes}</div>;
+  return <div className="whitespace-pre-wrap break-words">{nodes}</div>;
 }
 
 function escapeRegExp(value: string) {
@@ -6692,6 +7113,7 @@ function AiImageGenerationState() {
 
 function AiTextResponse({ text }: { text: string }) {
   const segments = parseAiTextSegments(text);
+  const requestedExportKind = detectRequestedExportKind(text);
 
   return (
     <div className="grid max-w-[min(100%,52rem)] gap-3 text-sm leading-6 text-foreground">
@@ -6720,6 +7142,7 @@ function AiTextResponse({ text }: { text: string }) {
         if (segment.type === "table") {
           return (
             <AiMarkdownTable
+              exportKind={requestedExportKind}
               headers={segment.headers}
               key={`${segment.type}-${index}`}
               rows={segment.rows}
@@ -7019,13 +7442,253 @@ function AiMarkdownTextBlock({ text }: { text: string }) {
     }
 
     elements.push(
-      <p className="whitespace-pre-wrap" key={`paragraph-${index}`}>
-        {renderInlineMarkdown(paragraphLines.join(" "))}
-      </p>,
+      <AiParagraphBlock
+        key={`paragraph-${index}`}
+        text={paragraphLines.join(" ")}
+      />,
     );
   }
 
   return <div className="grid gap-3">{elements}</div>;
+}
+
+function AiParagraphBlock({ text }: { text: string }) {
+  const actionLink = /^\[([^\]]+)\]\((https?:\/\/[^)\s]+|\/[^)\s]+|#[^)\s]+)\)\.?$/.exec(
+    text.trim(),
+  );
+
+  if (actionLink) {
+    return (
+      <AiActionLinkCard
+        href={actionLink[2]}
+        label={actionLink[1]}
+      />
+    );
+  }
+
+  return (
+    <p className="whitespace-pre-wrap">
+      {renderInlineMarkdown(text)}
+    </p>
+  );
+}
+
+function getArtifactKind(label: string, hrefOrFilename = "") {
+  const value = `${label} ${hrefOrFilename}`.toLowerCase();
+
+  if (value.includes("google sheet") || value.includes("sheets.google")) {
+    return "google-sheets";
+  }
+
+  if (value.includes("google doc") || value.includes("docs.google")) {
+    return "google-docs";
+  }
+
+  if (value.includes("pdf") || value.endsWith(".pdf")) {
+    return "pdf";
+  }
+
+  if (value.includes("excel") || /\.xlsx?$/.test(value)) {
+    return "excel";
+  }
+
+  if (value.includes("word") || /\.docx?$/.test(value)) {
+    return "word";
+  }
+
+  if (value.includes("csv") || value.endsWith(".csv")) {
+    return "csv";
+  }
+
+  if (value.includes("markdown") || value.endsWith(".md")) {
+    return "markdown";
+  }
+
+  return "file";
+}
+
+function ArtifactIconTile({
+  className,
+  filename,
+  label,
+}: {
+  className?: string;
+  filename?: string;
+  label: string;
+}) {
+  const kind = getArtifactKind(label, filename);
+  const compact = className?.includes("size-");
+  const iconClassName = compact ? "size-3.5" : "size-6";
+
+  if (kind === "google-sheets") {
+    return (
+      <span
+        className={cn(
+          "grid size-10 shrink-0 place-items-center rounded-xl border border-black/8 bg-white p-2 shadow-xs/5 dark:border-white/10",
+          className,
+        )}
+      >
+        <ConnectorLogo
+          connector={{ key: "google-sheets", logo: "GS", name: "Google Sheets" }}
+        />
+      </span>
+    );
+  }
+
+  const colors: Record<string, string> = {
+    csv: "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400",
+    excel: "bg-green-500/12 text-green-600 dark:text-green-400",
+    file: "bg-muted text-muted-foreground",
+    markdown: "bg-zinc-500/12 text-zinc-700 dark:text-zinc-200",
+    pdf: "bg-red-500/12 text-red-600 dark:text-red-400",
+    word: "bg-blue-500/12 text-blue-600 dark:text-blue-400",
+  };
+
+  return (
+    <span
+      className={cn(
+        "grid size-10 shrink-0 place-items-center rounded-xl border border-black/8 shadow-xs/5 dark:border-white/10",
+        colors[kind] ?? colors.file,
+        className,
+      )}
+    >
+      <FileKindLogo className={iconClassName} kind={kind} />
+    </span>
+  );
+}
+
+function FileKindLogo({
+  className,
+  kind,
+}: {
+  className?: string;
+  kind: string;
+}) {
+  if (kind === "pdf") {
+    return <PdfFileLogo className={className} />;
+  }
+
+  if (kind === "csv") {
+    return <CsvFileLogo className={className} />;
+  }
+
+  if (kind === "excel") {
+    return <ExcelFileLogo className={className} />;
+  }
+
+  if (kind === "word") {
+    return <WordFileLogo className={className} />;
+  }
+
+  if (kind === "markdown") {
+    return <MarkdownFileLogo className={className} />;
+  }
+
+  return <Icon className={className} icon={File01Icon} />;
+}
+
+function PdfFileLogo(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 32 32" {...props}>
+      <path
+        d="M8 3.5h11.5L25 9v19.5H8z"
+        fill="#ef4444"
+        opacity="0.16"
+      />
+      <path
+        d="M8 3.5h11.5L25 9v19.5H8z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+      <path d="M19.5 3.5V9H25" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+      <path d="M10.5 20.5c5.7-1.7 8.3-5.4 7.5-8.1-.4-1.3-1.9-.8-1.8.8.2 2.8 2.5 5.5 5.4 6.7" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      <path d="M10.5 24h11" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function CsvFileLogo(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 32 32" {...props}>
+      <path d="M7 4h18v24H7z" fill="#10b981" opacity="0.16" />
+      <path d="M7 4h18v24H7z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+      <path d="M11 11h10M11 16h10M11 21h10M15.5 8v17" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
+      <path d="M10.2 26h11.6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function ExcelFileLogo(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 32 32" {...props}>
+      <path d="M10 5h15v22H10z" fill="#22c55e" opacity="0.16" />
+      <path d="M10 5h15v22H10z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+      <path d="M6 9.5h10v13H6z" fill="currentColor" opacity="0.9" />
+      <path d="M8.8 13l4.4 6M13.2 13l-4.4 6" stroke="var(--background)" strokeLinecap="round" strokeWidth="1.8" />
+      <path d="M18.5 11h3.5M18.5 15h3.5M18.5 19h3.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+function WordFileLogo(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 32 32" {...props}>
+      <path d="M10 5h15v22H10z" fill="#3b82f6" opacity="0.16" />
+      <path d="M10 5h15v22H10z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+      <path d="M6 9.5h10v13H6z" fill="currentColor" opacity="0.9" />
+      <path d="M8.4 13l1.2 6 1.4-4.2 1.4 4.2 1.2-6" stroke="var(--background)" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <path d="M18.5 11h3.5M18.5 15h3.5M18.5 19h3.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+function MarkdownFileLogo(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 32 32" {...props}>
+      <path d="M5.5 8h21v16h-21z" fill="currentColor" opacity="0.12" />
+      <path d="M5.5 8h21v16h-21z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+      <path d="M9 20v-8l3 4 3-4v8M20 12v7M17.5 16.5 20 19l2.5-2.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" />
+    </svg>
+  );
+}
+
+function AiActionLinkCard({
+  href,
+  label,
+}: {
+  href: string;
+  label: string;
+}) {
+  const kind = getArtifactKind(label, href);
+  const subtitle =
+    kind === "google-sheets"
+      ? "Google Sheets document"
+      : kind === "google-docs"
+        ? "Google Docs document"
+        : "Generated artifact";
+
+  return (
+    <a
+      className="flex w-full max-w-xl items-center gap-3 rounded-xl border border-black/8 bg-background p-3 text-foreground shadow-xs/5 transition-[background-color,border-color,scale] hover:border-foreground/15 hover:bg-muted/35 active:scale-[0.99] dark:border-white/8"
+      href={href}
+      rel="noreferrer"
+      target={href.startsWith("http") ? "_blank" : undefined}
+    >
+      <ArtifactIconTile label={label} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold">{label}</span>
+        <span className="mt-1 block truncate text-xs text-muted-foreground">
+          {subtitle}
+        </span>
+      </span>
+      <span className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-foreground px-2.5 text-xs font-medium text-background">
+        Open
+        <Icon className="size-3.5" icon={ArrowRight01Icon} />
+      </span>
+    </a>
+  );
 }
 
 function renderInlineMarkdown(text: string) {
@@ -7093,9 +7756,11 @@ function renderInlineMarkdown(text: string) {
 }
 
 function AiMarkdownTable({
+  exportKind,
   headers,
   rows,
 }: {
+  exportKind?: TableExportKind;
   headers: string[];
   rows: string[][];
 }) {
@@ -7110,9 +7775,38 @@ function AiMarkdownTable({
     <AiGeneratedTable
       headers={table.headers}
       rows={table.rows}
+      exportKind={exportKind}
       variant={comparison ? "comparison" : "data"}
     />
   );
+}
+
+type TableExportKind = "csv" | "excel" | "markdown" | "pdf" | "word";
+
+function detectRequestedExportKind(text: string): TableExportKind | undefined {
+  const normalizedText = text.toLowerCase();
+
+  if (/\bpdf\b|\.pdf\b/.test(normalizedText)) {
+    return "pdf";
+  }
+
+  if (/\bcsv\b|\.csv\b/.test(normalizedText)) {
+    return "csv";
+  }
+
+  if (/\bexcel\b|\bxlsx?\b|\.xlsx?\b/.test(normalizedText)) {
+    return "excel";
+  }
+
+  if (/\bword\b|\bdocx?\b|\.docx?\b/.test(normalizedText)) {
+    return "word";
+  }
+
+  if (/\bmarkdown\b|\bmd\b|\.md\b/.test(normalizedText)) {
+    return "markdown";
+  }
+
+  return undefined;
 }
 
 function normalizeAiTableData(headers: string[], rows: string[][]) {
@@ -7135,17 +7829,52 @@ function normalizeAiTableData(headers: string[], rows: string[][]) {
 }
 
 function AiGeneratedTable({
+  exportKind = "pdf",
   headers,
   rows,
   variant = "data",
 }: {
+  exportKind?: TableExportKind;
   headers: string[];
   rows: string[][];
   variant?: "comparison" | "data";
 }) {
+  const exportAction = getTableExportAction(exportKind, headers, rows);
+
   return (
-    <div className="w-full max-w-full rounded-xl border border-black/8 bg-background text-sm text-foreground dark:border-white/8">
-      <div className="max-w-full overflow-x-auto rounded-[inherit]">
+    <div className="w-full max-w-full overflow-hidden rounded-xl border border-black/8 bg-background text-sm text-foreground dark:border-white/8">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <ArtifactIconTile
+            filename={exportAction.filename}
+            label={exportAction.filename}
+          />
+          <div className="min-w-0">
+            <p className="truncate font-mono text-xs font-semibold">
+              {exportAction.filename}
+            </p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              Table preview
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-1">
+          <button
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-[background-color,color,scale] hover:bg-muted hover:text-foreground active:scale-[0.96]"
+            onClick={exportAction.onClick}
+            type="button"
+          >
+            <ArtifactIconTile
+              className="size-5 rounded-md border-0 shadow-none"
+              filename={exportAction.filename}
+              label={exportAction.label}
+            />
+            <span>{exportAction.label}</span>
+            <Icon className="size-3.5" icon={Download01Icon} />
+          </button>
+        </div>
+      </div>
+      <div className="max-w-full overflow-x-auto">
         <table className="min-w-max border-separate border-spacing-0">
           <thead>
             <tr>
@@ -7253,36 +7982,280 @@ function AiCodeBlock({
 } = {}) {
   const fallbackCode =
     "export const sum = (a: number, b: number) =>\n  a + b;\n\nexport const clamp = (n: number, min: number, max: number) =>\n  Math.min(Math.max(n, min), max);";
-  const lines = (code?.trimEnd() || fallbackCode).split("\n");
+  const content = code?.trimEnd() || fallbackCode;
+  const lines = content.split("\n");
+  const language = getCodeLanguage(filename);
 
   return (
     <div className="w-full max-w-full overflow-hidden rounded-xl border border-black/8 bg-background text-sm dark:border-white/8">
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <div className="flex items-center gap-2 font-mono text-xs">
-          <Icon className="size-3.5 text-muted-foreground" icon={File01Icon} />
-          {filename}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <ArtifactIconTile filename={filename} label={filename} />
+          <div className="min-w-0">
+            <p className="truncate font-mono text-xs font-semibold">{filename}</p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              Generated file preview
+            </p>
+          </div>
         </div>
-        <button
-          className="text-xs text-muted-foreground hover:text-foreground"
-          type="button"
-        >
-          Copy
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-[background-color,color] hover:bg-muted hover:text-foreground"
+            onClick={() => {
+              navigator.clipboard?.writeText(content).catch(() => undefined);
+            }}
+            type="button"
+          >
+            <Icon className="size-3.5" icon={Copy01Icon} />
+            Copy
+          </button>
+          <button
+            className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-[background-color,color] hover:bg-muted hover:text-foreground"
+            onClick={() => downloadTextFile(filename, content)}
+            type="button"
+          >
+            <Icon className="size-3.5" icon={Download01Icon} />
+            Download
+          </button>
+        </div>
       </div>
       <pre className="max-w-full overflow-x-auto p-3 text-xs leading-5 text-foreground">
-        <code>
+        <code className="font-mono">
           {lines.map((line, index) => (
             <span className="block" key={`${index}-${line}`}>
-              <span className="mr-3 select-none text-muted-foreground">
+              <span className="mr-3 inline-block w-6 select-none text-right tabular-nums text-muted-foreground/70">
                 {index + 1}
               </span>
-              {line}
+              <span>{renderHighlightedCodeLine(line, language, index)}</span>
             </span>
           ))}
         </code>
       </pre>
     </div>
   );
+}
+
+function getCodeLanguage(filename: string) {
+  const extension = filename.split(".").pop()?.toLowerCase() ?? "";
+  const aliases: Record<string, string> = {
+    bash: "shell",
+    cjs: "javascript",
+    css: "css",
+    html: "html",
+    js: "javascript",
+    jsx: "javascript",
+    json: "json",
+    md: "markdown",
+    mjs: "javascript",
+    py: "python",
+    python: "python",
+    sh: "shell",
+    sql: "sql",
+    ts: "typescript",
+    tsx: "typescript",
+    xml: "html",
+    yaml: "yaml",
+    yml: "yaml",
+  };
+
+  return aliases[extension] ?? extension;
+}
+
+function renderHighlightedCodeLine(
+  line: string,
+  language: string,
+  lineIndex: number,
+) {
+  const parts = splitCodeLine(line, language);
+
+  return parts.map((part, index) => {
+    if (part.kind === "plain") {
+      return renderHighlightedPlainCode(part.text, language, `${lineIndex}-${index}`);
+    }
+
+    return (
+      <span
+        className={cn(
+          part.kind === "comment" && "text-muted-foreground/75 italic",
+          part.kind === "string" && "text-emerald-600 dark:text-emerald-400",
+        )}
+        key={`${lineIndex}-${index}-${part.kind}`}
+      >
+        {part.text}
+      </span>
+    );
+  });
+}
+
+function splitCodeLine(line: string, language: string) {
+  const parts: { kind: "comment" | "plain" | "string"; text: string }[] = [];
+  const commentMarkers = getCodeCommentMarkers(language);
+  let cursor = 0;
+
+  const pushPlain = (text: string) => {
+    if (text) {
+      parts.push({ kind: "plain", text });
+    }
+  };
+
+  while (cursor < line.length) {
+    const marker = commentMarkers.find((candidate) =>
+      line.startsWith(candidate, cursor),
+    );
+
+    if (marker) {
+      parts.push({ kind: "comment", text: line.slice(cursor) });
+      break;
+    }
+
+    const char = line[cursor];
+    if (char === '"' || char === "'" || char === "`") {
+      let end = cursor + 1;
+      while (end < line.length) {
+        if (line[end] === "\\" && end + 1 < line.length) {
+          end += 2;
+          continue;
+        }
+
+        if (line[end] === char) {
+          end += 1;
+          break;
+        }
+
+        end += 1;
+      }
+
+      parts.push({ kind: "string", text: line.slice(cursor, end) });
+      cursor = end;
+      continue;
+    }
+
+    const nextSpecialIndexes = [
+      ...commentMarkers
+        .map((candidate) => line.indexOf(candidate, cursor + 1))
+        .filter((index) => index >= 0),
+      ...['"', "'", "`"]
+        .map((candidate) => line.indexOf(candidate, cursor + 1))
+        .filter((index) => index >= 0),
+    ];
+    const nextSpecial =
+      nextSpecialIndexes.length > 0 ? Math.min(...nextSpecialIndexes) : line.length;
+
+    pushPlain(line.slice(cursor, nextSpecial));
+    cursor = nextSpecial;
+  }
+
+  return parts.length ? parts : [{ kind: "plain" as const, text: line }];
+}
+
+function getCodeCommentMarkers(language: string) {
+  if (["python", "shell", "yaml"].includes(language)) {
+    return ["#"];
+  }
+
+  if (["sql"].includes(language)) {
+    return ["--"];
+  }
+
+  return ["//"];
+}
+
+function renderHighlightedPlainCode(
+  text: string,
+  language: string,
+  keyPrefix: string,
+) {
+  const keywordSet = getCodeKeywords(language);
+  const tokens: React.ReactNode[] = [];
+  const tokenPattern =
+    /([A-Za-z_$][\w$]*)(?=\s*\()|([A-Za-z_$][\w$]*)|(\b\d+(?:\.\d+)?\b)|([{}()[\].,;:+\-*/%=<>!|&]+)/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenPattern.exec(text))) {
+    if (match.index > cursor) {
+      tokens.push(text.slice(cursor, match.index));
+    }
+
+    const [token, functionName, identifier, number, operator] = match;
+    const className = cn(
+      functionName && !keywordSet.has(functionName)
+        ? "text-cyan-600 dark:text-cyan-300"
+        : undefined,
+      identifier && keywordSet.has(identifier)
+        ? "text-blue-600 dark:text-blue-300"
+        : undefined,
+      identifier && /^(true|false|null|none|undefined)$/i.test(identifier)
+        ? "text-purple-600 dark:text-purple-300"
+        : undefined,
+      number && "text-purple-600 dark:text-purple-300",
+      operator && "text-muted-foreground",
+    );
+
+    tokens.push(
+      className ? (
+        <span className={className} key={`${keyPrefix}-${match.index}`}>
+          {token}
+        </span>
+      ) : (
+        token
+      ),
+    );
+    cursor = match.index + token.length;
+  }
+
+  if (cursor < text.length) {
+    tokens.push(text.slice(cursor));
+  }
+
+  return tokens.length ? tokens : text;
+}
+
+function getCodeKeywords(language: string) {
+  const common = [
+    "as",
+    "async",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "default",
+    "def",
+    "delete",
+    "do",
+    "else",
+    "except",
+    "export",
+    "extends",
+    "finally",
+    "for",
+    "from",
+    "function",
+    "if",
+    "import",
+    "in",
+    "interface",
+    "let",
+    "new",
+    "return",
+    "switch",
+    "throw",
+    "try",
+    "type",
+    "var",
+    "while",
+    "with",
+    "yield",
+  ];
+  const byLanguage: Record<string, string[]> = {
+    python: ["and", "elif", "false", "is", "lambda", "none", "not", "or", "pass", "true"],
+    sql: ["and", "by", "create", "delete", "from", "group", "insert", "join", "limit", "order", "select", "table", "update", "values", "where"],
+  };
+
+  return new Set([...(byLanguage[language] ?? []), ...common]);
 }
 
 function AiTaskList({ items }: { items: AiTaskListItem[] }) {
@@ -12672,13 +13645,9 @@ function getDefaultUserModelConnectionForm(
 }
 
 function SettingsModelAccess() {
-  const [forms, setForms] = useState<Record<UserModelProviderKey, UserModelConnectionForm>>({
-    custom: getDefaultUserModelConnectionForm("custom"),
-    local: getDefaultUserModelConnectionForm("local"),
-  });
+  const [customDialogOpen, setCustomDialogOpen] = useState(false);
+  const [customConnections, setCustomConnections] = useState<DatabaseRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<UserModelProviderKey | null>(null);
-  const [saved, setSaved] = useState<UserModelProviderKey | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
@@ -12705,30 +13674,11 @@ function SettingsModelAccess() {
           return;
         }
 
-        setForms((current) => {
-          const next = { ...current };
-
-          for (const connection of connections) {
-            const providerKey = asString(connection.providerKey) as UserModelProviderKey;
-            if (providerKey !== "custom" && providerKey !== "local") {
-              continue;
-            }
-
-            next[providerKey] = {
-              ...next[providerKey],
-              apiKey: "",
-              baseUrl: asString(connection.baseUrl, next[providerKey].baseUrl),
-              displayName: asString(
-                connection.displayName,
-                next[providerKey].displayName,
-              ),
-              hasApiKey: asBoolean(connection.hasApiKey),
-              modelId: asString(connection.modelId, next[providerKey].modelId),
-            };
-          }
-
-          return next;
-        });
+        setCustomConnections(
+          connections.filter(
+            (connection) => asString(connection.providerKey) === "custom",
+          ),
+        );
       } finally {
         if (alive) {
           setLoading(false);
@@ -12743,103 +13693,114 @@ function SettingsModelAccess() {
     };
   }, []);
 
-  function updateForm(
-    providerKey: UserModelProviderKey,
-    key: keyof UserModelConnectionForm,
-    value: string,
-  ) {
-    setSaved(null);
-    setErrorMessage("");
-    setForms((current) => ({
-      ...current,
-      [providerKey]: {
-        ...current[providerKey],
-        [key]: value,
-      },
-    }));
-  }
-
-  async function saveConnection(providerKey: UserModelProviderKey) {
-    const form = forms[providerKey];
-    setSaving(providerKey);
-    setSaved(null);
-    setErrorMessage("");
-
+  async function refreshCustomConnections() {
+    setLoading(true);
     try {
       const response = await fetch("/api/user-model-connections", {
-        body: JSON.stringify({
-          apiKey: form.apiKey,
-          baseUrl: form.baseUrl,
-          displayName: form.displayName,
-          modelId: form.modelId,
-          providerKey,
-        }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
+        cache: "no-store",
       });
-      const payload = asRecord(await response.json().catch(() => ({})));
       if (!response.ok) {
-        throw new Error(asString(payload.error, "Could not save model"));
+        return;
       }
 
-      const connection = asRecord(payload.connection);
-      setForms((current) => ({
-        ...current,
-        [providerKey]: {
-          ...current[providerKey],
-          apiKey: "",
-          baseUrl: asString(connection.baseUrl, current[providerKey].baseUrl),
-          displayName: asString(
-            connection.displayName,
-            current[providerKey].displayName,
-          ),
-          hasApiKey: asBoolean(connection.hasApiKey),
-          modelId: asString(connection.modelId, current[providerKey].modelId),
-        },
-      }));
-      setSaved(providerKey);
-      window.setTimeout(() => {
-        setSaved((current) => (current === providerKey ? null : current));
-      }, 1800);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not save model");
+      const payload = asRecord(await response.json().catch(() => ({})));
+      setCustomConnections(
+        asRecordArray(payload.connections).filter(
+          (connection) => asString(connection.providerKey) === "custom",
+        ),
+      );
     } finally {
-      setSaving(null);
+      setLoading(false);
     }
   }
 
   return (
     <SettingsSection
-      action={loading ? <Spinner className="size-4 text-muted-foreground" /> : null}
-      description="Add your own cloud API model or local model endpoint."
+      action={
+        <div className="flex items-center gap-2">
+          {loading ? <Spinner className="size-4 text-muted-foreground" /> : null}
+          <Button
+            onClick={() => setCustomDialogOpen(true)}
+            size="sm"
+            type="button"
+          >
+            <Icon icon={PlusSignIcon} />
+            Add custom LLM
+          </Button>
+        </div>
+      }
+      description="Manage custom API LLMs. Local model support is coming soon."
       icon={AiBrainIcon}
       title="Model access"
     >
-      <div className="grid gap-3 p-4 lg:grid-cols-2">
-        <ModelConnectionCard
-          description="Connect an OpenAI-compatible endpoint with your own API key."
-          form={forms.custom}
-          onChange={(key, value) => updateForm("custom", key, value)}
-          onSave={() => saveConnection("custom")}
-          saved={saved === "custom"}
-          saving={saving === "custom"}
-          title="Custom API model"
-        />
-        <ModelConnectionCard
-          description="Use a local OpenAI-compatible server, such as Ollama or LM Studio."
-          form={forms.local}
-          onChange={(key, value) => updateForm("local", key, value)}
-          onSave={() => saveConnection("local")}
-          saved={saved === "local"}
-          saving={saving === "local"}
-          title="Local model"
-        />
+      <div className="grid gap-3 p-4">
+        <div className="rounded-xl border border-border/70 bg-background/70 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">Custom API LLMs</h3>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                OpenAI-compatible endpoints connected to your account.
+              </p>
+            </div>
+            <Badge variant="outline">
+              {customConnections.length} models
+            </Badge>
+          </div>
+          <div className="mt-3 grid gap-2">
+            {customConnections.length > 0 ? (
+              customConnections.map((connection) => (
+                <div
+                  className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/25 p-3"
+                  key={asString(connection.id)}
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {asString(connection.displayName, "Custom API")}
+                    </p>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {asString(connection.modelId)} · {asString(connection.baseUrl)}
+                    </p>
+                  </div>
+                  {asBoolean(connection.hasApiKey) ? (
+                    <Badge variant="success">Saved key</Badge>
+                  ) : (
+                    <Badge variant="outline">No key</Badge>
+                  )}
+                </div>
+              ))
+            ) : (
+              <button
+                className="rounded-lg border border-dashed border-border p-4 text-left text-sm text-muted-foreground transition-[background-color,color] hover:bg-muted/40 hover:text-foreground"
+                onClick={() => setCustomDialogOpen(true)}
+                type="button"
+              >
+                No custom API LLMs yet. Add your first custom LLM.
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="rounded-xl border border-border/70 bg-background/70 p-3 opacity-80">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold">Local model</h3>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Local OpenAI-compatible endpoints will be available later.
+              </p>
+            </div>
+            <Badge variant="destructive">Soon</Badge>
+          </div>
+        </div>
       </div>
       {errorMessage ? (
         <div className="px-4 py-3 text-xs font-medium text-red-600 dark:text-red-500">
           {errorMessage}
         </div>
       ) : null}
+      <CustomLlmDialog
+        onOpenChange={setCustomDialogOpen}
+        onSaved={refreshCustomConnections}
+        open={customDialogOpen}
+      />
     </SettingsSection>
   );
 }
@@ -12916,12 +13877,14 @@ function ModelConnectionCard({
 }
 
 function ModelConnectionField({
+  description,
   label,
   onChange,
   placeholder,
   type = "text",
   value,
 }: {
+  description?: string;
   label: string;
   onChange: (value: string) => void;
   placeholder: string;
@@ -12944,6 +13907,11 @@ function ModelConnectionField({
         type={type}
         value={value}
       />
+      {description ? (
+        <p className="text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -15324,6 +16292,305 @@ function downloadCsv(
     .map((row) => row.map(csvCell).join(","))
     .join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function getTextFileMimeType(filename: string) {
+  const extension = filename.split(".").pop()?.toLowerCase();
+
+  switch (extension) {
+    case "csv":
+      return "text/csv;charset=utf-8";
+    case "html":
+      return "text/html;charset=utf-8";
+    case "json":
+      return "application/json;charset=utf-8";
+    case "doc":
+    case "docx":
+      return "application/msword;charset=utf-8";
+    case "xls":
+    case "xlsx":
+      return "application/vnd.ms-excel;charset=utf-8";
+    case "md":
+    case "markdown":
+      return "text/markdown;charset=utf-8";
+    case "xml":
+      return "application/xml;charset=utf-8";
+    case "yaml":
+    case "yml":
+      return "application/yaml;charset=utf-8";
+    default:
+      return "text/plain;charset=utf-8";
+  }
+}
+
+function downloadTextFile(filename: string, content: string) {
+  const safeFilename = filename.trim() || "download.txt";
+  const blob = new Blob([content], { type: getTextFileMimeType(safeFilename) });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = safeFilename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function downloadTableCsv(
+  filename: string,
+  headers: string[],
+  rows: string[][],
+) {
+  const content = tableToCsv(headers, rows);
+  downloadTextFile(filename, content);
+}
+
+function downloadTableMarkdown(
+  filename: string,
+  headers: string[],
+  rows: string[][],
+) {
+  const content = tableToMarkdown(headers, rows);
+  downloadTextFile(filename, content);
+}
+
+function downloadTableExcel(
+  filename: string,
+  headers: string[],
+  rows: string[][],
+) {
+  downloadTextFile(filename, tableToHtmlDocument(headers, rows, "Excel table"));
+}
+
+function downloadTableWord(
+  filename: string,
+  headers: string[],
+  rows: string[][],
+) {
+  downloadTextFile(filename, tableToHtmlDocument(headers, rows, "Word table"));
+}
+
+function getTableExportAction(
+  kind: TableExportKind,
+  headers: string[],
+  rows: string[][],
+) {
+  switch (kind) {
+    case "csv":
+      return {
+        filename: "generated-table.csv",
+        label: "CSV",
+        onClick: () => downloadTableCsv("generated-table.csv", headers, rows),
+      };
+    case "excel":
+      return {
+        filename: "generated-table.xls",
+        label: "Excel",
+        onClick: () => downloadTableExcel("generated-table.xls", headers, rows),
+      };
+    case "word":
+      return {
+        filename: "generated-table.doc",
+        label: "Word",
+        onClick: () => downloadTableWord("generated-table.doc", headers, rows),
+      };
+    case "markdown":
+      return {
+        filename: "generated-table.md",
+        label: "MD",
+        onClick: () => downloadTableMarkdown("generated-table.md", headers, rows),
+      };
+    case "pdf":
+    default:
+      return {
+        filename: "generated-table.pdf",
+        label: "PDF",
+        onClick: () => downloadTablePdf("generated-table.pdf", headers, rows),
+      };
+  }
+}
+
+function downloadTablePdf(
+  filename: string,
+  headers: string[],
+  rows: string[][],
+) {
+  const safeFilename = filename.trim() || "generated-table.pdf";
+  const pageWidth = 595;
+  const pageHeight = 842;
+  const margin = 40;
+  const contentWidth = pageWidth - margin * 2;
+  const columnCount = Math.max(1, headers.length);
+  const columnWidth = contentWidth / columnCount;
+  const maxCellChars = Math.max(8, Math.floor(columnWidth / 5));
+  const rowHeight = 22;
+  let y = pageHeight - margin;
+  const operations: string[] = [];
+
+  const drawText = (text: string, x: number, textY: number, size = 9) => {
+    operations.push(
+      `BT /F1 ${size} Tf ${x.toFixed(2)} ${textY.toFixed(2)} Td (${escapePdfText(text)}) Tj ET`,
+    );
+  };
+
+  drawText("Generated table", margin, y, 16);
+  y -= 30;
+
+  const tableRows = [headers, ...rows].slice(0, 30);
+  tableRows.forEach((row, rowIndex) => {
+    const isHeader = rowIndex === 0;
+    const fontSize = isHeader ? 9.5 : 8.5;
+
+    row.slice(0, columnCount).forEach((cell, columnIndex) => {
+      const x = margin + columnIndex * columnWidth;
+      const text = truncatePdfText(plainPdfText(cell), maxCellChars);
+      drawText(text, x, y, fontSize);
+    });
+
+    operations.push(
+      `${margin.toFixed(2)} ${(y - 7).toFixed(2)} m ${(pageWidth - margin).toFixed(2)} ${(y - 7).toFixed(2)} l S`,
+    );
+    y -= rowHeight;
+  });
+
+  if (rows.length > tableRows.length - 1) {
+    y -= 8;
+    drawText(
+      `Showing first ${tableRows.length - 1} rows of ${rows.length}.`,
+      margin,
+      y,
+      8,
+    );
+  }
+
+  downloadPdfBlob(safeFilename, createSimplePdf(operations.join("\n")));
+}
+
+function tableToCsv(headers: string[], rows: string[][]) {
+  return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function tableToMarkdown(headers: string[], rows: string[][]) {
+  const safeHeaders = headers.map(markdownTableCell);
+  const separator = safeHeaders.map(() => "---");
+  const safeRows = rows.map((row) => headers.map((_, index) => markdownTableCell(row[index] ?? "")));
+
+  return [safeHeaders, separator, ...safeRows]
+    .map((row) => `| ${row.join(" | ")} |`)
+    .join("\n");
+}
+
+function markdownTableCell(value: unknown) {
+  return String(value ?? "")
+    .replace(/\r?\n/g, " ")
+    .replace(/\|/g, "\\|")
+    .trim();
+}
+
+function tableToHtmlDocument(
+  headers: string[],
+  rows: string[][],
+  title: string,
+) {
+  const headerCells = headers
+    .map((header) => `<th>${escapeHtml(String(header ?? ""))}</th>`)
+    .join("");
+  const bodyRows = rows
+    .map(
+      (row) =>
+        `<tr>${headers
+          .map((_, index) => `<td>${escapeHtml(String(row[index] ?? ""))}</td>`)
+          .join("")}</tr>`,
+    )
+    .join("");
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(title)}</title>
+<style>
+body{font-family:Arial,sans-serif;color:#111827}
+table{border-collapse:collapse;width:100%}
+th,td{border:1px solid #d1d5db;padding:8px;text-align:left}
+th{background:#f3f4f6;font-weight:700}
+</style>
+</head>
+<body>
+<table><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table>
+</body>
+</html>`;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function plainPdfText(value: unknown) {
+  return String(value ?? "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "");
+}
+
+function truncatePdfText(value: string, maxLength: number) {
+  return value.length > maxLength
+    ? `${value.slice(0, Math.max(0, maxLength - 3))}...`
+    : value;
+}
+
+function escapePdfText(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+function createSimplePdf(contentStream: string) {
+  const pageWidth = 595;
+  const pageHeight = 842;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${contentStream.length} >>\nstream\n${contentStream}\nendstream`,
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+
+  objects.forEach((object, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  pdf += offsets
+    .slice(1)
+    .map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`)
+    .join("");
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+
+  return pdf;
+}
+
+function downloadPdfBlob(filename: string, pdf: string) {
+  const blob = new Blob([pdf], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
 

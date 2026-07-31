@@ -72,6 +72,10 @@ export async function POST(request: Request) {
       return badRequest("Only custom and local model connections are supported.");
     }
 
+    if (providerKey === "local") {
+      return badRequest("Local models are coming soon.");
+    }
+
     if (!modelId) {
       return badRequest("Model ID is required.");
     }
@@ -80,29 +84,13 @@ export async function POST(request: Request) {
       return badRequest("Base URL is required.");
     }
 
-    const { data: existingRows, error: existingError } = await auth.admin
-      .from("user_model_connections")
-      .select("id, api_key_secret")
-      .eq("user_id", auth.user.id)
-      .eq("provider_key", providerKey)
-      .is("workspace_id", null)
-      .limit(1);
-
-    if (existingError) {
-      throw existingError;
-    }
-
-    const existing = (existingRows ?? [])[0] as
-      | { api_key_secret?: string | null; id: string }
-      | undefined;
-
-    if (providerKey === "custom" && !apiKey && !existing?.api_key_secret) {
+    if (providerKey === "custom" && !apiKey) {
       return badRequest("API key is required for custom API models.");
     }
 
     const payload = {
       base_url: baseUrl,
-      display_name: displayName || (providerKey === "local" ? "Local model" : "Custom API"),
+      display_name: displayName || "Custom API",
       enabled: true,
       model_id: modelId,
       provider_key: providerKey,
@@ -112,25 +100,46 @@ export async function POST(request: Request) {
       ...(apiKey ? { api_key_secret: apiKey } : {}),
     };
 
-    const query = existing
-      ? auth.admin
-          .from("user_model_connections")
-          .update(payload)
-          .eq("id", existing.id)
-          .select("id, provider_key, display_name, model_id, base_url, api_key_secret, enabled")
-          .single()
-      : auth.admin
-          .from("user_model_connections")
-          .insert(payload)
-          .select("id, provider_key, display_name, model_id, base_url, api_key_secret, enabled")
-          .single();
-
-    const { data, error } = await query;
+    const { data, error } = await auth.admin
+      .from("user_model_connections")
+      .insert(payload)
+      .select("id, provider_key, display_name, model_id, base_url, api_key_secret, enabled")
+      .single();
     if (error) {
       throw error;
     }
 
     return ok({ connection: sanitizeConnection(data as Record<string, unknown>) });
+  } catch (error) {
+    return serverError(error);
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const auth = await requireUser();
+    if (isRouteResponse(auth)) {
+      return auth;
+    }
+
+    const id = new URL(request.url).searchParams.get("id") ?? "";
+    if (!id) {
+      return badRequest("Model connection ID is required.");
+    }
+
+    const { error } = await auth.admin
+      .from("user_model_connections")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", auth.user.id)
+      .eq("provider_key", "custom")
+      .is("workspace_id", null);
+
+    if (error) {
+      throw error;
+    }
+
+    return ok({ success: true });
   } catch (error) {
     return serverError(error);
   }
