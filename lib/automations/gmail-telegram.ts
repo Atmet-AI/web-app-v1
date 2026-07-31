@@ -412,6 +412,7 @@ export async function provisionGmailToTelegramAutomation({
     .from("workflow_agents")
     .select("*")
     .eq("workspace_id", workspaceId)
+    .eq("created_by", userId)
     .eq("runtime_state", "running")
     .eq("status", "active")
     .eq("settings->automation->>type", automationType)
@@ -464,6 +465,22 @@ export async function provisionGmailToTelegramAutomation({
   }
 
   const agentId = stringValue(asRecord(agent).id);
+  const { error: agentMemberError } = await admin
+    .from("workflow_agent_members")
+    .upsert(
+      {
+        agent_id: agentId,
+        assigned_by: userId,
+        role: "owner",
+        user_id: userId,
+      },
+      { onConflict: "agent_id,user_id" },
+    );
+
+  if (agentMemberError) {
+    throw agentMemberError;
+  }
+
   const { data: nodes, error: nodesError } = await admin
     .from("workflow_nodes")
     .insert([

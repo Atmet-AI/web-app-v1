@@ -2,6 +2,7 @@ import {
   handleGmailToTelegramWebhook,
   verifyComposioWebhookRequest,
 } from "@/lib/automations/gmail-telegram";
+import { handleGenericComposioTriggerWebhook } from "@/lib/agents/composio-triggers";
 import { forbidden, ok, serverError } from "@/lib/api/http";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -25,13 +26,22 @@ export async function POST(request: Request) {
       return ok({ handled: false, reason: "ignored_event_type" });
     }
 
-    const result = await handleGmailToTelegramWebhook({
-      admin: createSupabaseAdminClient(),
-      payload,
-    });
+    const admin = createSupabaseAdminClient();
+    const genericResult = await handleGenericComposioTriggerWebhook({ admin, payload });
+
+    if (genericResult.handled) {
+      return ok({
+        ...genericResult,
+        handler: "generic",
+        verificationSkipped: verification.skipped,
+      });
+    }
+
+    const result = await handleGmailToTelegramWebhook({ admin, payload });
 
     return ok({
       ...result,
+      handler: result.handled ? "gmail_telegram" : "none",
       verificationSkipped: verification.skipped,
     });
   } catch (error) {

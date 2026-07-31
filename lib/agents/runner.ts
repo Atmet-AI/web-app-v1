@@ -3,9 +3,15 @@ import { buildAtmetSystemPrompt } from "@/lib/ai/system";
 import { normalizeModelConfig, runAtmetChat } from "@/lib/ai/providers";
 import type { AtmetChatMessage } from "@/lib/ai/types";
 import { getAppDocsForRequest } from "@/lib/apps-docs";
-import { executeComposioProxy, getComposioUserConnection } from "@/lib/composio";
+import {
+  executeComposioProxy,
+  executeComposioToolWithText,
+  getComposioToolkitSlug,
+  getComposioUserConnection,
+  getComposioUserId,
+} from "@/lib/composio";
 
-type WorkflowRunTrigger = "manual" | "node" | "schedule";
+type WorkflowRunTrigger = "manual" | "node" | "schedule" | "composio";
 
 type WorkflowNodeRow = {
   app_keys?: string[] | null;
@@ -37,9 +43,12 @@ type WorkflowAgentRow = {
 type RunWorkflowAgentOptions = {
   admin: SupabaseClient;
   agentId: string;
+  approvedApprovalId?: string;
   nodeId?: string;
+  resumeRunId?: string;
   startedBy?: string | null;
   trigger?: WorkflowRunTrigger;
+  triggerEvent?: Record<string, unknown> | null;
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -73,8 +82,78 @@ function getNodeAppKeys(node: WorkflowNodeRow) {
     keys.push("telegram");
   }
 
+  if (/\bgoogle\s*sheets?\b|\bsheets?\b|\bspreadsheet\b/.test(content)) {
+    keys.push("google-sheets");
+  }
+
+  if (/\boutlook\b/.test(content)) {
+    keys.push("outlook");
+  }
+
+  if (/\bslack\b/.test(content)) {
+    keys.push("slack");
+  }
+
+  if (/\bgithub\b|\bpull request\b|\bissue\b|\bcommit\b/.test(content)) {
+    keys.push("github");
+  }
+
   return uniqueStrings(keys);
 }
+
+function getWriteAppKeys(node: WorkflowNodeRow) {
+  const appKeys = getNodeAppKeys(node);
+  const content = [node.title, JSON.stringify(asRecord(node.config))]
+    .join("\n")
+    .toLowerCase();
+
+  if (
+    !/\b(send|reply|forward|create|update|append|post|publish|write|delete|draft)\b/.test(
+      content,
+    )
+  ) {
+    return [];
+  }
+
+  return appKeys.filter((appKey) =>
+    ["gmail", "google-sheets", "telegram", "outlook", "slack", "github"].includes(
+      appKey,
+    ),
+  );
+}
+
+function nodeSkipsApproval(node: WorkflowNodeRow) {
+  const config = asRecord(node.config);
+  return config.autoApproveActions === true || config.askBeforeActions === false;
+}
+
+function isEventTriggerNode(node: WorkflowNodeRow) {
+  const config = asRecord(node.config);
+  const kind = stringValue(config.kind) || stringValue(config.type);
+  return kind === "event_trigger" || kind === "trigger";
+}
+
+function findDeepString(value: unknown, keys: string[]) {
+  const stack = [value];
+  const normalizedKeys = keys.map((key) => key.toLowerCase());
+
+  while (stack.length > 0) {
+    const current = stack.shift();
+    const record = asRecord(current);
+    for (const [key, item] of Object.entries(record)) {
+      if (normalizedKeys.includes(key.toLowerCase()) && typeof item === "string") {
+        return item.trim();
+      }
+
+      if (item && typeof item === "object") {
+        stack.push(item);
+      }
+    }
+  }
+
+  return "";
+}
+
 
 function mapProviderMessage(row: unknown): AtmetChatMessage | null {
   const record = asRecord(row);
@@ -285,6 +364,189 @@ async function addRunEvent({
   });
 }
 
+async function getWorkspaceRequiresWriteApprovals({
+  admin,
+  workspaceId,
+}: {
+  admin: SupabaseClient;
+  workspaceId: string;
+}) {
+  const { data, error } = await admin
+    .from("workspace_usage_controls")
+    .select("require_write_approvals")
+    .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
+    .order("workspace_id", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    return true;
+  }
+
+  return asRecord(data).require_write_approvals !== false;
+}
+
+async function requestNodeApproval({
+  admin,
+  agent,
+  completedOutputs,
+  node,
+  nodeIndex,
+  orderedNodes,
+  runId,
+  startedBy,
+  trigger,
+  writeAppKeys,
+}: {
+  admin: SupabaseClient;
+  agent: WorkflowAgentRow;
+  completedOutputs: Array<{ nodeTitle: string; output: string }>;
+  node: WorkflowNodeRow;
+  nodeIndex: number;
+  orderedNodes: WorkflowNodeRow[];
+  runId: string;
+  startedBy?: string | null;
+  trigger: WorkflowRunTrigger;
+  writeAppKeys: string[];
+}) {
+  const summary = `Approval required before "${node.title}" writes to ${writeAppKeys.join(", ")}.`;
+  const { data: approval, error: approvalError } = await admin
+    .from("workflow_approvals")
+    .insert({
+      action_type: "write_action",
+      agent_id: agent.id,
+      app_keys: writeAppKeys,
+      node_id: node.id,
+      payload: {
+        completedOutputs,
+        nodeIndex,
+        orderedNodeIds: orderedNodes.map((item) => item.id),
+        trigger,
+      },
+      requested_by: startedBy,
+      run_id: runId,
+      status: "pending",
+      summary,
+      workspace_id: agent.workspace_id,
+    })
+    .select("*")
+    .single();
+
+  if (approvalError) {
+    throw approvalError;
+  }
+
+  const approvalId = stringValue(asRecord(approval).id);
+  let messageId = "";
+
+  if (node.source_chat_id) {
+    const { data: message, error: messageError } = await admin
+      .from("chat_messages")
+      .insert({
+        chat_id: node.source_chat_id,
+        content: summary,
+        metadata: {
+          agentId: agent.id,
+          appKeys: writeAppKeys,
+          approvalId,
+          kind: "workflow_approval_request",
+          nodeId: node.id,
+          runId,
+          status: "pending",
+        },
+        role: "assistant",
+      })
+      .select("id")
+      .single();
+
+    if (messageError) {
+      throw messageError;
+    }
+
+    messageId = stringValue(asRecord(message).id);
+    await admin
+      .from("workflow_approvals")
+      .update({ chat_id: node.source_chat_id, message_id: messageId || null })
+      .eq("id", approvalId);
+    await admin
+      .from("chats")
+      .update({
+        last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", node.source_chat_id);
+  }
+
+  await Promise.all([
+    admin
+      .from("workflow_runs")
+      .update({
+        metadata: {
+          completedOutputs,
+          nodeCount: orderedNodes.length,
+          nodeId: node.id,
+          orderedNodeIds: orderedNodes.map((item) => item.id),
+          pendingApprovalId: approvalId,
+          pendingNodeIndex: nodeIndex,
+          trigger,
+        },
+        status: "waiting_approval",
+      })
+      .eq("id", runId),
+    admin
+      .from("workflow_nodes")
+      .update({ runtime_state: "paused", status: "paused" })
+      .eq("id", node.id),
+  ]);
+
+  await addRunEvent({
+    admin,
+    message: summary,
+    metadata: {
+      appKeys: writeAppKeys,
+      approvalId,
+      chatId: node.source_chat_id,
+      messageId,
+    },
+    nodeId: node.id,
+    runId,
+    type: "approval_requested",
+  });
+
+  return { approval, approvalId, messageId };
+}
+
+async function loadApprovedApproval({
+  admin,
+  agentId,
+  approvalId,
+  runId,
+}: {
+  admin: SupabaseClient;
+  agentId: string;
+  approvalId?: string;
+  runId?: string;
+}) {
+  if (!approvalId || !runId) {
+    return null;
+  }
+
+  const { data, error } = await admin
+    .from("workflow_approvals")
+    .select("*")
+    .eq("id", approvalId)
+    .eq("agent_id", agentId)
+    .eq("run_id", runId)
+    .in("status", ["approved", "auto_approved"])
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ? asRecord(data) : null;
+}
+
 function buildNodePrompt({
   agent,
   appDocsContext,
@@ -450,80 +712,153 @@ async function runNodeConnectedAppActions({
   startedBy?: string | null;
 }) {
   const appKeys = getNodeAppKeys(node);
+  const writeAppKeys = getWriteAppKeys(node);
   const metadata: Record<string, unknown>[] = [];
   const contextItems: string[] = [];
 
-  if (!appKeys.includes("gmail")) {
+  if (writeAppKeys.length === 0) {
     return { context: "", metadata };
   }
 
   const userId = await getWorkflowUserId({ admin, agent, chatId, startedBy });
   if (!userId) {
-    metadata.push({ appKey: "gmail", status: "missing_user" });
+    metadata.push({ appKeys: writeAppKeys, status: "missing_user" });
     return { context: "", metadata };
   }
 
-  const { data: connection, error } = await admin
+  const { data: connections, error } = await admin
     .from("workspace_connectors")
     .select("app_key, settings")
     .eq("workspace_id", agent.workspace_id)
-    .eq("app_key", "gmail")
-    .maybeSingle();
+    .in("app_key", writeAppKeys);
 
   if (error) {
     throw error;
   }
 
-  const connectionRecord = asRecord(connection);
-  if (!connection || getConnectionUserStatus(connectionRecord, userId) !== "connected") {
-    metadata.push({ appKey: "gmail", status: "not_connected" });
-    contextItems.push("### Gmail\nGmail is linked to this node, but the user has not connected Gmail yet.");
-    return { context: contextItems.join("\n\n"), metadata };
-  }
-
-  const connectedAccountId = stringValue(
-    asRecord(getComposioUserConnection(connectionRecord.settings, userId)).connectedAccountId,
+  const connectionByAppKey = new Map(
+    (connections ?? []).map((connection) => [
+      stringValue(connection.app_key),
+      asRecord(connection),
+    ]),
   );
+  const config = asRecord(node.config);
+  const configuredToolSlug =
+    stringValue(config.actionToolSlug) || stringValue(config.toolSlug);
+  const executionText = [
+    "Workflow node request:",
+    content,
+    "",
+    "Relevant chat and previous-node context:",
+    conversationContext,
+    "",
+    "Node configuration:",
+    JSON.stringify(config, null, 2),
+  ].join("\n");
 
-  try {
-    const gmailResult = await sendGmailMessage({
-      connectedAccountId,
-      content,
-      conversationContext,
-    });
-
-    if (!gmailResult) {
-      metadata.push({ appKey: "gmail", status: "missing_email_fields" });
-      return { context: "", metadata };
+  for (const appKey of writeAppKeys) {
+    const connectionRecord = connectionByAppKey.get(appKey);
+    if (!connectionRecord || getConnectionUserStatus(connectionRecord, userId) !== "connected") {
+      metadata.push({ appKey, status: "not_connected" });
+      contextItems.push(
+        `### ${appKey}\n${appKey} is linked to this node, but the user has not connected it yet.`,
+      );
+      continue;
     }
 
-    metadata.push({
-      appKey: "gmail",
-      status: "used",
-      toolSlug: "gmail_proxy_send_message",
-    });
-    contextItems.push(
-      [
-        "### Gmail",
-        "Tool: Gmail proxy /gmail/v1/users/me/messages/send",
-        "Result:",
-        JSON.stringify(
-          {
-            body: gmailResult.body,
-            recipient: gmailResult.recipient,
-            subject: gmailResult.subject,
-          },
-          null,
-          2,
-        ),
-      ].join("\n"),
+    const connectedAccountId = stringValue(
+      asRecord(getComposioUserConnection(connectionRecord.settings, userId))
+        .connectedAccountId,
     );
-  } catch (error) {
-    metadata.push({
-      appKey: "gmail",
-      error: error instanceof Error ? error.message : "Gmail send failed",
-      status: "failed",
-    });
+
+    if (appKey === "gmail") {
+      try {
+        const gmailResult = await sendGmailMessage({
+          connectedAccountId,
+          content,
+          conversationContext,
+        });
+
+        if (gmailResult) {
+          metadata.push({
+            appKey: "gmail",
+            status: "used",
+            toolSlug: "gmail_proxy_send_message",
+          });
+          contextItems.push(
+            [
+              "### Gmail",
+              "Tool: Gmail proxy /gmail/v1/users/me/messages/send",
+              "Result:",
+              JSON.stringify(
+                {
+                  body: gmailResult.body,
+                  recipient: gmailResult.recipient,
+                  subject: gmailResult.subject,
+                },
+                null,
+                2,
+              ),
+            ].join("\n"),
+          );
+          continue;
+        }
+
+        metadata.push({ appKey: "gmail", status: "missing_email_fields" });
+      } catch (error) {
+        metadata.push({
+          appKey: "gmail",
+          error: error instanceof Error ? error.message : "Gmail send failed",
+          status: "failed",
+        });
+      }
+    }
+
+    if (!configuredToolSlug) {
+      metadata.push({ appKey, status: "missing_configured_tool" });
+      continue;
+    }
+
+    const toolkitSlug = getComposioToolkitSlug(appKey);
+    const normalizedToolSlug = configuredToolSlug.toUpperCase();
+    const normalizedToolkit = String(toolkitSlug ?? appKey)
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
+
+    if (!toolkitSlug || !normalizedToolSlug.startsWith(normalizedToolkit)) {
+      metadata.push({
+        appKey,
+        status: "tool_not_allowed_for_app",
+        toolSlug: configuredToolSlug,
+      });
+      continue;
+    }
+
+    try {
+      const result = await executeComposioToolWithText({
+        connectedAccountId,
+        text: executionText,
+        toolSlug: configuredToolSlug,
+        userId: getComposioUserId(agent.workspace_id, userId),
+        version: stringValue(config.actionToolVersion, "latest"),
+      });
+      metadata.push({ appKey, status: "used", toolSlug: configuredToolSlug });
+      contextItems.push(
+        [
+          `### ${appKey}`,
+          `Tool: ${configuredToolSlug}`,
+          "Result:",
+          JSON.stringify(result, null, 2),
+        ].join("\n"),
+      );
+    } catch (error) {
+      metadata.push({
+        appKey,
+        error: error instanceof Error ? error.message : "Composio tool failed",
+        status: "failed",
+        toolSlug: configuredToolSlug,
+      });
+    }
   }
 
   return { context: contextItems.join("\n\n"), metadata };
@@ -532,9 +867,12 @@ async function runNodeConnectedAppActions({
 export async function runWorkflowAgent({
   admin,
   agentId,
+  approvedApprovalId,
   nodeId,
+  resumeRunId,
   startedBy = null,
   trigger = "manual",
+  triggerEvent = null,
 }: RunWorkflowAgentOptions) {
   const { data: agentData, error: agentError } = await admin
     .from("workflow_agents")
@@ -550,32 +888,115 @@ export async function runWorkflowAgent({
   const agent = agentData as WorkflowAgentRow;
   const allNodes = Array.isArray(agent.workflow_nodes) ? agent.workflow_nodes : [];
   const edges = Array.isArray(agent.workflow_edges) ? agent.workflow_edges : [];
-  const orderedNodes = nodeId
+  let orderedNodes = nodeId
     ? allNodes.filter((node) => node.id === nodeId)
     : getWorkflowExecutionOrder(allNodes, edges);
 
-  const { data: run, error: runError } = await admin
-    .from("workflow_runs")
-    .insert({
-      agent_id: agentId,
-      metadata: {
-        nodeCount: orderedNodes.length,
-        nodeId: nodeId ?? null,
-        trigger,
-      },
-      started_at: new Date().toISOString(),
-      started_by: startedBy,
-      status: "running",
-    })
-    .select("*")
-    .single();
+  let run: Record<string, unknown>;
+  let completedOutputs: Array<{ nodeTitle: string; output: string }> = [];
+  let startIndex = 0;
+  let approvedApproval: Record<string, unknown> | null = null;
 
-  if (runError) {
-    throw runError;
+  if (resumeRunId) {
+    const { data: existingRun, error: existingRunError } = await admin
+      .from("workflow_runs")
+      .select("*")
+      .eq("id", resumeRunId)
+      .eq("agent_id", agentId)
+      .single();
+
+    if (existingRunError) {
+      throw existingRunError;
+    }
+
+    run = asRecord(existingRun);
+    approvedApproval = await loadApprovedApproval({
+      admin,
+      agentId,
+      approvalId: approvedApprovalId,
+      runId: resumeRunId,
+    });
+
+    if (!approvedApproval) {
+      throw new Error("Approval is not valid for this workflow run.");
+    }
+
+    const runMetadata = asRecord(run.metadata);
+    const orderedNodeIds = Array.isArray(runMetadata.orderedNodeIds)
+      ? runMetadata.orderedNodeIds.map((item) => stringValue(item)).filter(Boolean)
+      : [];
+    const nodeById = new Map(allNodes.map((node) => [node.id, node]));
+
+    if (orderedNodeIds.length > 0) {
+      orderedNodes = orderedNodeIds
+        .map((id) => nodeById.get(id))
+        .filter((node): node is WorkflowNodeRow => Boolean(node));
+    }
+
+    completedOutputs = Array.isArray(runMetadata.completedOutputs)
+      ? runMetadata.completedOutputs
+          .map((item) => {
+            const record = asRecord(item);
+            return {
+              nodeTitle: stringValue(record.nodeTitle),
+              output: stringValue(record.output),
+            };
+          })
+          .filter((item) => item.nodeTitle || item.output)
+      : [];
+    startIndex = numberValue(runMetadata.pendingNodeIndex, 0);
+
+    await admin
+      .from("workflow_runs")
+      .update({
+        metadata: {
+          ...runMetadata,
+          approvedApprovalId,
+          resumedAt: new Date().toISOString(),
+        },
+        status: "running",
+      })
+      .eq("id", resumeRunId);
+  } else {
+    const { data: createdRun, error: runError } = await admin
+      .from("workflow_runs")
+      .insert({
+        agent_id: agentId,
+        metadata: {
+          nodeCount: orderedNodes.length,
+          nodeId: nodeId ?? null,
+          orderedNodeIds: orderedNodes.map((node) => node.id),
+          trigger,
+          triggerEvent: triggerEvent
+            ? {
+                appKey: stringValue(triggerEvent.appKey),
+                eventId: findDeepString(triggerEvent, [
+                  "event_id",
+                  "eventId",
+                  "id",
+                  "message_id",
+                  "messageId",
+                ]),
+                receivedAt: new Date().toISOString(),
+                triggerSlug: findDeepString(triggerEvent, ["trigger_slug", "triggerSlug"]),
+              }
+            : null,
+        },
+        started_at: new Date().toISOString(),
+        started_by: startedBy,
+        status: "running",
+      })
+      .select("*")
+      .single();
+
+    if (runError) {
+      throw runError;
+    }
+
+    run = asRecord(createdRun);
   }
 
-  const runId = stringValue(asRecord(run).id);
-  const completedOutputs: Array<{ nodeTitle: string; output: string }> = [];
+  const runId = stringValue(run.id);
 
   await admin
     .from("workflow_agents")
@@ -583,9 +1004,11 @@ export async function runWorkflowAgent({
     .eq("id", agentId);
   await addRunEvent({
     admin,
-    message: `Started ${trigger} run for ${orderedNodes.length} node(s).`,
+    message: resumeRunId
+      ? "Resumed run after approval."
+      : `Started ${trigger} run for ${orderedNodes.length} node(s).`,
     runId,
-    type: "run_started",
+    type: resumeRunId ? "run_resumed" : "run_started",
   });
 
   if (orderedNodes.length === 0) {
@@ -618,9 +1041,53 @@ export async function runWorkflowAgent({
     ]);
   const model = normalizeModelConfig(modelRow, "atmet");
   const baseSystemPrompt = buildAtmetSystemPrompt({ brain, workspace });
+  const workspaceRequiresWriteApprovals =
+    await getWorkspaceRequiresWriteApprovals({
+      admin,
+      workspaceId: agent.workspace_id,
+    });
 
   try {
-    for (const node of orderedNodes) {
+    for (const [nodeIndex, node] of orderedNodes.entries()) {
+      if (nodeIndex < startIndex) {
+        continue;
+      }
+
+      if (isEventTriggerNode(node)) {
+        await addRunEvent({
+          admin,
+          message: `Captured trigger event for "${node.title}".`,
+          metadata: {
+            appKeys: getNodeAppKeys(node),
+            eventId: triggerEvent
+              ? findDeepString(triggerEvent, [
+                  "event_id",
+                  "eventId",
+                  "id",
+                  "message_id",
+                  "messageId",
+                ])
+              : "",
+            triggerSlug: triggerEvent
+              ? findDeepString(triggerEvent, ["trigger_slug", "triggerSlug"])
+              : "",
+          },
+          nodeId: node.id,
+          runId,
+          type: "trigger_event_captured",
+        });
+        completedOutputs.push({
+          nodeTitle: node.title,
+          output:
+            "A connected app trigger fired. The raw event payload is stored server-side and was not sent to the model.",
+        });
+        await admin
+          .from("workflow_nodes")
+          .update({ runtime_state: "paused", status: "ready" })
+          .eq("id", node.id);
+        continue;
+      }
+
       if (!node.source_chat_id) {
         await addRunEvent({
           admin,
@@ -677,6 +1144,41 @@ export async function runWorkflowAgent({
         messageCreatedAt: stringValue(asRecord(lastUserMessage).created_at),
       });
       const lastUserContent = stringValue(asRecord(lastUserMessage).content);
+      const writeAppKeys = getWriteAppKeys(node);
+      const approvalMatchesCurrentNode =
+        approvedApproval &&
+        stringValue(approvedApproval.node_id) === node.id &&
+        stringValue(approvedApproval.run_id) === runId;
+
+      if (
+        workspaceRequiresWriteApprovals &&
+        writeAppKeys.length > 0 &&
+        !approvalMatchesCurrentNode &&
+        !nodeSkipsApproval(node)
+      ) {
+        const approval = await requestNodeApproval({
+          admin,
+          agent,
+          completedOutputs,
+          node,
+          nodeIndex,
+          orderedNodes,
+          runId,
+          startedBy,
+          trigger,
+          writeAppKeys,
+        });
+
+        return {
+          approval: approval.approval,
+          approvalId: approval.approvalId,
+          completedNodeCount: completedOutputs.length,
+          run: { ...run, status: "waiting_approval" },
+          runId,
+          status: "waiting_approval",
+        };
+      }
+
       const connectedAppAction = await runNodeConnectedAppActions({
         admin,
         agent,
@@ -717,6 +1219,9 @@ export async function runWorkflowAgent({
           content: result.content,
           metadata: {
             agentId,
+            approvedApprovalId: approvalMatchesCurrentNode
+              ? stringValue(approvedApproval?.id)
+              : null,
             kind: "workflow_node_output",
             modelKey: model.key,
             nodeId: node.id,
@@ -774,8 +1279,12 @@ export async function runWorkflowAgent({
         admin,
         message: `Completed "${node.title}".`,
         metadata: {
+          appActions: connectedAppAction.metadata,
           chatId: node.source_chat_id,
           messageId: stringValue(asRecord(assistantMessage).id),
+          modelKey: model.key,
+          tokenUsage:
+            Number(result.inputTokens ?? 0) + Number(result.outputTokens ?? 0),
         },
         nodeId: node.id,
         runId,
@@ -792,6 +1301,7 @@ export async function runWorkflowAgent({
             completedNodeCount: completedOutputs.length,
             nodeCount: orderedNodes.length,
             nodeId: nodeId ?? null,
+            orderedNodeIds: orderedNodes.map((node) => node.id),
             trigger,
           },
           status: "completed",
@@ -832,6 +1342,7 @@ export async function runWorkflowAgent({
           error: message,
           nodeCount: orderedNodes.length,
           nodeId: nodeId ?? null,
+          orderedNodeIds: orderedNodes.map((node) => node.id),
           trigger,
         },
         status: "failed",

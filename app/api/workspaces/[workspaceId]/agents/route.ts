@@ -3,6 +3,7 @@ import { isRouteResponse, requireWorkspacePermission } from "@/lib/api/auth";
 import { recordActivityLog } from "@/lib/api/audit";
 import { badRequest, created, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 import { deriveAppKeysFromChatMessages } from "@/lib/agents/app-keys";
+import { createAgentVersionSnapshot } from "@/lib/agents/versions";
 
 type RouteContext = {
   params: Promise<{ workspaceId: string }>;
@@ -99,18 +100,43 @@ export async function GET(_request: Request, context: RouteContext) {
       return auth;
     }
 
-    const { data, error } = await auth.supabase
-      .from("workflow_agents")
-      .select("*, workflow_nodes(*), workflow_edges(*)")
-      .eq("workspace_id", workspaceId)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false });
+    const [
+      { data, error },
+      { data: agentMemberships, error: agentMembershipsError },
+      { data: isSuperAdmin, error: superAdminError },
+    ] = await Promise.all([
+      auth.admin
+        .from("workflow_agents")
+        .select("*, workflow_nodes(*), workflow_edges(*)")
+        .eq("workspace_id", workspaceId)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false }),
+      auth.admin
+        .from("workflow_agent_members")
+        .select("agent_id")
+        .eq("user_id", auth.user.id),
+      auth.supabase.rpc("is_super_admin", { target_user_id: auth.user.id }),
+    ]);
 
-    if (error) {
-      throw error;
+    if (error || agentMembershipsError || superAdminError) {
+      throw error ?? agentMembershipsError ?? superAdminError;
     }
 
-    const agents = await hydrateMissingNodeAppKeys(auth.admin, data ?? []);
+    const assignedAgentIds = new Set(
+      (agentMemberships ?? [])
+        .map((membership) => stringValue(membership.agent_id))
+        .filter(Boolean),
+    );
+    const visibleAgents =
+      isSuperAdmin === true
+        ? (data ?? [])
+        : (data ?? []).filter(
+            (agent) =>
+              stringValue(agent.created_by) === auth.user.id ||
+              assignedAgentIds.has(stringValue(agent.id)),
+          );
+
+    const agents = await hydrateMissingNodeAppKeys(auth.admin, visibleAgents);
 
     return ok({ agents });
   } catch (error) {
@@ -197,6 +223,30 @@ export async function POST(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    const { error: memberError } = await auth.admin
+      .from("workflow_agent_members")
+      .upsert(
+        {
+          agent_id: data.id,
+          assigned_by: auth.user.id,
+          role: "owner",
+          user_id: auth.user.id,
+        },
+        { onConflict: "agent_id,user_id" },
+      );
+
+    if (memberError) {
+      throw memberError;
+    }
+
+    await createAgentVersionSnapshot({
+      admin: auth.admin,
+      agentId: data.id,
+      changeType: "agent.created",
+      createdBy: auth.user.id,
+      summary: "Agent created.",
+    });
 
     await recordActivityLog(auth.admin, {
       action: "agent.created",

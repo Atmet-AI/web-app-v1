@@ -32,7 +32,7 @@ export async function POST(request: Request, context: RouteContext) {
       actorId: auth.user.id,
       metadata: {
         nodeId,
-        runId: result.run?.id,
+        runId: result.runId,
         trigger: nodeId ? "node" : "manual",
       },
       request,

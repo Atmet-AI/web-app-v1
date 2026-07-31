@@ -18,6 +18,7 @@ import {
   Brain03Icon,
   BuildingIcon,
   CalendarClockIcon,
+  Cancel01Icon,
   ChartIcon,
   Chat01Icon,
   ChevronDownIcon,
@@ -212,6 +213,7 @@ type PageKey =
   | "skills"
   | "connectors"
   | "usage"
+  | "notifications"
   | "changelogs"
   | "settings"
   | "admin";
@@ -223,6 +225,7 @@ const pageKeyValues: PageKey[] = [
   "skills",
   "connectors",
   "usage",
+  "notifications",
   "changelogs",
   "settings",
   "admin",
@@ -295,6 +298,12 @@ type PlaygroundCardRunState = "complete" | "idle" | "running";
 type PlaygroundConnection = {
   from: string;
   to: string;
+};
+
+type AgentObservabilityData = {
+  approvals: DatabaseRecord[];
+  runs: DatabaseRecord[];
+  versions: DatabaseRecord[];
 };
 
 type PlaygroundDrag = {
@@ -592,10 +601,31 @@ function updateAppRouteState({
   const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
 
   if (nextPath === currentPath) {
+    window.history.replaceState(
+      {
+        ...(window.history.state ?? {}),
+        adminProfile,
+        adminTab,
+        agentName,
+        atmet: true,
+        chatId,
+        page: nextPage,
+      },
+      "",
+      nextPath,
+    );
     return;
   }
 
-  const nextState = { ...(window.history.state ?? {}), atmet: true };
+  const nextState = {
+    ...(window.history.state ?? {}),
+    adminProfile,
+    adminTab,
+    agentName,
+    atmet: true,
+    chatId,
+    page: nextPage,
+  };
   const historyMethod = replace ? "replaceState" : "pushState";
   window.history[historyMethod](nextState, "", nextPath);
 }
@@ -630,7 +660,7 @@ type AdminLogRow = {
   detail: string;
   event: string;
   sortTime: string;
-  source: "AI" | "Activity" | "Session" | "Usage";
+  source: "AI" | "Activity" | "Session" | "Usage" | "Workflow";
   status: string;
   time: string;
   user: string;
@@ -854,6 +884,33 @@ function mapAdminLog(
     };
   }
 
+  if (source === "Workflow") {
+    const workflowRun = getRecordByKey(record, "workflow_runs");
+    const workflowAgent = getRecordByKey(workflowRun, "workflow_agents");
+    const workflowWorkspace = getRecordByKey(workflowAgent, "workspaces");
+
+    return {
+      detail: formatAdminLogDetail({
+        fallback: asString(record.message, asString(record.event_type)),
+        metadata,
+        primary: [
+          asString(workflowAgent.name),
+          asString(record.message),
+          asString(record.node_id),
+        ]
+          .filter(Boolean)
+          .join(" / "),
+      }),
+      event: `workflow.${asString(record.event_type, "event")}`,
+      sortTime: createdAt,
+      source,
+      status: formatStatusLabel(asString(record.event_type, "Recorded")),
+      time: formatDateTimeLabel(createdAt) || "",
+      user,
+      workspace: asString(workflowWorkspace.name, workspaceName),
+    };
+  }
+
   return {
     detail: formatAdminLogDetail({
       fallback: asString(record.target_type, asString(record.target_id)),
@@ -926,6 +983,8 @@ const pageDescriptions = {
     "Track product updates, release notes, and workspace-facing changes.",
   connectors:
     "Connect apps so Atmet can work with files, messages, tasks, and calendars.",
+  notifications:
+    "Review workspace invites, approvals, updates, and account activity sent to you.",
   settings:
     "Manage profile, workspace preferences, billing, data, and support options.",
   skills:
@@ -1142,6 +1201,7 @@ type AiOutputVariant =
   | "web-search";
 
 type ChatMessage = {
+  approval?: ChatApprovalRequest | null;
   attachments?: ChatMessageAttachment[];
   content: string;
   feedback?: "dislike" | "like" | null;
@@ -1150,6 +1210,15 @@ type ChatMessage = {
   role: "assistant" | "user";
   state?: "complete" | "thinking" | "typing";
   variant?: AiOutputVariant;
+};
+
+type ChatApprovalRequest = {
+  agentId: string;
+  appKeys: string[];
+  approvalId: string;
+  nodeId: string;
+  runId: string;
+  status: string;
 };
 
 type ChatMessageAttachment = {
@@ -1566,6 +1635,7 @@ function mapChatMessage(row: unknown): ChatMessage | null {
   }
 
   return {
+    approval: mapChatApprovalRequest(metadata),
     attachments: asRecordArray(metadata.attachments)
       .map(mapChatMessageAttachment)
       .filter((attachment): attachment is ChatMessageAttachment =>
@@ -1584,6 +1654,28 @@ function mapChatMessage(row: unknown): ChatMessage | null {
       .filter((mention): mention is ChatMessageMention => Boolean(mention)),
     role,
     state: "complete",
+  };
+}
+
+function mapChatApprovalRequest(metadata: DatabaseRecord): ChatApprovalRequest | null {
+  if (asString(metadata.kind) !== "workflow_approval_request") {
+    return null;
+  }
+
+  const approvalId = asString(metadata.approvalId);
+  if (!approvalId) {
+    return null;
+  }
+
+  return {
+    agentId: asString(metadata.agentId),
+    appKeys: Array.isArray(metadata.appKeys)
+      ? metadata.appKeys.map((item) => asString(item)).filter(Boolean)
+      : [],
+    approvalId,
+    nodeId: asString(metadata.nodeId),
+    runId: asString(metadata.runId),
+    status: asString(metadata.status, "pending"),
   };
 }
 
@@ -1988,6 +2080,10 @@ export default function Home() {
       ? sidebarChats.find((chat) => chat.id === activeSidebarChatId) ?? null
       : null;
   const activeWorkspaceId = workspace?.id ?? null;
+  const isSuperAdmin = asBoolean(profile?.is_super_admin);
+  const visibleSecondaryNavigation = isSuperAdmin
+    ? secondaryNavigation
+    : secondaryNavigation.filter((item) => item.key !== "admin");
   const workflowSidebarChatMeta = new Map<string, WorkflowSidebarChatMeta>();
 
   for (const agent of agentList) {
@@ -2037,6 +2133,12 @@ export default function Home() {
       void playAtmetSound("error");
     }
   }, [bootstrapError]);
+
+  useEffect(() => {
+    if (!isBootstrapLoading && activePage === "admin" && !isSuperAdmin) {
+      selectPage("chat", { chatId: activeSidebarChatId });
+    }
+  }, [activePage, activeSidebarChatId, isBootstrapLoading, isSuperAdmin]);
 
   const dynamicComposerOptions: ComposerOption[] = [
     ...connectorList.map((connector) => ({
@@ -2113,15 +2215,11 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (process.env.NODE_ENV === "production") {
-      return;
-    }
-
     const hasScheduledRunningAgent = agentList.some(
       (agent) => agent.runtime === "running" && Boolean(agent.schedule),
     );
 
-    if (!hasScheduledRunningAgent) {
+    if (!hasScheduledRunningAgent || !activeWorkspaceId) {
       return;
     }
 
@@ -2133,11 +2231,13 @@ export default function Home() {
 
       try {
         await fetch("/api/agents/scheduled", {
+          body: JSON.stringify({ workspaceId: activeWorkspaceId }),
           cache: "no-store",
           method: "POST",
+          headers: { "Content-Type": "application/json" },
         });
       } catch {
-        // Local scheduler polling is best effort; production uses Vercel cron.
+        // Browser-assisted scheduler polling is best effort; cron or a worker should run it in production too.
       }
     }
 
@@ -2149,11 +2249,11 @@ export default function Home() {
       window.clearTimeout(initialTickId);
       window.clearInterval(intervalId);
     };
-  }, [agentList]);
+  }, [activeWorkspaceId, agentList]);
 
   async function handleNotificationAction(
     notificationId: string,
-    action: "accept" | "reject" | "read",
+    action: "accept" | "archive" | "reject" | "read",
   ) {
     if (notificationActionId) {
       return;
@@ -2190,6 +2290,29 @@ export default function Home() {
     }
   }
 
+  async function openNotificationsPage() {
+    selectPage("notifications");
+
+    try {
+      const response = await fetch("/api/notifications?limit=100", {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = asRecord(await response.json());
+      const nextNotifications = asRecordArray(payload.notifications)
+        .map(mapNotification)
+        .filter((item): item is NotificationItem => Boolean(item));
+
+      setNotifications(nextNotifications);
+    } catch {
+      // The page can still render the notifications already loaded in memory.
+    }
+  }
+
   useEffect(() => {
     function syncRouteFromHistory() {
       const nextPage = getInitialPage();
@@ -2205,6 +2328,14 @@ export default function Home() {
       }
     }
 
+    updateAppRouteState({
+      adminProfile: getInitialPage() === "admin" ? getInitialAdminProfileView() : null,
+      adminTab: getInitialPage() === "admin" ? getInitialAdminTab() : undefined,
+      agentName: getInitialPage() === "agents" ? getInitialAgentName() : null,
+      chatId: getInitialPage() === "chat" ? getInitialChatId() : null,
+      page: getInitialPage(),
+      replace: true,
+    });
     syncRouteFromHistory();
     window.addEventListener("popstate", syncRouteFromHistory);
 
@@ -2380,6 +2511,11 @@ export default function Home() {
     page: PageKey,
     options: { agentName?: string | null; chatId?: string | null } = {},
   ) {
+    if (page === "admin" && !isSuperAdmin) {
+      page = "chat";
+      options = { chatId: activeSidebarChatId };
+    }
+
     setActivePage(page);
     updateAppRouteState({
       agentName: options.agentName,
@@ -2798,7 +2934,7 @@ export default function Home() {
     {
       items: [
         ...primaryNavigation,
-        ...secondaryNavigation,
+        ...visibleSecondaryNavigation,
         settingsNavigation,
       ].map((item, index) => ({
         action: () =>
@@ -2991,6 +3127,7 @@ export default function Home() {
               busyId={notificationActionId}
               notifications={notifications}
               onAction={handleNotificationAction}
+              onSeeAll={() => void openNotificationsPage()}
             />
             <UserIdentity onSelectPage={selectPage} profile={profile} />
           </div>
@@ -3044,7 +3181,7 @@ export default function Home() {
             />
 
             <nav className="mt-auto grid gap-0.5 pr-1">
-              {secondaryNavigation.map((item) => (
+              {visibleSecondaryNavigation.map((item) => (
                 <NavButton
                   key={item.key}
                   active={activePage === item.key}
@@ -3135,6 +3272,7 @@ export default function Home() {
               {activePage === "agents" && (
                 <AgentsPage
                   agents={agentList}
+                  composerOptions={dynamicComposerOptions}
                   onCreateAgent={createAgent}
                   onCreateWorkflowChatNode={createWorkflowChatNode}
                   onDeleteWorkflowChatNode={deleteWorkflowChatNode}
@@ -3175,6 +3313,13 @@ export default function Home() {
               {activePage === "usage" && (
                 <UsagePage usage={usageData} workspaceId={activeWorkspaceId} />
               )}
+              {activePage === "notifications" && (
+                <NotificationsPage
+                  busyId={notificationActionId}
+                  notifications={notifications}
+                  onAction={handleNotificationAction}
+                />
+              )}
               {activePage === "changelogs" && (
                 <EmptyPage
                   description={pageDescriptions.changelogs}
@@ -3200,7 +3345,7 @@ export default function Home() {
                   workspaceSettings={workspaceSettings}
                 />
               )}
-              {activePage === "admin" && <AdminPage />}
+              {activePage === "admin" && isSuperAdmin && <AdminPage />}
             </div>
           </div>
         </section>
@@ -4031,13 +4176,15 @@ function NotificationCenter({
   busyId,
   notifications,
   onAction,
+  onSeeAll,
 }: {
   busyId: string | null;
   notifications: NotificationItem[];
   onAction: (
     notificationId: string,
-    action: "accept" | "reject" | "read",
+    action: "accept" | "archive" | "reject" | "read",
   ) => void;
+  onSeeAll: () => void;
 }) {
   const unreadCount = notifications.filter(
     (notification) => notification.status === "unread",
@@ -4080,8 +4227,89 @@ function NotificationCenter({
             ))}
           </div>
         )}
+        <MenuSeparator />
+        <MenuItem
+          className="justify-between"
+          onClick={onSeeAll}
+        >
+          <span>See all notifications</span>
+          <Icon className="size-3.5 text-muted-foreground" icon={ArrowRight01Icon} />
+        </MenuItem>
       </MenuPopup>
     </Menu>
+  );
+}
+
+function NotificationsPage({
+  busyId,
+  notifications,
+  onAction,
+}: {
+  busyId: string | null;
+  notifications: NotificationItem[];
+  onAction: (
+    notificationId: string,
+    action: "accept" | "archive" | "reject" | "read",
+  ) => void;
+}) {
+  const unreadCount = notifications.filter(
+    (notification) => notification.status === "unread",
+  ).length;
+
+  return (
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
+      <PageHeader
+        actions={
+          <Badge className="h-7 px-2 text-xs" variant="outline">
+            {notifications.length} total / {unreadCount} unread
+          </Badge>
+        }
+        description={pageDescriptions.notifications}
+        title="Notifications"
+      />
+      <CardFrame>
+        <CardFrameHeader>
+          <div>
+            <CardFrameTitle>Inbox</CardFrameTitle>
+            <CardFrameDescription>
+              Workspace invites, approvals, account updates, and system notices.
+            </CardFrameDescription>
+          </div>
+          {unreadCount > 0 ? (
+            <Badge className="h-6 px-2 text-xs" variant="success">
+              {unreadCount} new
+            </Badge>
+          ) : null}
+        </CardFrameHeader>
+        <CardPanel className="p-1">
+          {notifications.length === 0 ? (
+            <div className="grid min-h-64 place-items-center px-6 text-center">
+              <div>
+                <div className="mx-auto grid size-10 place-items-center rounded-lg bg-muted text-muted-foreground">
+                  <Icon className="size-5" icon={BellIcon} />
+                </div>
+                <p className="mt-3 text-sm font-medium">No notifications yet.</p>
+                <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                  New workspace activity and approvals will show up here.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-1">
+              {notifications.map((notification) => (
+                <NotificationRow
+                  busy={busyId === notification.id}
+                  disabled={Boolean(busyId)}
+                  key={notification.id}
+                  notification={notification}
+                  onAction={onAction}
+                />
+              ))}
+            </div>
+          )}
+        </CardPanel>
+      </CardFrame>
+    </div>
   );
 }
 
@@ -4096,7 +4324,7 @@ function NotificationRow({
   notification: NotificationItem;
   onAction: (
     notificationId: string,
-    action: "accept" | "reject" | "read",
+    action: "accept" | "archive" | "reject" | "read",
   ) => void;
 }) {
   const actionable =
@@ -4137,7 +4365,26 @@ function NotificationRow({
             <p className="min-w-0 truncate text-sm font-medium leading-5">
               {notification.title}
             </p>
-            <NotificationStatusBadge notification={notification} />
+            <div className="flex shrink-0 items-center gap-1">
+              <NotificationStatusBadge notification={notification} />
+              <button
+                aria-label="Dismiss notification"
+                className="grid size-6 place-items-center rounded-md text-muted-foreground opacity-0 transition-[background-color,color,opacity] hover:bg-muted hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                disabled={disabled}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onAction(notification.id, "archive");
+                }}
+                type="button"
+              >
+                {busy ? (
+                  <Spinner className="size-3" />
+                ) : (
+                  <Icon className="size-3.5" icon={Cancel01Icon} />
+                )}
+              </button>
+            </div>
           </div>
           <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
             {notification.body}
@@ -4996,6 +5243,72 @@ function ChatExperience({
     }
   }
 
+  async function decideWorkflowApproval(
+    message: ChatMessage,
+    decision: "approved" | "auto_approved" | "rejected",
+  ) {
+    const approval = message.approval;
+    if (!approval?.approvalId) {
+      return;
+    }
+    const approvalId = approval.approvalId;
+    const originalStatus = approval.status;
+
+    setMessages((current) =>
+      current.map((item) =>
+        item.id === message.id && item.approval
+          ? {
+              ...item,
+              approval: { ...item.approval, status: decision },
+            }
+          : item,
+      ),
+    );
+
+    try {
+      const response = await fetch(`/api/workflow-approvals/${approvalId}`, {
+        body: JSON.stringify({ decision }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      });
+      const payload = asRecord(await response.json().catch(() => ({})));
+
+      if (!response.ok) {
+        throw new Error(asString(payload.error, "Could not update approval."));
+      }
+
+      void playAtmetSuccessSound();
+      if (activeChatId) {
+        const messagesResponse = await fetch(`/api/chats/${activeChatId}/messages`, {
+          cache: "no-store",
+        });
+        if (messagesResponse.ok) {
+          const messagesPayload = asRecord(await messagesResponse.json());
+          const loadedMessages = asRecordArray(messagesPayload.messages)
+            .map(mapChatMessage)
+            .filter((item): item is ChatMessage => Boolean(item));
+          keepChatAtEndOnNextPaint();
+          setMessages(loadedMessages);
+        }
+      }
+    } catch (error) {
+      void playAtmetSound("error");
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === message.id && item.approval
+            ? {
+                ...item,
+                approval: { ...item.approval, status: originalStatus },
+              }
+            : item,
+        ),
+      );
+      window.alert(
+        error instanceof Error ? error.message : "Could not update approval.",
+      );
+    }
+  }
+
   function copyMessageContent(message: ChatMessage) {
     navigator.clipboard?.writeText(message.content).catch(() => undefined);
   }
@@ -5564,6 +5877,7 @@ function ChatExperience({
                         onEdit={startEditingUserMessage}
                         onEditValueChange={setEditingMessageDraft}
                         onFeedback={setMessageFeedback}
+                        onApprovalDecision={decideWorkflowApproval}
                         onRegenerate={regenerateFromMessage}
                         onSaveEdit={(nextContent) => editUserMessage(message, nextContent)}
                         onTypingFrame={keepChatAtEndOnNextPaint}
@@ -6411,6 +6725,7 @@ function ChatMessageBubble({
   editValue,
   isEditing = false,
   message,
+  onApprovalDecision,
   onCancelEdit,
   onCopy,
   onEdit,
@@ -6424,6 +6739,10 @@ function ChatMessageBubble({
   editValue?: string;
   isEditing?: boolean;
   message: ChatMessage;
+  onApprovalDecision?: (
+    message: ChatMessage,
+    decision: "approved" | "auto_approved" | "rejected",
+  ) => void;
   onCancelEdit?: () => void;
   onCopy?: (message: ChatMessage) => void;
   onEdit?: (message: ChatMessage) => void;
@@ -6497,6 +6816,12 @@ function ChatMessageBubble({
             onComplete={onTypingComplete}
             text={message.content}
           />
+        ) : message.approval ? (
+          <WorkflowApprovalCard
+            approval={message.approval}
+            message={message}
+            onDecision={onApprovalDecision}
+          />
         ) : (
           <AiTextResponse text={message.content} />
         )}
@@ -6507,6 +6832,92 @@ function ChatMessageBubble({
             onFeedback={onFeedback}
             onRegenerate={onRegenerate}
           />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function WorkflowApprovalCard({
+  approval,
+  message,
+  onDecision,
+}: {
+  approval: ChatApprovalRequest;
+  message: ChatMessage;
+  onDecision?: (
+    message: ChatMessage,
+    decision: "approved" | "auto_approved" | "rejected",
+  ) => void;
+}) {
+  const pending = approval.status === "pending";
+  const statusLabel =
+    approval.status === "auto_approved"
+      ? "Auto approved"
+      : approval.status === "approved"
+        ? "Approved"
+        : approval.status === "rejected"
+          ? "Rejected"
+          : "Waiting for approval";
+
+  return (
+    <div className="w-full max-w-xl overflow-hidden rounded-xl border border-black/8 bg-background text-sm shadow-xs/5 dark:border-white/8">
+      <div className="flex items-start gap-3 border-b border-border/70 px-3 py-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-amber-500/12 text-amber-600 dark:text-amber-300">
+          <Icon className="size-4.5" icon={ShieldCheck} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-semibold">Approval checkpoint</p>
+            <Badge
+              variant={approval.status === "rejected" ? "destructive" : pending ? "warning" : "success"}
+            >
+              {statusLabel}
+            </Badge>
+          </div>
+          <p className="mt-1 text-pretty text-xs leading-5 text-muted-foreground">
+            {message.content}
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+        <div className="flex flex-wrap gap-1.5">
+          {approval.appKeys.map((appKey) => (
+            <span
+              className="inline-flex h-7 items-center gap-1.5 rounded-md bg-muted px-2 text-xs font-medium text-muted-foreground"
+              key={appKey}
+            >
+              <AgentAppLogo className="size-4 rounded-sm text-[0.5rem]" logo={appKey} />
+              {formatStatusLabel(appKey)}
+            </span>
+          ))}
+        </div>
+        {pending ? (
+          <div className="flex flex-wrap justify-end gap-1">
+            <Button
+              onClick={() => onDecision?.(message, "rejected")}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Reject
+            </Button>
+            <Button
+              onClick={() => onDecision?.(message, "auto_approved")}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Auto approve
+            </Button>
+            <Button
+              onClick={() => onDecision?.(message, "approved")}
+              size="sm"
+              type="button"
+            >
+              Approve
+            </Button>
+          </div>
         ) : null}
       </div>
     </div>
@@ -8592,6 +9003,7 @@ type AgentFilter = "all" | "paused" | "running";
 
 function AgentsPage({
   agents,
+  composerOptions,
   onAgentRuntimeChange,
   onAgentScheduleChange,
   onCreateAgent,
@@ -8604,6 +9016,7 @@ function AgentsPage({
   workflowChatNodesByAgent,
 }: {
   agents: Agent[];
+  composerOptions: ComposerOption[];
   onAgentRuntimeChange: (agentName: string, runtime: "paused" | "running") => void;
   onAgentScheduleChange: (agentName: string, schedule: string | null) => void;
   onCreateAgent: (name: string) => void;
@@ -8640,6 +9053,7 @@ function AgentsPage({
     return (
       <AgentPlayground
         agent={selectedAgent}
+        composerOptions={composerOptions}
         key={`${selectedAgent.name}-${
           workflowChatNodesByAgent[selectedAgent.name]?.length ?? 0
         }`}
@@ -8664,62 +9078,151 @@ function AgentsPage({
         description={pageDescriptions.agents}
         title="Workflow Agents"
       />
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <Group className="h-9 w-full sm:h-8 sm:w-auto">
-          <Input
-            aria-label="Search agents"
-            className="h-full w-full sm:w-72 [&_[data-slot=input]]:h-full [&_[data-slot=input]]:leading-none sm:[&_[data-slot=input]]:h-full"
-            onChange={(event) => setAgentSearch(event.target.value)}
-            placeholder="Search agents..."
-            value={agentSearch}
-          />
-          <GroupSeparator />
-          <AgentFilterMenu
-            filter={agentFilter}
-            onFilterChange={setAgentFilter}
-          />
-        </Group>
-        <span className="text-xs text-muted-foreground">
-          {visibleAgents.length} of {agents.length} agents
-        </span>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {visibleAgents.map((agent, index) => (
-          <Card className="overflow-hidden" key={`${agent.name}-${index}`}>
-            <button
-              className="group text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => {
-                onSelectAgentName(agent.name);
-                onPlaygroundChange(true);
-              }}
-              type="button"
-            >
-              <CardPanel
-                className={cn(
-                  "relative grid min-h-36 place-items-center overflow-hidden rounded-t-2xl bg-linear-to-br p-5 transition-transform group-hover:scale-[1.01]",
-                  agent.gradient,
-                )}
-              >
-                <OreoFlareAvatar
-                  className="absolute inset-0"
-                  scale={2.8}
-                  seed={`agent-card-${agent.name}`}
-                />
-                <div className="absolute inset-0 bg-white/10 dark:bg-black/16" />
-                <AgentLogoStack logos={agent.appLogos} />
-              </CardPanel>
-              <CardPanel className="border-t border-border p-4">
-                <CardTitle>{agent.name}</CardTitle>
-                <AgentRuntimeStatus
-                  runtime={agent.runtime}
-                  tokenUsage={agent.tokenUsage}
-                />
-              </CardPanel>
-            </button>
-          </Card>
-        ))}
-      </div>
+      {agents.length === 0 ? (
+        <AgentsEmptyState onCreateAgent={onCreateAgent} />
+      ) : (
+        <>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <Group className="h-9 w-full sm:h-8 sm:w-auto">
+              <Input
+                aria-label="Search agents"
+                className="h-full w-full sm:w-72 [&_[data-slot=input]]:h-full [&_[data-slot=input]]:leading-none sm:[&_[data-slot=input]]:h-full"
+                onChange={(event) => setAgentSearch(event.target.value)}
+                placeholder="Search agents..."
+                value={agentSearch}
+              />
+              <GroupSeparator />
+              <AgentFilterMenu
+                filter={agentFilter}
+                onFilterChange={setAgentFilter}
+              />
+            </Group>
+            <span className="text-xs text-muted-foreground">
+              {visibleAgents.length} of {agents.length} agents
+            </span>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {visibleAgents.map((agent, index) => (
+              <Card className="overflow-hidden" key={`${agent.name}-${index}`}>
+                <button
+                  className="group text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => {
+                    onSelectAgentName(agent.name);
+                    onPlaygroundChange(true);
+                  }}
+                  type="button"
+                >
+                  <CardPanel
+                    className={cn(
+                      "relative grid min-h-36 place-items-center overflow-hidden rounded-t-2xl bg-linear-to-br p-5 transition-transform group-hover:scale-[1.01]",
+                      agent.gradient,
+                    )}
+                  >
+                    <OreoFlareAvatar
+                      className="absolute inset-0"
+                      scale={2.8}
+                      seed={`agent-card-${agent.name}`}
+                    />
+                    <div className="absolute inset-0 bg-white/10 dark:bg-black/16" />
+                    <AgentLogoStack logos={agent.appLogos} />
+                  </CardPanel>
+                  <CardPanel className="border-t border-border p-4">
+                    <CardTitle>{agent.name}</CardTitle>
+                    <AgentRuntimeStatus
+                      runtime={agent.runtime}
+                      tokenUsage={agent.tokenUsage}
+                    />
+                  </CardPanel>
+                </button>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
     </>
+  );
+}
+
+function AgentsEmptyState({
+  onCreateAgent,
+}: {
+  onCreateAgent: (name: string) => void;
+}) {
+  return (
+    <div className="grid min-h-[28rem] place-items-center rounded-2xl border border-dashed border-border/70 bg-muted/15 px-6 py-12 text-center">
+      <div className="mx-auto max-w-md">
+        <IsometricAgentIllustration className="mx-auto h-48 w-full max-w-80 text-muted-foreground" />
+        <h2 className="mt-6 text-xl font-semibold tracking-tight">
+          No agents yet
+        </h2>
+        <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
+          Create a workflow agent, connect the apps it can use, and let it run
+          with the right permissions.
+        </p>
+        <div className="mt-6 flex justify-center">
+          <NewAgentDialog
+            label="Create your first agent"
+            onCreate={onCreateAgent}
+            size="default"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IsometricAgentIllustration({
+  className,
+}: {
+  className?: string;
+}) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      viewBox="0 0 320 220"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <g
+        opacity="0.9"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.6"
+      >
+        <path d="M42 138 160 70l118 68-118 68L42 138Z" opacity="0.42" />
+        <path d="M70 138 160 86l90 52-90 52-90-52Z" />
+        <path d="M160 86v104" opacity="0.28" />
+        <path d="m70 138 90 52 90-52" opacity="0.28" />
+        <path d="M111 113v42l49 28 49-28v-42l-49-28-49 28Z" />
+        <path d="m111 113 49 28 49-28" />
+        <path d="M160 141v42" />
+        <path d="M135 101v-23l25-14 25 14v23" opacity="0.72" />
+        <path d="m135 78 25 14 25-14" opacity="0.72" />
+        <path d="M160 92v25" opacity="0.72" />
+        <path d="M79 118 49 101v-34l30-17 30 17v34l-30 17Z" />
+        <path d="m49 67 30 17 30-17" />
+        <path d="M79 84v34" />
+        <path d="M241 118 211 101v-34l30-17 30 17v34l-30 17Z" />
+        <path d="m211 67 30 17 30-17" />
+        <path d="M241 84v34" />
+        <path d="M103 96 132 82" opacity="0.55" />
+        <path d="M217 96 188 82" opacity="0.55" />
+        <path d="M88 152v21l28 16 28-16v-21" opacity="0.62" />
+        <path d="M176 173v-21l28-16 28 16v21l-28 16-28-16Z" opacity="0.62" />
+        <path d="M116 189v-37l44-25 44 25v37" opacity="0.36" />
+        <path d="M122 58c8-11 22-18 38-18s30 7 38 18" opacity="0.46" />
+        <path d="M147 57h26" />
+        <path d="M151 65h18" />
+        <path d="M160 40V24" />
+        <path d="M154 24h12" />
+        <path d="M49 101 29 112v22" opacity="0.42" />
+        <path d="M271 101 291 112v22" opacity="0.42" />
+        <path d="M29 134 48 145" opacity="0.42" />
+        <path d="M291 134 272 145" opacity="0.42" />
+      </g>
+    </svg>
   );
 }
 
@@ -8764,7 +9267,15 @@ function AgentFilterMenu({
   );
 }
 
-function NewAgentDialog({ onCreate }: { onCreate: (name: string) => void }) {
+function NewAgentDialog({
+  label = "New agent",
+  onCreate,
+  size = "sm",
+}: {
+  label?: string;
+  onCreate: (name: string) => void;
+  size?: React.ComponentProps<typeof Button>["size"];
+}) {
   const [name, setName] = useState("");
   const [open, setOpen] = useState(false);
   const trimmedName = name.trim();
@@ -8782,9 +9293,9 @@ function NewAgentDialog({ onCreate }: { onCreate: (name: string) => void }) {
 
   return (
     <Dialog onOpenChange={setOpen} open={open}>
-      <Button onClick={() => setOpen(true)} size="sm">
+      <Button onClick={() => setOpen(true)} size={size}>
         <Icon icon={PlusSignIcon} />
-        New agent
+        {label}
       </Button>
       <DialogPopup>
         <form className="flex min-h-0 flex-1 flex-col" onSubmit={submitAgent}>
@@ -8991,6 +9502,7 @@ function getWorkflowRunOrder(
 
 function AgentPlayground({
   agent,
+  composerOptions,
   onAgentRuntimeChange,
   onAgentScheduleChange,
   onBack,
@@ -9000,6 +9512,7 @@ function AgentPlayground({
   workflowChatNodes,
 }: {
   agent: Agent;
+  composerOptions: ComposerOption[];
   onAgentRuntimeChange: (agentName: string, runtime: "paused" | "running") => void;
   onAgentScheduleChange: (agentName: string, schedule: string | null) => void;
   onBack: () => void;
@@ -9577,6 +10090,7 @@ function AgentPlayground({
       </div>
       <AgentNodeChatSheet
         card={openNodeChat}
+        composerOptions={composerOptions}
         onOpenChange={(open) => {
           if (!open) {
             setOpenNodeChatId(null);
@@ -9760,11 +10274,13 @@ function AgentPlaygroundContextMenu({
 
 function AgentNodeChatSheet({
   card,
+  composerOptions,
   onOpenChange,
   open,
   workspaceId,
 }: {
   card?: PlaygroundCard;
+  composerOptions: ComposerOption[];
   onOpenChange: (open: boolean) => void;
   open: boolean;
   workspaceId: string | null;
@@ -9780,6 +10296,7 @@ function AgentNodeChatSheet({
           <ChatExperience
             activeChatId={card?.chatId ?? null}
             compact
+            composerOptions={composerOptions}
             key={card?.chatId ?? card?.id ?? "node-chat"}
             workspaceId={workspaceId}
           />
@@ -9816,6 +10333,12 @@ function AgentSettingsSheet({
         ? "days"
         : "minutes",
   );
+  const [observability, setObservability] = useState<AgentObservabilityData>({
+    approvals: [],
+    runs: [],
+    versions: [],
+  });
+  const [observabilityLoading, setObservabilityLoading] = useState(false);
   useEffect(() => {
     const nextScheduleMatch = /^every\s+(\d{1,3})\s*(minute|minutes|hour|hours|day|days)$/i.exec(
       agent.schedule ?? "",
@@ -9838,6 +10361,47 @@ function AgentSettingsSheet({
 
     return () => window.clearTimeout(timeoutId);
   }, [agent.schedule]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadObservability() {
+      if (!agent.id) {
+        return;
+      }
+
+      setObservabilityLoading(true);
+      try {
+        const response = await fetch(`/api/agents/${agent.id}/observability`, {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = asRecord(await response.json());
+        if (!cancelled) {
+          setObservability({
+            approvals: asRecordArray(payload.approvals),
+            runs: asRecordArray(payload.runs),
+            versions: asRecordArray(payload.versions),
+          });
+        }
+      } catch (error) {
+        console.error(error);
+      } finally {
+        if (!cancelled) {
+          setObservabilityLoading(false);
+        }
+      }
+    }
+
+    void loadObservability();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agent.id]);
   const selectedScheduleValue =
     agent.schedule &&
     ["hourly", "daily", "weekdays", "weekly"].includes(agent.schedule)
@@ -10031,9 +10595,202 @@ function AgentSettingsSheet({
               />
             </div>
           </AgentSheetSection>
+
+          <AgentSheetSection icon={ShieldCheck} title="Approval checkpoints">
+            <AgentApprovalList
+              approvals={observability.approvals}
+              loading={observabilityLoading}
+            />
+          </AgentSheetSection>
+
+          <AgentSheetSection icon={ListViewIcon} title="Run observability">
+            <AgentRunEventList
+              loading={observabilityLoading}
+              runs={observability.runs}
+            />
+          </AgentSheetSection>
+
+          <AgentSheetSection icon={BookOpenIcon} title="Version history">
+            <AgentVersionList
+              loading={observabilityLoading}
+              versions={observability.versions}
+            />
+          </AgentSheetSection>
         </SheetPanel>
       </SheetPopup>
     </Sheet>
+  );
+}
+
+function AgentApprovalList({
+  approvals,
+  loading,
+}: {
+  approvals: DatabaseRecord[];
+  loading: boolean;
+}) {
+  if (loading && approvals.length === 0) {
+    return <p className="text-xs text-muted-foreground">Loading approvals...</p>;
+  }
+
+  if (approvals.length === 0) {
+    return (
+      <p className="rounded-lg border border-border p-3 text-xs leading-5 text-muted-foreground">
+        No approval checkpoints yet.
+      </p>
+    );
+  }
+
+  return (
+    <div className="grid gap-2">
+      {approvals.slice(0, 5).map((approval) => {
+        const status = asString(approval.status, "pending");
+        return (
+          <div
+            className="grid gap-1 rounded-lg border border-border p-3"
+            key={asString(approval.id)}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="truncate text-sm font-medium">
+                {asString(approval.summary, "Approval checkpoint")}
+              </p>
+              <Badge
+                variant={
+                  status === "rejected"
+                    ? "destructive"
+                    : status === "pending"
+                      ? "warning"
+                      : "success"
+                }
+              >
+                {formatStatusLabel(status)}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {formatDateTimeLabel(approval.created_at)}
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AgentRunEventList({
+  loading,
+  runs,
+}: {
+  loading: boolean;
+  runs: DatabaseRecord[];
+}) {
+  if (loading && runs.length === 0) {
+    return <p className="text-xs text-muted-foreground">Loading runs...</p>;
+  }
+
+  if (runs.length === 0) {
+    return (
+      <p className="rounded-lg border border-border p-3 text-xs leading-5 text-muted-foreground">
+        No runs recorded yet.
+      </p>
+    );
+  }
+
+  return (
+    <div className="grid gap-2">
+      {runs.slice(0, 5).map((run) => {
+        const events = asRecordArray(run.workflow_run_events);
+        return (
+          <div
+            className="rounded-lg border border-border p-3"
+            key={asString(run.id)}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium">
+                Run {asString(run.id).slice(0, 8)}
+              </p>
+              <Badge
+                variant={
+                  asString(run.status) === "failed"
+                    ? "destructive"
+                    : asString(run.status) === "waiting_approval"
+                      ? "warning"
+                      : asString(run.status) === "completed"
+                        ? "success"
+                        : "secondary"
+                }
+              >
+                {formatStatusLabel(asString(run.status, "queued"))}
+              </Badge>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {formatDateTimeLabel(run.created_at)} · {events.length} event(s)
+            </p>
+            <div className="mt-2 grid gap-1">
+              {events.slice(-4).map((event) => (
+                <div
+                  className="flex min-w-0 items-start gap-2 text-xs"
+                  key={asString(event.id)}
+                >
+                  <span className="mt-2 size-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                  <span className="min-w-0">
+                    <span className="font-medium">
+                      {formatStatusLabel(asString(event.event_type))}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      {asString(event.message)}
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AgentVersionList({
+  loading,
+  versions,
+}: {
+  loading: boolean;
+  versions: DatabaseRecord[];
+}) {
+  if (loading && versions.length === 0) {
+    return <p className="text-xs text-muted-foreground">Loading versions...</p>;
+  }
+
+  if (versions.length === 0) {
+    return (
+      <p className="rounded-lg border border-border p-3 text-xs leading-5 text-muted-foreground">
+        No versions saved yet.
+      </p>
+    );
+  }
+
+  return (
+    <div className="grid gap-2">
+      {versions.slice(0, 6).map((version) => (
+        <div
+          className="flex items-center justify-between gap-3 rounded-lg border border-border p-3"
+          key={asString(version.id)}
+        >
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">
+              Version {asNumber(version.version_number)}
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
+              {asString(version.summary, asString(version.change_type))}
+            </p>
+          </div>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {formatDateTimeLabel(version.created_at)}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -10209,7 +10966,6 @@ function AgentChatCard({
             runState={runState}
             runtime={card.runtime}
           />
-          <AgentNodeModelBadge modelKey={card.modelKey} />
         </div>
         <button
           aria-label={`Open ${card.title} chat`}
@@ -10224,14 +10980,17 @@ function AgentChatCard({
           <Icon className="size-4" icon={Chat01Icon} />
         </button>
       </div>
-      <div className="mt-4 flex -space-x-2">
-        {card.apps.map((logo) => (
-          <AgentAppLogo
-            className="size-8 rounded-lg text-[0.625rem]"
-            key={logo}
-            logo={logo}
-          />
-        ))}
+      <div className="mt-4 flex items-center gap-2">
+        <div className="flex -space-x-2">
+          {card.apps.map((logo) => (
+            <AgentAppLogo
+              className="size-8 rounded-lg text-[0.625rem]"
+              key={logo}
+              logo={logo}
+            />
+          ))}
+        </div>
+        <AgentNodeModelBadge modelKey={card.modelKey} />
       </div>
     </div>
   );
@@ -10241,7 +11000,7 @@ function AgentNodeModelBadge({ modelKey }: { modelKey: string }) {
   const model = getChatModelOption(modelKey);
 
   return (
-    <div className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-md border border-black/8 bg-muted/55 px-1.5 py-1 text-[0.68rem] font-medium leading-none text-muted-foreground dark:border-white/8 dark:bg-white/[0.045]">
+    <div className="mt-2 inline-flex max-w-full items-center gap-1.5 text-[0.68rem] font-medium leading-none text-muted-foreground">
       <ChatModelMark className="size-3.5" model={model} />
       <span className="truncate">{model.name}</span>
     </div>
@@ -11244,8 +12003,6 @@ function BrainPage({}: {
   brain: DatabaseRecord | null;
   workspaceId: string | null;
 }) {
-  const [knowledgeDialogOpen, setKnowledgeDialogOpen] = useState(false);
-
   return (
     <>
       <PageHeader
@@ -11253,21 +12010,82 @@ function BrainPage({}: {
         title="Brain"
       />
 
-      <BuildKnowledgeBaseDialog
-        onOpenChange={setKnowledgeDialogOpen}
-        open={knowledgeDialogOpen}
-      />
-
-      <div className="flex min-h-[45svh] items-center justify-center">
-        <Button
-          className="active:scale-[0.96]"
-          onClick={() => setKnowledgeDialogOpen(true)}
-        >
-          <Icon icon={Brain03Icon} />
-          Build knowledge base/graph
-        </Button>
-      </div>
+      <BrainSoonState />
     </>
+  );
+}
+
+function BrainSoonState() {
+  return (
+    <div className="grid min-h-[28rem] place-items-center rounded-2xl border border-dashed border-border/70 bg-muted/15 px-6 py-12 text-center">
+      <div className="mx-auto max-w-md">
+        <IsometricBrainIllustration className="mx-auto h-48 w-full max-w-80 text-muted-foreground" />
+        <Badge className="mt-1" variant="destructive">
+          Soon
+        </Badge>
+        <h2 className="mt-5 text-xl font-semibold tracking-tight">
+          Brain is almost ready
+        </h2>
+        <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
+          Build a private knowledge base and graph that your agents can search,
+          reason over, and use with workspace permissions.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function IsometricBrainIllustration({
+  className,
+}: {
+  className?: string;
+}) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      viewBox="0 0 320 220"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <g
+        opacity="0.9"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.6"
+      >
+        <path d="M40 154 160 84l120 70-120 70L40 154Z" opacity="0.36" />
+        <path d="M78 151 160 104l82 47-82 47-82-47Z" />
+        <path d="M78 151v16l82 47 82-47v-16" opacity="0.42" />
+        <path d="M160 104v94" opacity="0.26" />
+        <path d="M116 122 160 97l44 25-44 25-44-25Z" />
+        <path d="M116 122v42l44 25 44-25v-42" />
+        <path d="M160 147v42" />
+        <path d="M132 133h56" opacity="0.55" />
+        <path d="M140 145h40" opacity="0.55" />
+        <path d="M145 157h30" opacity="0.55" />
+        <path d="M70 106 104 86l34 20-34 20-34-20Z" />
+        <path d="M70 106v27l34 20 34-20v-27" />
+        <path d="M104 126v27" />
+        <path d="M182 106 216 86l34 20-34 20-34-20Z" />
+        <path d="M182 106v27l34 20 34-20v-27" />
+        <path d="M216 126v27" />
+        <path d="M126 117 148 105" opacity="0.48" />
+        <path d="M194 117 172 105" opacity="0.48" />
+        <path d="M104 153 139 172" opacity="0.48" />
+        <path d="M216 153 181 172" opacity="0.48" />
+        <path d="M92 72V54" opacity="0.5" />
+        <path d="M228 72V54" opacity="0.5" />
+        <path d="M134 75 160 60l26 15" opacity="0.5" />
+        <path d="M160 60V33" opacity="0.5" />
+        <path d="M142 26h36" />
+        <path d="M150 18h20" />
+        <path d="M60 182h50" opacity="0.28" />
+        <path d="M210 182h50" opacity="0.28" />
+        <path d="M110 203h100" opacity="0.22" />
+      </g>
+    </svg>
   );
 }
 
@@ -14607,6 +15425,9 @@ function AdminPage() {
                   .filter((item): item is AdminLogRow => Boolean(item)),
                 asRecordArray(overview.modelRunLogs)
                   .map((log) => mapAdminLog(log, "AI"))
+                  .filter((item): item is AdminLogRow => Boolean(item)),
+                asRecordArray(overview.workflowEventLogs)
+                  .map((log) => mapAdminLog(log, "Workflow"))
                   .filter((item): item is AdminLogRow => Boolean(item)),
               ),
             requests: asRecordArray(requests.requests)

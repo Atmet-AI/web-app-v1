@@ -2,6 +2,7 @@ import { isRouteResponse } from "@/lib/api/auth";
 import { recordActivityLog } from "@/lib/api/audit";
 import { requireAgentPermission } from "@/lib/api/permissions";
 import { ok, readJson, serverError, stringValue } from "@/lib/api/http";
+import { createAgentVersionSnapshot } from "@/lib/agents/versions";
 
 type RouteContext = {
   params: Promise<{ agentId: string }>;
@@ -64,6 +65,14 @@ export async function PATCH(request: Request, context: RouteContext) {
       throw error;
     }
 
+    await createAgentVersionSnapshot({
+      admin: auth.admin,
+      agentId,
+      changeType: "agent.updated",
+      createdBy: auth.user.id,
+      summary: "Agent settings updated.",
+    });
+
     await recordActivityLog(auth.admin, {
       action: "agent.updated",
       actorId: auth.user.id,
@@ -102,6 +111,14 @@ export async function DELETE(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await createAgentVersionSnapshot({
+      admin: auth.admin,
+      agentId,
+      changeType: "agent.deleted",
+      createdBy: auth.user.id,
+      summary: "Agent archived.",
+    });
 
     await recordActivityLog(auth.admin, {
       action: "agent.deleted",

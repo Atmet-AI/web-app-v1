@@ -1,4 +1,4 @@
-import { isRouteResponse, requireWorkspacePermission } from "@/lib/api/auth";
+import { isRouteResponse, requireSuperAdmin } from "@/lib/api/auth";
 import { recordActivityLog } from "@/lib/api/audit";
 import { badRequest, created, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
       return badRequest("workspaceId is required");
     }
 
-    const auth = await requireWorkspacePermission(workspaceId, "workspace.read");
+    const auth = await requireSuperAdmin();
 
     if (isRouteResponse(auth)) {
       return auth;
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   try {
     const body = await readJson(request);
     const workspaceId = stringValue(body.workspaceId);
-    const auth = await requireWorkspacePermission(workspaceId, "roles.manage");
+    const auth = await requireSuperAdmin();
 
     if (isRouteResponse(auth)) {
       return auth;

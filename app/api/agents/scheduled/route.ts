@@ -1,4 +1,5 @@
-import { forbidden, ok, serverError } from "@/lib/api/http";
+import { isRouteResponse, requireWorkspacePermission } from "@/lib/api/auth";
+import { forbidden, ok, readJson, serverError, stringValue } from "@/lib/api/http";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { isWorkflowScheduleDue, runWorkflowAgent } from "@/lib/agents/runner";
 import {
@@ -21,17 +22,41 @@ function hasCronAccess(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    if (!hasCronAccess(request)) {
-      return forbidden();
+    const cronAccess = hasCronAccess(request);
+    let workspaceId = "";
+    let userId = "";
+
+    if (!cronAccess) {
+      const body = await readJson(request);
+      workspaceId = stringValue(body.workspaceId);
+
+      if (!workspaceId) {
+        return forbidden();
+      }
+
+      const auth = await requireWorkspacePermission(workspaceId, "agents.manage");
+      if (isRouteResponse(auth)) {
+        return auth;
+      }
+      userId = auth.user.id;
     }
 
     const admin = createSupabaseAdminClient();
-    const { data: agents, error } = await admin
+    let query = admin
       .from("workflow_agents")
       .select("id, schedule, settings")
       .eq("runtime_state", "running")
       .is("deleted_at", null)
       .not("schedule", "is", null);
+
+    if (workspaceId) {
+      query = query.eq("workspace_id", workspaceId);
+    }
+    if (userId) {
+      query = query.eq("created_by", userId);
+    }
+
+    const { data: agents, error } = await query;
 
     if (error) {
       throw error;

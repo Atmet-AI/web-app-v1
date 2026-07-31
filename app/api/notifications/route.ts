@@ -16,7 +16,7 @@ async function loadNotifications(
     .limit(30);
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const auth = await requireUser();
 
@@ -24,7 +24,18 @@ export async function GET() {
       return auth;
     }
 
-    const { data, error } = await loadNotifications(auth.user.id, auth.admin);
+    const url = new URL(request.url);
+    const limit = Math.min(
+      100,
+      Math.max(1, Number.parseInt(url.searchParams.get("limit") ?? "30", 10) || 30),
+    );
+    const { data, error } = await auth.admin
+      .from("notifications")
+      .select("*")
+      .eq("user_id", auth.user.id)
+      .neq("status", "archived")
+      .order("created_at", { ascending: false })
+      .limit(limit);
 
     if (error) {
       throw error;

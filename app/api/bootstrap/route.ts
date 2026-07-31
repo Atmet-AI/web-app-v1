@@ -506,7 +506,35 @@ export async function GET() {
       {};
     const globalUsageControls =
       (usageControls ?? []).find((control) => !control.workspace_id) ?? {};
-    const agentsWithTokenUsage = (agents ?? []).map((agent) => {
+    const [
+      { data: agentMemberships, error: agentMembershipsError },
+      { data: isSuperAdmin, error: superAdminError },
+    ] = await Promise.all([
+      auth.admin
+        .from("workflow_agent_members")
+        .select("agent_id")
+        .eq("user_id", auth.user.id),
+      auth.supabase.rpc("is_super_admin", { target_user_id: auth.user.id }),
+    ]);
+
+    if (agentMembershipsError || superAdminError) {
+      throw agentMembershipsError ?? superAdminError;
+    }
+
+    const assignedAgentIds = new Set(
+      (agentMemberships ?? [])
+        .map((membership) => String(membership.agent_id ?? ""))
+        .filter(Boolean),
+    );
+    const visibleAgents =
+      isSuperAdmin === true
+        ? (agents ?? [])
+        : (agents ?? []).filter(
+            (agent) =>
+              String(agent.created_by ?? "") === auth.user.id ||
+              assignedAgentIds.has(String(agent.id ?? "")),
+          );
+    const agentsWithTokenUsage = visibleAgents.map((agent) => {
       const workflowNodes = Array.isArray(agent.workflow_nodes)
         ? agent.workflow_nodes as Array<Record<string, unknown>>
         : [];

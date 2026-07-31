@@ -2,6 +2,7 @@ import { isRouteResponse } from "@/lib/api/auth";
 import { recordActivityLog } from "@/lib/api/audit";
 import { requireAgentPermission } from "@/lib/api/permissions";
 import { badRequest, created, ok, readJson, serverError, stringValue } from "@/lib/api/http";
+import { createAgentVersionSnapshot } from "@/lib/agents/versions";
 
 type RouteContext = {
   params: Promise<{ agentId: string }>;
@@ -42,6 +43,14 @@ export async function POST(request: Request, context: RouteContext) {
       throw error;
     }
 
+    await createAgentVersionSnapshot({
+      admin: auth.admin,
+      agentId,
+      changeType: "edge.saved",
+      createdBy: auth.user.id,
+      summary: "Workflow connection saved.",
+    });
+
     await recordActivityLog(auth.admin, {
       action: "agent.edge.saved",
       actorId: auth.user.id,
@@ -76,6 +85,14 @@ export async function DELETE(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await createAgentVersionSnapshot({
+      admin: auth.admin,
+      agentId,
+      changeType: "edge.deleted",
+      createdBy: auth.user.id,
+      summary: "Workflow connection deleted.",
+    });
 
     await recordActivityLog(auth.admin, {
       action: "agent.edge.deleted",

@@ -36,7 +36,7 @@ async function loadNotifications(auth: AuthContext) {
     .eq("user_id", auth.user.id)
     .neq("status", "archived")
     .order("created_at", { ascending: false })
-    .limit(30);
+    .limit(100);
 
   if (error) {
     throw error;
@@ -154,6 +154,16 @@ export async function PATCH(request: Request, context: RouteContext) {
       await auth.admin
         .from("notifications")
         .update({ read_at: now, status: "read" })
+        .eq("id", notificationId)
+        .eq("user_id", auth.user.id);
+
+      return ok({ notifications: await loadNotifications(auth) });
+    }
+
+    if (action === "archive") {
+      await auth.admin
+        .from("notifications")
+        .update({ read_at: now, status: "archived" })
         .eq("id", notificationId)
         .eq("user_id", auth.user.id);
 

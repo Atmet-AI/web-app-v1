@@ -21,6 +21,7 @@ export async function GET() {
       { data: sessionLogs, error: sessionError },
       { data: feedbackMessages, error: feedbackError },
       { data: modelRuns, error: modelRunsError },
+      { data: workflowEvents, error: workflowEventsError },
     ] = await Promise.all([
       dataClient.from("workspaces").select("*", { count: "exact", head: true }).is("deleted_at", null),
       dataClient.from("profiles").select("*", { count: "exact", head: true }),
@@ -50,6 +51,11 @@ export async function GET() {
         .select("*, profiles:profiles!ai_model_runs_user_id_fkey(full_name, email), workspaces(name, slug)")
         .order("created_at", { ascending: false })
         .limit(1000),
+      dataClient
+        .from("workflow_run_events")
+        .select("*, workflow_runs(agent_id, started_by, workflow_agents(name, workspace_id, workspaces(name, slug)))")
+        .order("created_at", { ascending: false })
+        .limit(1000),
     ]);
 
     if (
@@ -60,7 +66,8 @@ export async function GET() {
       auditError ||
       sessionError ||
       feedbackError ||
-      modelRunsError
+      modelRunsError ||
+      workflowEventsError
     ) {
       throw (
         workspaceError ??
@@ -70,7 +77,8 @@ export async function GET() {
         auditError ??
         sessionError ??
         feedbackError ??
-        modelRunsError
+        modelRunsError ??
+        workflowEventsError
       );
     }
 
@@ -168,6 +176,7 @@ export async function GET() {
       modelRunLogs: modelRuns,
       sessionLogs,
       usageLogs: usageEvents,
+      workflowEventLogs: workflowEvents,
     });
   } catch (error) {
     return serverError(error);

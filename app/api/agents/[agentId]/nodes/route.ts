@@ -3,6 +3,7 @@ import { recordActivityLog } from "@/lib/api/audit";
 import { requireAgentPermission, requireChatPermission } from "@/lib/api/permissions";
 import { created, ok, readJson, serverError, stringValue, numberValue } from "@/lib/api/http";
 import { deriveAppKeysFromChatMessages } from "@/lib/agents/app-keys";
+import { createAgentVersionSnapshot } from "@/lib/agents/versions";
 
 type RouteContext = {
   params: Promise<{ agentId: string }>;
@@ -65,6 +66,14 @@ export async function POST(request: Request, context: RouteContext) {
       throw error;
     }
 
+    await createAgentVersionSnapshot({
+      admin: auth.admin,
+      agentId,
+      changeType: "node.created",
+      createdBy: auth.user.id,
+      summary: `Created node "${data.title}".`,
+    });
+
     await recordActivityLog(auth.admin, {
       action: "agent.node.created",
       actorId: auth.user.id,
@@ -116,6 +125,14 @@ export async function PATCH(request: Request, context: RouteContext) {
       throw error;
     }
 
+    await createAgentVersionSnapshot({
+      admin: auth.admin,
+      agentId,
+      changeType: "node.updated",
+      createdBy: auth.user.id,
+      summary: `Updated node "${data.title}".`,
+    });
+
     await recordActivityLog(auth.admin, {
       action: "agent.node.updated",
       actorId: auth.user.id,
@@ -162,6 +179,14 @@ export async function DELETE(request: Request, context: RouteContext) {
     if (error) {
       throw error;
     }
+
+    await createAgentVersionSnapshot({
+      admin: auth.admin,
+      agentId,
+      changeType: "node.deleted",
+      createdBy: auth.user.id,
+      summary: "Deleted a workflow node.",
+    });
 
     await recordActivityLog(auth.admin, {
       action: "agent.node.deleted",
