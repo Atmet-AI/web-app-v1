@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -481,6 +482,26 @@ export default function LoginPage() {
           isWaitlistMode ? "max-w-3xl" : "max-w-sm",
         )}
       >
+        <div className="mb-8 flex justify-center">
+          <span className="grid h-8 w-24 place-items-center">
+            <Image
+              alt="Atmet"
+              className="h-auto w-full dark:hidden"
+              height={32}
+              priority
+              src="/Atmet Logos/Atmet Light mode.svg"
+              width={96}
+            />
+            <Image
+              alt="Atmet"
+              className="hidden h-auto w-full dark:block"
+              height={32}
+              priority
+              src="/Atmet Logos/Atmet Dark mode.svg"
+              width={96}
+            />
+          </span>
+        </div>
         <div className="mb-8 text-center">
           <h1 className="text-balance text-2xl font-semibold tracking-tight">
             {title}

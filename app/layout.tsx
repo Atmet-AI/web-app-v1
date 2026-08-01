@@ -7,13 +7,14 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 const interHeading = Inter({ subsets: ["latin"], variable: "--font-heading" });
 const interMono = Inter({ subsets: ["latin"], variable: "--font-mono" });
 
-const appUrl = "https://app.atmetai.com";
+const appUrl = "https://atmetai.com";
 const faviconUrl = "/Atmet%20Favicon.png";
 const previewImageUrl = "/Preview%20Image%20Link.png";
-const appDescription = "Your AI workspace for chats, agents, apps, and automations.";
+const appDescription =
+  "Atmet connects your team's tools into one permission-aware AI workspace for sourced answers, agents, and automations.";
 
 export const metadata: Metadata = {
-  title: "Atmet Platform",
+  title: "Atmet | One AI workspace for every tool",
   description: appDescription,
   metadataBase: new URL(appUrl),
   alternates: {
@@ -25,7 +26,7 @@ export const metadata: Metadata = {
     apple: [{ url: faviconUrl, type: "image/png", sizes: "1028x1028" }],
   },
   openGraph: {
-    title: "Atmet Platform",
+    title: "Atmet | One AI workspace for every tool",
     description: appDescription,
     url: appUrl,
     siteName: "Atmet",
@@ -34,14 +35,14 @@ export const metadata: Metadata = {
         url: previewImageUrl,
         width: 1200,
         height: 630,
-        alt: "Atmet Platform",
+        alt: "Atmet",
       },
     ],
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Atmet Platform",
+    title: "Atmet | One AI workspace for every tool",
     description: appDescription,
     images: [previewImageUrl],
   },

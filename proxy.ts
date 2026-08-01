@@ -18,6 +18,14 @@ function getSupabaseProxyEnv() {
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  const host = request.headers.get("host")?.split(":")[0].toLowerCase() ?? "";
+  const isAppHost = host === "app.atmetai.com";
+  const isMarketingRoot = pathname === "/" && !isAppHost;
+
+  if (isMarketingRoot) {
+    return NextResponse.next({ request });
+  }
+
   const env = getSupabaseProxyEnv();
 
   if (!env) {
@@ -141,9 +149,21 @@ export async function proxy(request: NextRequest) {
     );
   }
 
+  if (pathname === "/" && isAppHost) {
+    const dashboardUrl = request.nextUrl.clone();
+    dashboardUrl.pathname = "/dashboard";
+    const rewriteResponse = NextResponse.rewrite(dashboardUrl);
+
+    pendingCookies.forEach(({ name, value, options }) => {
+      rewriteResponse.cookies.set(name, value, options);
+    });
+
+    return rewriteResponse;
+  }
+
   return response;
 }
 
 export const config = {
-  matcher: ["/", "/signup"],
+  matcher: ["/", "/dashboard/:path*", "/signup"],
 };
