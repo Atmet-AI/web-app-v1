@@ -476,32 +476,33 @@ export default function LoginPage() {
 
   return (
     <main className="relative grid min-h-svh bg-background px-5 text-foreground">
+      <div className="absolute left-1/2 top-8 z-10 -translate-x-1/2">
+        <span className="grid h-5 w-16 place-items-center">
+          <Image
+            alt="Atmet"
+            className="h-auto w-full dark:hidden"
+            height={20}
+            priority
+            src="/Atmet Logos/Atmet Light mode.svg"
+            width={64}
+          />
+          <Image
+            alt="Atmet"
+            className="hidden h-auto w-full dark:block"
+            height={20}
+            priority
+            src="/Atmet Logos/Atmet Dark mode.svg"
+            width={64}
+          />
+        </span>
+      </div>
+
       <section
         className={cn(
           "mx-auto flex w-full flex-col justify-center px-3 pb-28 pt-20 sm:px-0",
           isWaitlistMode ? "max-w-3xl" : "max-w-sm",
         )}
       >
-        <div className="mb-8 flex justify-center">
-          <span className="grid h-8 w-24 place-items-center">
-            <Image
-              alt="Atmet"
-              className="h-auto w-full dark:hidden"
-              height={32}
-              priority
-              src="/Atmet Logos/Atmet Light mode.svg"
-              width={96}
-            />
-            <Image
-              alt="Atmet"
-              className="hidden h-auto w-full dark:block"
-              height={32}
-              priority
-              src="/Atmet Logos/Atmet Dark mode.svg"
-              width={96}
-            />
-          </span>
-        </div>
         <div className="mb-8 text-center">
           <h1 className="text-balance text-2xl font-semibold tracking-tight">
             {title}
@@ -857,7 +858,7 @@ export default function LoginPage() {
             </>
           )}
 
-          {!isWaitlistMode && !isResetMode && (
+          {!isWaitlistMode && !isResetMode && (isForgotMode || passwordVisible) && (
             <button
               className="mx-auto mt-4 min-h-8 rounded-md px-2 text-muted-foreground text-sm outline-none transition-[color,scale] duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]"
               onClick={isForgotMode ? backToSignIn : startForgotPassword}

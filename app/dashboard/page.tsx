@@ -2043,6 +2043,7 @@ export default function Home() {
   const [connectedConnectorKeys, setConnectedConnectorKeys] = useState<string[]>(
     [],
   );
+  const [areConnectorsHydrating, setAreConnectorsHydrating] = useState(true);
   const [usageData, setUsageData] = useState<UsageData | null>(null);
   const [brainData, setBrainData] = useState<DatabaseRecord | null>(null);
   const [subscriptionData, setSubscriptionData] =
@@ -2405,6 +2406,7 @@ export default function Home() {
       setSkillList(mappedSkills);
       setConnectorList(mappedConnectors);
       setConnectedConnectorKeys(connectedKeys);
+      setAreConnectorsHydrating(false);
       setUsageData(mapUsage(payload.usage, mappedChats.length, mappedAgents.length));
       setBrainData(asRecord(payload.brain));
       setSubscriptionData(asRecord(payload.subscription));
@@ -2526,11 +2528,12 @@ export default function Home() {
         console.error(error);
         if (!cancelled) {
           if (!appliedCachedPayload) {
-            setBootstrapError(
-              error instanceof Error
-                ? error.message
-                : "Could not load workspace data",
-            );
+          setBootstrapError(
+            error instanceof Error
+              ? error.message
+              : "Could not load workspace data",
+          );
+            setAreConnectorsHydrating(false);
             setIsBootstrapLoading(false);
           }
           setIsBootstrapRefreshing(false);
@@ -2539,6 +2542,7 @@ export default function Home() {
         if (!cancelled) {
           setIsBootstrapLoading(false);
           setIsBootstrapRefreshing(false);
+          setAreConnectorsHydrating(false);
         }
       }
     }
@@ -3343,6 +3347,7 @@ export default function Home() {
               )}
               {activePage === "connectors" && (
                 <ConnectorsPage
+                  connectionsLoading={areConnectorsHydrating}
                   connectedConnectorKeys={connectedConnectorKeys}
                   connectors={connectorList}
                   onConnectedConnectorKeysChange={setConnectedConnectorKeys}
@@ -12951,11 +12956,13 @@ function UserTokenLimitSlider({
 }
 
 function ConnectorsPage({
+  connectionsLoading,
   connectedConnectorKeys,
   connectors,
   onConnectedConnectorKeysChange,
   workspaceId,
 }: {
+  connectionsLoading: boolean;
   connectedConnectorKeys: string[];
   connectors: ConnectorItem[];
   onConnectedConnectorKeysChange: React.Dispatch<React.SetStateAction<string[]>>;
@@ -13045,7 +13052,11 @@ function ConnectorsPage({
           selectedConnector.key ?? selectedConnector.name,
         )}
         connector={selectedConnector}
-        busy={connectorActionKey === (selectedConnector.key ?? selectedConnector.name)}
+        busy={
+          connectionsLoading ||
+          connectorActionKey === (selectedConnector.key ?? selectedConnector.name)
+        }
+        connectionsLoading={connectionsLoading}
         onBack={() => setSelectedConnectorName(null)}
         onToggleConnect={() => toggleConnector(selectedConnector)}
       />
@@ -13097,12 +13108,17 @@ function ConnectorsPage({
               <CardPanel className="mt-auto flex-none p-4 pt-0">
                 <Button
                   className="w-full active:scale-[0.96]"
+                  disabled={connectionsLoading}
                   onClick={() => setSelectedConnectorName(connector.name)}
                   size="sm"
                   variant={connected ? "secondary" : "default"}
                 >
-                  <Icon icon={PlugIcon} />
-                  {connected ? "Manage" : "Connect"}
+                  {connectionsLoading ? (
+                    <Spinner className="size-3.5" />
+                  ) : (
+                    <Icon icon={PlugIcon} />
+                  )}
+                  {connectionsLoading ? "Loading" : connected ? "Manage" : "Connect"}
                 </Button>
               </CardPanel>
             </Card>
@@ -13160,12 +13176,14 @@ function ConnectorFilterMenu({
 
 function ConnectorProfilePage({
   busy,
+  connectionsLoading,
   connected,
   connector,
   onBack,
   onToggleConnect,
 }: {
   busy: boolean;
+  connectionsLoading: boolean;
   connected: boolean;
   connector: ConnectorItem;
   onBack: () => void;
@@ -13209,8 +13227,18 @@ function ConnectorProfilePage({
               size="sm"
               variant={connected ? "secondary" : "default"}
             >
-              <Icon icon={PlugIcon} />
-              {busy ? "Working..." : connected ? "Disconnect" : "Connect"}
+              {busy ? (
+                <Spinner className="size-3.5" />
+              ) : (
+                <Icon icon={PlugIcon} />
+              )}
+              {connectionsLoading
+                ? "Loading"
+                : busy
+                  ? "Working..."
+                  : connected
+                    ? "Disconnect"
+                    : "Connect"}
             </Button>
           </div>
         </div>
