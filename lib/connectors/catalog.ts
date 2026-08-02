@@ -18,7 +18,7 @@ export const connectorCatalog = [
     description: "Use Anthropic Claude for writing, analysis, and reasoning.",
     gradient: "from-orange-300/20 via-stone-100/10 to-stone-500/10",
     key: "claude",
-    logo: "https://svgl.app/library/anthropic_white.svg",
+    logo: "https://svgl.app/library/anthropic_black.svg",
     name: "Claude",
   },
   {
@@ -81,7 +81,7 @@ export const connectorCatalog = [
     description: "Track pull requests, issues, reviews, and releases.",
     gradient: "from-stone-500/20 via-stone-100/10 to-blue-400/10",
     key: "github",
-    logo: "https://svgl.app/library/github_dark.svg",
+    logo: "https://svgl.app/library/github_light.svg",
     name: "GitHub",
   },
 ] as const satisfies ConnectorCatalogEntry[];

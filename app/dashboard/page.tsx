@@ -1747,7 +1747,13 @@ function getMergedConnectorCatalog(apps: unknown[]) {
     const record = asRecord(app);
     const key = asString(record.key, asString(record.app_key));
     if (key && connectorCatalogKeySet.has(key)) {
-      appsByKey.set(key, { ...appsByKey.get(key), ...record, key });
+      const catalogEntry = appsByKey.get(key);
+      appsByKey.set(key, {
+        ...catalogEntry,
+        ...record,
+        key,
+        logo: asString(catalogEntry?.logo, asString(record.logo)),
+      });
     }
   }
 
