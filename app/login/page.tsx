@@ -477,22 +477,22 @@ export default function LoginPage() {
   return (
     <main className="relative grid min-h-svh bg-background px-5 text-foreground">
       <div className="absolute left-1/2 top-8 z-10 -translate-x-1/2">
-        <span className="grid h-5 w-16 place-items-center">
+        <span className="grid h-4 w-11 place-items-center">
           <Image
             alt="Atmet"
             className="h-auto w-full dark:hidden"
-            height={20}
+            height={16}
             priority
             src="/Atmet Logos/Atmet Light mode.svg"
-            width={64}
+            width={44}
           />
           <Image
             alt="Atmet"
             className="hidden h-auto w-full dark:block"
-            height={20}
+            height={16}
             priority
             src="/Atmet Logos/Atmet Dark mode.svg"
-            width={64}
+            width={44}
           />
         </span>
       </div>
