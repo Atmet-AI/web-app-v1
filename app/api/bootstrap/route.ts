@@ -422,6 +422,7 @@ export async function GET(request: Request) {
         members: [],
         memberships,
         notifications: notifications ?? [],
+        partial: true,
         preferences: userPreferences,
         profile,
         skills: [],

@@ -375,6 +375,10 @@ const connectorCatalogKeySet = new Set<string>(connectorCatalogKeys);
 
 const defaultConnectorCatalog = connectorCatalog satisfies DatabaseRecord[];
 
+const defaultConnectorList = defaultConnectorCatalog
+  .map((app, index) => mapConnector(app, new Set<string>(), index))
+  .filter((item): item is ConnectorItem => Boolean(item));
+
 function getConnectorForLogo(logo?: string | null) {
   const raw = asString(logo).toLowerCase();
   if (!raw) {
@@ -1269,6 +1273,7 @@ type DashboardData = {
   connections?: unknown[];
   members?: unknown[];
   notifications?: unknown[];
+  partial?: unknown;
   preferences?: unknown;
   profile?: unknown;
   setupUrl?: unknown;
@@ -1968,7 +1973,7 @@ function mergeNotifications(
   );
 }
 
-const dashboardCacheKey = "atmet.dashboard.shell.v5";
+const dashboardCacheKey = "atmet.dashboard.shell.v6";
 const dashboardCacheMaxAgeMs = 1000 * 60 * 10;
 
 function getCacheableDashboardPayload(payload: DashboardData): DashboardData {
@@ -2008,6 +2013,7 @@ function getCacheableDashboardPayload(payload: DashboardData): DashboardData {
     brain: asRecord(payload.brain),
     members: asRecordArray(payload.members),
     notifications: asRecordArray(payload.notifications),
+    partial: asBoolean(asRecord(payload).partial),
     profile: asRecord(payload.profile),
     skills: asRecordArray(payload.skills).map((skill) => {
       const record = asRecord(skill);
@@ -2045,7 +2051,8 @@ export default function Home() {
     null,
   );
   const [skillList, setSkillList] = useState<SkillItem[]>([]);
-  const [connectorList, setConnectorList] = useState<ConnectorItem[]>([]);
+  const [connectorList, setConnectorList] =
+    useState<ConnectorItem[]>(defaultConnectorList);
   const [connectedConnectorKeys, setConnectedConnectorKeys] = useState<string[]>(
     [],
   );
@@ -2356,7 +2363,10 @@ export default function Home() {
     };
   }, []);
 
-  function applyDashboardPayload(payload: DashboardData) {
+  function applyDashboardPayload(
+    payload: DashboardData,
+    options: { completeConnectorHydration?: boolean } = {},
+  ) {
     const isPartialPayload = asBoolean(asRecord(payload).partial);
     const profileRecord = asRecord(payload.profile);
     const mappedWorkspaces = asRecordArray(payload.workspaces)
@@ -2412,7 +2422,9 @@ export default function Home() {
       setSkillList(mappedSkills);
       setConnectorList(mappedConnectors);
       setConnectedConnectorKeys(connectedKeys);
-      setAreConnectorsHydrating(false);
+      if (options.completeConnectorHydration) {
+        setAreConnectorsHydrating(false);
+      }
       setUsageData(mapUsage(payload.usage, mappedChats.length, mappedAgents.length));
       setBrainData(asRecord(payload.brain));
       setSubscriptionData(asRecord(payload.subscription));
@@ -2428,6 +2440,7 @@ export default function Home() {
     async function loadDashboard() {
       setBootstrapError("");
       setIsBootstrapLoading(true);
+      setAreConnectorsHydrating(true);
 
       try {
         const cached = window.localStorage.getItem(dashboardCacheKey);
@@ -2485,16 +2498,18 @@ export default function Home() {
 
         applyDashboardPayload(payload);
         setIsBootstrapLoading(false);
-        try {
-          window.localStorage.setItem(
-            dashboardCacheKey,
-            JSON.stringify({
-              cachedAt: Date.now(),
-              payload: getCacheableDashboardPayload(payload),
-            }),
-          );
-        } catch {
-          window.localStorage.removeItem(dashboardCacheKey);
+        if (!asBoolean(asRecord(payload).partial)) {
+          try {
+            window.localStorage.setItem(
+              dashboardCacheKey,
+              JSON.stringify({
+                cachedAt: Date.now(),
+                payload: getCacheableDashboardPayload(payload),
+              }),
+            );
+          } catch {
+            window.localStorage.removeItem(dashboardCacheKey);
+          }
         }
 
         setIsBootstrapRefreshing(true);
@@ -2508,6 +2523,7 @@ export default function Home() {
         }
 
         if (!secondaryResponse.ok) {
+          setAreConnectorsHydrating(false);
           setIsBootstrapRefreshing(false);
           return;
         }
@@ -2517,7 +2533,9 @@ export default function Home() {
           return;
         }
 
-        applyDashboardPayload(secondaryPayload);
+        applyDashboardPayload(secondaryPayload, {
+          completeConnectorHydration: true,
+        });
         setIsBootstrapRefreshing(false);
         try {
           window.localStorage.setItem(
@@ -2539,16 +2557,15 @@ export default function Home() {
               ? error.message
               : "Could not load workspace data",
           );
-            setAreConnectorsHydrating(false);
             setIsBootstrapLoading(false);
           }
+          setAreConnectorsHydrating(false);
           setIsBootstrapRefreshing(false);
         }
       } finally {
         if (!cancelled) {
           setIsBootstrapLoading(false);
           setIsBootstrapRefreshing(false);
-          setAreConnectorsHydrating(false);
         }
       }
     }
