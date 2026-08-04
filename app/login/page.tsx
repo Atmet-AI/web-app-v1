@@ -177,6 +177,9 @@ export default function LoginPage() {
     }
 
     if (reset !== "1") {
+      if (window.location.hash === "#waitlist") {
+        setMode("waitlist");
+      }
       return;
     }
 
@@ -218,6 +221,25 @@ export default function LoginPage() {
       })
       .finally(() => setIsSubmitting(false));
   }, []);
+
+  useEffect(() => {
+    function syncHashMode() {
+      if (window.location.hash === "#waitlist") {
+        setMode("waitlist");
+        setErrorMessage("");
+        setSuccessMessage("");
+        setPasswordVisible(false);
+        setOtpVisible(false);
+        setWaitlistSubmitted(false);
+      } else if (mode === "waitlist") {
+        backToSignIn();
+      }
+    }
+
+    window.addEventListener("hashchange", syncHashMode);
+
+    return () => window.removeEventListener("hashchange", syncHashMode);
+  }, [mode]);
 
   useEffect(() => {
     if (!passwordVisible) {
@@ -423,6 +445,7 @@ export default function LoginPage() {
 
   function startForgotPassword() {
     setMode("forgot");
+    window.history.replaceState(null, "", "/login");
     setErrorMessage("");
     setSuccessMessage("");
     setPasswordVisible(false);
@@ -432,6 +455,7 @@ export default function LoginPage() {
 
   function backToSignIn() {
     setMode("login");
+    window.history.replaceState(null, "", "/login");
     setErrorMessage("");
     setSuccessMessage("");
     setOtpVisible(false);
@@ -442,6 +466,7 @@ export default function LoginPage() {
 
   function startWaitlist() {
     setMode("waitlist");
+    window.history.replaceState(null, "", "/login#waitlist");
     setErrorMessage("");
     setSuccessMessage("");
     setPasswordVisible(false);
@@ -477,22 +502,22 @@ export default function LoginPage() {
   return (
     <main className="relative grid min-h-svh bg-background px-5 text-foreground">
       <div className="absolute left-1/2 top-8 z-10 -translate-x-1/2">
-        <span className="grid h-4 w-11 place-items-center">
+        <span className="grid h-3 w-8 place-items-center">
           <Image
             alt="Atmet"
             className="h-auto w-full dark:hidden"
-            height={16}
+            height={12}
             priority
             src="/Atmet Logos/Atmet Light mode.svg"
-            width={44}
+            width={32}
           />
           <Image
             alt="Atmet"
             className="hidden h-auto w-full dark:block"
-            height={16}
+            height={12}
             priority
             src="/Atmet Logos/Atmet Dark mode.svg"
-            width={44}
+            width={32}
           />
         </span>
       </div>
