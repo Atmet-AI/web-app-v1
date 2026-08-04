@@ -46,7 +46,7 @@ The app callback route is:
 Production env:
 
 ```txt
-NEXT_PUBLIC_APP_URL=https://app.atmetai.com
+NEXT_PUBLIC_APP_URL=https://app.atmet.pro
 ```
 
 ## 3. Auth Routes Added
