@@ -20,11 +20,6 @@ export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const host = request.headers.get("host")?.split(":")[0].toLowerCase() ?? "";
   const isAppHost = host === "app.atmetai.com";
-  const isMarketingRoot = pathname === "/" && !isAppHost;
-
-  if (isMarketingRoot) {
-    return NextResponse.next({ request });
-  }
 
   const env = getSupabaseProxyEnv();
 

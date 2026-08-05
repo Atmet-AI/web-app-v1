@@ -2074,6 +2074,9 @@ export default function Home() {
   const [sidebarChats, setSidebarChats] =
     useState<SidebarChat[]>(initialSidebarChats);
   const [creatingChat, setCreatingChat] = useState(false);
+  const [loadingSidebarChatId, setLoadingSidebarChatId] = useState<string | null>(
+    null,
+  );
   const [chatParticipantIdsByChat, setChatParticipantIdsByChat] = useState<
     Record<string, string[]>
   >({});
@@ -2789,6 +2792,9 @@ export default function Home() {
   }
 
   function openSidebarChat(chatId: string) {
+    if (chatId !== activeSidebarChatId) {
+      setLoadingSidebarChatId(chatId);
+    }
     setActiveSidebarChatId(chatId);
     selectPage("chat", { chatId });
   }
@@ -3244,6 +3250,7 @@ export default function Home() {
             <SidebarChatHistory
               activeChatId={activePage === "chat" ? activeSidebarChatId : null}
               chats={sidebarChats}
+              loadingChatId={loadingSidebarChatId}
               onDeleteChat={deleteSidebarChat}
               onJumpToAgentWorkflow={openAgentPlayground}
               onOpenChange={setChatHistoryOpen}
@@ -3325,6 +3332,7 @@ export default function Home() {
                   onAddMemberToChat={addMemberToChat}
                   onCreateAgent={createAgent}
                   onCreateChat={createSidebarChat}
+                  onMessagesSettled={() => setLoadingSidebarChatId(null)}
                   onUpdateChatTitle={(chatId, title) => {
                     setSidebarChats((current) =>
                       current.map((chat) =>
@@ -3339,6 +3347,7 @@ export default function Home() {
                 <AgentsPage
                   agents={agentList}
                   composerOptions={dynamicComposerOptions}
+                  loading={isBootstrapLoading}
                   onCreateAgent={createAgent}
                   onCreateWorkflowChatNode={createWorkflowChatNode}
                   onDeleteWorkflowChatNode={deleteWorkflowChatNode}
@@ -4730,6 +4739,7 @@ function WorkflowChatSpinnerIcon({ running }: { running: boolean }) {
 function SidebarChatHistory({
   activeChatId,
   chats,
+  loadingChatId,
   onDeleteChat,
   onJumpToAgentWorkflow,
   onOpenChange,
@@ -4741,6 +4751,7 @@ function SidebarChatHistory({
 }: {
   activeChatId: string | null;
   chats: SidebarChat[];
+  loadingChatId: string | null;
   onDeleteChat: (chatId: string) => void;
   onJumpToAgentWorkflow: (agentName: string) => void;
   onOpenChange: (open: boolean) => void;
@@ -4770,6 +4781,7 @@ function SidebarChatHistory({
             {orderedChats.map((chat) => {
               const workflowMeta = workflowChatMeta.get(chat.id);
               const isWorkflowChat = Boolean(workflowMeta);
+              const isOpeningChat = loadingChatId === chat.id;
               const chatTitle = workflowMeta
                 ? `${workflowMeta.agentName} / ${workflowMeta.title || chat.title}`
                 : chat.title;
@@ -4789,7 +4801,9 @@ function SidebarChatHistory({
                     onClick={() => onOpenChat(chat.id)}
                     type="button"
                   >
-                    {isWorkflowChat ? (
+                    {isOpeningChat ? (
+                      <Spinner className="size-3.5 text-muted-foreground" />
+                    ) : isWorkflowChat ? (
                       <WorkflowChatSpinnerIcon
                         running={Boolean(workflowMeta?.running)}
                       />
@@ -4887,6 +4901,7 @@ function ChatPage({
   onAddMemberToChat,
   onCreateAgent,
   onCreateChat,
+  onMessagesSettled,
   onUpdateChatTitle,
   workspaceId,
 }: {
@@ -4902,6 +4917,7 @@ function ChatPage({
   onAddMemberToChat: (chatId: string, memberId: string) => void;
   onCreateAgent: (name: string) => void | Promise<void>;
   onCreateChat: (title: string) => Promise<string>;
+  onMessagesSettled: () => void;
   onUpdateChatTitle: (chatId: string, title: string) => void;
   workspaceId: string | null;
 }) {
@@ -4921,6 +4937,7 @@ function ChatPage({
       onAddMemberToChat={onAddMemberToChat}
       onCreateAgent={onCreateAgent}
       onCreateChat={onCreateChat}
+      onMessagesSettled={onMessagesSettled}
       onUpdateChatTitle={onUpdateChatTitle}
       workspaceId={workspaceId}
     />
@@ -4941,6 +4958,7 @@ function ChatExperience({
   onAddMemberToChat,
   onCreateAgent,
   onCreateChat,
+  onMessagesSettled,
   onUpdateChatTitle,
   workspaceId = null,
 }: {
@@ -4957,6 +4975,7 @@ function ChatExperience({
   onAddMemberToChat?: (chatId: string, memberId: string) => void;
   onCreateAgent?: (name: string) => void | Promise<void>;
   onCreateChat?: (title: string) => Promise<string>;
+  onMessagesSettled?: () => void;
   onUpdateChatTitle?: (chatId: string, title: string) => void;
   workspaceId?: string | null;
 }) {
@@ -4965,6 +4984,7 @@ function ChatExperience({
   );
   const [userModelOptions, setUserModelOptions] = useState<ChatModelOption[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageDraft, setEditingMessageDraft] = useState("");
@@ -5165,12 +5185,15 @@ function ChatExperience({
 
     async function loadMessages() {
       if (!activeChatId) {
+        setMessagesLoading(false);
         setMessages([]);
         setLastResponseUsedApp(false);
         setCreateAgentDialogOpen(false);
+        onMessagesSettled?.();
         return;
       }
 
+      setMessagesLoading(true);
       if (
         skipNextMessageLoadRef.current &&
         (!skipNextMessageLoadForChatIdRef.current ||
@@ -5178,6 +5201,8 @@ function ChatExperience({
       ) {
         skipNextMessageLoadRef.current = false;
         skipNextMessageLoadForChatIdRef.current = null;
+        setMessagesLoading(false);
+        onMessagesSettled?.();
         return;
       }
 
@@ -5201,6 +5226,11 @@ function ChatExperience({
         }
       } catch (error) {
         console.error(error);
+      } finally {
+        if (!cancelled) {
+          setMessagesLoading(false);
+          onMessagesSettled?.();
+        }
       }
     }
 
@@ -5921,6 +5951,7 @@ function ChatExperience({
     Boolean(activeChat) &&
     Boolean(onAddChatToAgentWorkflow) &&
     Boolean(onCreateAgent);
+  const showMessages = hasMessages && !messagesLoading;
 
   return (
     <div
@@ -5930,10 +5961,16 @@ function ChatExperience({
           ? "min-h-full justify-end"
           : "min-h-[calc(100svh-8rem)]",
         !compact &&
-          (hasMessages ? "justify-end overflow-hidden py-4" : "justify-center py-8"),
+          (showMessages ? "justify-end overflow-hidden py-4" : "justify-center py-8"),
       )}
     >
-      {hasMessages && (
+      {messagesLoading && (
+        <div className="grid min-h-56 place-items-center text-muted-foreground">
+          <Spinner className="size-5" />
+        </div>
+      )}
+
+      {showMessages && (
         <MessageScrollerProvider
           autoScroll
           defaultScrollPosition="end"
@@ -6000,7 +6037,7 @@ function ChatExperience({
       <div
         className={cn(
           "relative mx-auto w-full max-w-3xl rounded-2xl border border-black/10 bg-white/28 backdrop-blur-2xl backdrop-saturate-150 dark:border-white/10 dark:bg-white/[0.035]",
-          hasMessages && "absolute inset-x-0 bottom-1 z-10",
+          showMessages && "absolute inset-x-0 bottom-1 z-10",
         )}
       >
           {showCreateAgentFrame && (
@@ -9043,6 +9080,7 @@ type AgentFilter = "all" | "paused" | "running";
 function AgentsPage({
   agents,
   composerOptions,
+  loading = false,
   onAgentRuntimeChange,
   onAgentScheduleChange,
   onCreateAgent,
@@ -9056,6 +9094,7 @@ function AgentsPage({
 }: {
   agents: Agent[];
   composerOptions: ComposerOption[];
+  loading?: boolean;
   onAgentRuntimeChange: (agentName: string, runtime: "paused" | "running") => void;
   onAgentScheduleChange: (agentName: string, schedule: string | null) => void;
   onCreateAgent: (name: string) => void;
@@ -9117,7 +9156,11 @@ function AgentsPage({
         description={pageDescriptions.agents}
         title="Workflow Agents"
       />
-      {agents.length === 0 ? (
+      {loading ? (
+        <div className="grid min-h-[28rem] place-items-center text-muted-foreground">
+          <Spinner className="size-5" />
+        </div>
+      ) : agents.length === 0 ? (
         <AgentsEmptyState onCreateAgent={onCreateAgent} />
       ) : (
         <>
