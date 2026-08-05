@@ -917,12 +917,13 @@ export default function LoginPage() {
                         Anything else you&apos;d like to add?
                       </Label>
                       <Textarea
+                        className="placeholder:text-muted-foreground/72"
                         disabled={waitlistSubmitted}
                         id="waitlist-notes"
                         onChange={(event) =>
                           setWaitlistNotes(event.target.value)
                         }
-                        placeholder="Write here"
+                        placeholder="write here"
                         value={waitlistNotes}
                       />
                     </div>
