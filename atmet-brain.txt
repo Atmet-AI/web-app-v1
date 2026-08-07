@@ -1,0 +1,1377 @@
+# Atmet Brain
+
+Atmet Brain is the core intelligence layer behind Atmet. Its purpose is to turn everything a company knows — documents, databases, emails, conversations, connected apps, policies, processes, people, projects, customers, decisions, and operational data — into one structured, continuously updated company brain that AI agents can understand and use.
+
+The Brain is not simply a folder of files, a vector database, or a traditional knowledge base. It is designed to become the company’s central knowledge infrastructure.
+
+A company should be able to connect its existing systems, upload its data, and allow Atmet Brain to understand, organize, connect, secure, and continuously update that knowledge without requiring the company to manually rebuild its information inside another tool.
+
+The same Brain Core can power the Atmet platform or be deployed as a standalone service for a company.
+
+---
+
+## The Main Idea
+
+A company has one main Brain.
+
+Under that Brain, knowledge can be organized into departments, teams, agents, and custom sub-agents.
+
+For example:
+
+Company Brain
+→ Finance
+→ Accounting
+→ Invoice Agent
+
+Or:
+
+Company Brain
+→ Sales
+→ Enterprise Sales
+→ Proposal Agent
+
+Each child can inherit knowledge from the levels above it.
+
+An Invoice Agent may access:
+
+Company knowledge
+
+* Finance knowledge
+* Accounting knowledge
+* its own private knowledge
+
+The agent does not need its own duplicated database.
+
+Instead, every agent receives a specific knowledge scope.
+
+This means Atmet can support an unlimited number of agents without copying the company’s information for every new agent.
+
+Agents are therefore not separate knowledge bases.
+
+An Atmet agent is better understood as:
+
+**Model + Instructions + Knowledge Scope + Tools + Permissions + Memory**
+
+The Brain remains separate from the AI model.
+
+A company could use GPT today, Claude tomorrow, a local Llama model later, or several models at the same time while continuing to use exactly the same Brain.
+
+---
+
+# Knowledge Sources
+
+Atmet Brain should be able to receive almost any kind of company information.
+
+Examples include:
+
+* PDFs
+* Word documents
+* presentations
+* Excel files
+* CSV files
+* images
+* screenshots
+* audio
+* video
+* meeting recordings
+* emails
+* Slack messages
+* Notion
+* Google Drive
+* Microsoft SharePoint
+* CRMs
+* ERPs
+* databases
+* APIs
+* GitHub
+* project management applications
+* internal company systems
+
+Connected applications have two separate purposes inside Atmet.
+
+The first is **Brain Access**.
+
+Brain Access allows Atmet to read, sync, and understand information from an application.
+
+For example, connecting HubSpot may allow the Brain to understand customers, contacts, deals, activities, and sales history.
+
+Connecting Slack may allow the Brain to understand conversations, decisions, projects, and internal discussions.
+
+This is different from **Action Access**.
+
+Action Access allows an agent to perform actions inside that application.
+
+For example:
+
+Brain Access: Read Salesforce opportunities.
+
+Action Access: Create or update a Salesforce opportunity.
+
+These two capabilities should remain separate.
+
+A company can therefore allow Atmet Brain to learn from an application without giving agents permission to modify anything inside it.
+
+---
+
+# Raw Data Store
+
+Everything entering the Brain should first be preserved in its original form.
+
+This is the Raw Data Store.
+
+If a company uploads:
+
+`Employee-Handbook.pdf`
+
+the original PDF should remain available.
+
+If Atmet syncs information from Salesforce, the original source record or snapshot should be preserved.
+
+If information comes from Slack, Atmet should preserve the source reference to the original message.
+
+The Raw Data Store acts as the evidence layer of the Brain.
+
+It allows Atmet to:
+
+* reprocess information later
+* improve extraction without requiring users to upload data again
+* show users where information came from
+* recover from incorrect AI extraction
+* keep source history
+* support auditing
+* verify AI answers
+
+The original information should never be replaced by the AI’s interpretation of it.
+
+---
+
+# Canonical Knowledge
+
+Raw company data is messy.
+
+One company may store the same information across:
+
+Slack, PDFs, Salesforce, email, Excel, Notion, and internal databases.
+
+Atmet therefore needs a common internal language.
+
+This is the **Canonical Knowledge Model**.
+
+There is not a separate canonical system for PDFs, Slack, Salesforce, and every other source.
+
+There is one shared Atmet canonical knowledge model, containing many individual knowledge objects.
+
+For example, Salesforce may contain:
+
+Rania
+Studio Be
+Proposal stage
+$18,000 opportunity
+
+Slack may contain:
+
+“We sent the Studio Be proposal to Rania.”
+
+A proposal PDF may contain:
+
+Studio Be Proposal
+Value: $18,000
+Primary Contact: Rania
+
+Atmet should recognize that these sources describe the same underlying business concepts.
+
+The canonical layer could therefore contain:
+
+Customer: Studio Be
+
+Person: Rania
+
+Opportunity: Studio Be Proposal
+
+Value: $18,000
+
+Stage: Proposal
+
+The Brain keeps links back to every original source that contributed to this understanding.
+
+The canonical layer is therefore Atmet’s structured understanding of what the company knows.
+
+---
+
+# Knowledge Objects
+
+Canonical knowledge is made of reusable Knowledge Objects.
+
+A Knowledge Object could represent almost anything.
+
+Examples include:
+
+* Person
+* Organization
+* Department
+* Team
+* Customer
+* Supplier
+* Project
+* Task
+* Process
+* Procedure
+* Policy
+* Rule
+* Decision
+* Product
+* Service
+* Contract
+* Invoice
+* Transaction
+* Message
+* Meeting
+* Document
+* Metric
+* Event
+
+Each object may contain:
+
+ID
+organization
+type
+title
+content
+source
+department
+team
+owner
+dates
+tags
+entities
+relationships
+security level
+permissions
+confidence
+version
+embedding
+
+The object system should remain extensible.
+
+Atmet should provide a general base ontology, while each company may have its own domain-specific concepts.
+
+A hospital may need:
+
+Patient
+Treatment
+Doctor
+Appointment
+
+A marketing company may need:
+
+Campaign
+Offer
+Publisher
+Advertiser
+Conversion
+
+A construction company may need:
+
+Site
+Material
+Contractor
+Inspection
+
+Atmet can eventually analyze a company during onboarding and automatically propose its company-specific ontology.
+
+---
+
+# Knowledge Understanding Engine
+
+The component responsible for transforming raw data into canonical knowledge is the Knowledge Understanding Engine.
+
+It should combine deterministic software with AI.
+
+Structured information should use deterministic mappings whenever possible.
+
+For example:
+
+HubSpot deal amount
+→ Opportunity value
+
+Database foreign key
+→ known relationship
+
+Salesforce company ID
+→ Organization reference
+
+This information does not need to be guessed by an LLM.
+
+AI becomes especially useful for unstructured information.
+
+For example, an email may say:
+
+“We decided that enterprise customers will now receive 60-day payment terms.”
+
+The AI can extract:
+
+Type: Policy or Decision
+
+Subject: Enterprise customers
+
+Rule: Payment terms
+
+Value: 60 days
+
+The engine can perform tasks such as:
+
+* document classification
+* entity extraction
+* fact extraction
+* relationship extraction
+* topic detection
+* semantic chunking
+* metadata enrichment
+* duplicate detection
+* conflict detection
+* language understanding
+* summarization
+* entity resolution
+
+AI should propose an interpretation, but that interpretation should still pass through schemas, validation, entity resolution, confidence checks, and source tracking.
+
+Atmet should never blindly save whatever an LLM generates as unquestionable company knowledge.
+
+---
+
+# Entity Resolution
+
+The same real-world entity may appear differently across company systems.
+
+For example:
+
+Studio Be
+Studio BE
+StudioBe
+STUDIO BE DESIGN LLC
+
+Atmet should detect that these likely represent the same organization.
+
+Instead of creating four company objects, Brain creates one canonical entity:
+
+Studio Be
+
+with aliases and links to every source.
+
+The same applies to:
+
+employees
+customers
+products
+projects
+contracts
+suppliers
+departments
+
+Entity Resolution is necessary for creating a clean Brain and a useful Knowledge Graph.
+
+---
+
+# Knowledge Graph
+
+The Canonical Knowledge layer explains what things exist.
+
+The Knowledge Graph explains how those things relate to one another.
+
+For example:
+
+Rania
+→ works at → Studio Be
+
+Studio Be
+→ has opportunity → Proposal #192
+
+Proposal #192
+→ became → Contract #184
+
+Contract #184
+→ belongs to → Studio Be
+
+The company should not manually build all of these connections.
+
+Atmet should automatically build most of the Knowledge Graph.
+
+There are three main ways relationships can be created.
+
+### Deterministic relationships
+
+These come directly from structured systems.
+
+If Salesforce explicitly connects a contact to a company, Atmet can create that relationship with very high confidence.
+
+If a database contains a foreign key between an invoice and a customer, Atmet already knows the relationship.
+
+### AI-extracted relationships
+
+AI can understand relationships from unstructured content.
+
+For example:
+
+“Sarah manages Project Falcon.”
+
+can become:
+
+Sarah
+→ manages → Project Falcon
+
+“Project Falcon belongs to Studio Be.”
+
+can become:
+
+Project Falcon
+→ belongs to → Studio Be
+
+### Human-confirmed relationships
+
+A company can explicitly create, confirm, modify, or override important relationships.
+
+Human-confirmed information can be treated as more authoritative than AI inference.
+
+Each relationship should contain its own metadata.
+
+For example:
+
+Subject: Sarah
+
+Relationship: manages
+
+Object: Project Falcon
+
+Source: Operations Notes.pdf
+
+Method: AI extracted
+
+Confidence: 0.96
+
+Status: confirmed
+
+This makes the graph explainable.
+
+Atmet is not simply storing that two objects are connected. It understands why it believes the connection exists.
+
+---
+
+# The Graph Builds Itself Continuously
+
+The Knowledge Graph should not be generated only once during onboarding.
+
+It should continue evolving as the company changes.
+
+For example, Atmet initially knows:
+
+Rania
+→ works at → Studio Be
+
+Then Gmail is connected and Brain discovers:
+
+Rania
+→ discussed → Proposal #192
+
+HubSpot later provides:
+
+Studio Be
+→ has deal → Deal #192
+
+Entity resolution recognizes that the proposal and the CRM deal refer to the same business opportunity.
+
+Later a contract is uploaded.
+
+Now Brain learns:
+
+Deal #192
+→ resulted in → Contract #184
+
+The graph becomes richer every time new knowledge enters the Brain.
+
+---
+
+# Metadata
+
+Every piece of company knowledge should contain rich metadata.
+
+Metadata means information about the knowledge itself.
+
+For example:
+
+Annual Leave Policy
+
+could contain:
+
+Department: HR
+
+Source: Employee Handbook
+
+Page: 34
+
+Owner: Head of HR
+
+Country: Jordan
+
+Employee type: Full-time
+
+Effective date: January 1, 2026
+
+Last verified: July 22, 2026
+
+Authority: Official
+
+Confidentiality: Internal
+
+Language: English
+
+Tags: HR, leave, employee benefits
+
+Metadata is critical for retrieval.
+
+Instead of searching millions of pieces of knowledge blindly, Brain can first filter the correct context.
+
+For example:
+
+Department = Finance
+Country = Jordan
+Status = Active
+Document type = Policy
+
+Then perform semantic retrieval on the remaining knowledge.
+
+---
+
+# Vector Indexes
+
+The Vector Index helps Atmet search by meaning.
+
+For example, a user may ask:
+
+“How much vacation do employees get?”
+
+while the company handbook says:
+
+“Full-time employees receive 21 working days of annual leave.”
+
+Traditional keyword matching may miss the relationship between “vacation” and “annual leave.”
+
+Embeddings allow Atmet to understand that the two pieces of text are semantically similar.
+
+The Vector Index is therefore one retrieval mechanism.
+
+It is not the entire Brain.
+
+Atmet may eventually maintain multiple indexes for:
+
+documents
+knowledge objects
+policies
+procedures
+messages
+entities
+agent memory
+decisions
+
+Vector retrieval should work together with metadata filtering, graph traversal, structured database queries, keyword search, and reranking.
+
+---
+
+# Permissions
+
+The Company Brain may contain highly sensitive knowledge.
+
+A Sales Agent should not automatically have access to payroll.
+
+A normal employee should not automatically access confidential HR investigations.
+
+A Finance Agent may need finance records but not engineering secrets.
+
+Permissions should therefore be deeply integrated into Brain architecture.
+
+A company hierarchy might look like:
+
+Company
+
+Finance
+→ Accounting
+→ Payroll
+
+Sales
+
+Engineering
+
+HR
+
+Each user and agent receives a knowledge scope and corresponding permissions.
+
+The most important security principle is:
+
+**Unauthorized information must be filtered before it reaches the AI model.**
+
+Atmet should never retrieve confidential information, send it to an LLM, and then ask the model not to reveal it.
+
+The correct process is:
+
+User asks question
+
+→ identify user
+
+→ determine permissions
+
+→ determine knowledge scope
+
+→ retrieve only allowed knowledge
+
+→ send permitted context to the model
+
+This keeps security independent from model behavior.
+
+---
+
+# Knowledge Scope and Inheritance
+
+The organizational structure of Brain should behave like inherited knowledge scopes.
+
+For example:
+
+Company Brain
+→ Finance
+→ Accounting
+→ Invoice Agent
+
+The Invoice Agent could automatically inherit knowledge from:
+
+Company Brain
+
+Finance
+
+Accounting
+
+and combine it with its own private files or knowledge.
+
+Inheritance should also be configurable.
+
+An agent could have:
+
+Company knowledge: enabled
+
+Finance knowledge: enabled
+
+Accounting knowledge: enabled
+
+Payroll knowledge: disabled
+
+HR knowledge: disabled
+
+This allows companies to create unlimited agents while maintaining clear boundaries.
+
+---
+
+# Collections
+
+Hierarchical organization alone is not enough.
+
+Some knowledge belongs to several areas at once.
+
+A contract may belong to:
+
+Legal
+
+Finance
+
+Sales
+
+Studio Be account
+
+Instead of copying the document four times, Atmet should support cross-cutting Collections or Tags.
+
+For example:
+
+#StudioBe
+#Contracts
+#Enterprise
+#2026
+#Jordan
+
+This gives Brain two ways to organize information:
+
+Organizational hierarchy
+
+and
+
+Cross-company semantic collections
+
+---
+
+# Versions
+
+Company knowledge changes over time.
+
+For example:
+
+Annual leave in 2025: 18 days
+
+Annual leave in early 2026: 21 days
+
+Annual leave from July 2026: 24 days
+
+Brain should not simply overwrite:
+
+21 days
+
+with:
+
+24 days
+
+Instead, it should preserve history.
+
+Version 1
+18 days
+Effective through December 2025
+
+Version 2
+21 days
+Effective January–June 2026
+
+Version 3
+24 days
+Effective July 2026 onward
+
+This allows Brain to answer both:
+
+“What is our current leave policy?”
+
+and:
+
+“What was the leave policy in March?”
+
+Versions should apply to:
+
+documents
+policies
+contracts
+canonical objects
+relationships
+processes
+agent instructions
+Brain structures
+
+---
+
+# Source Lineage and Provenance
+
+Every important piece of knowledge should remain connected to its source.
+
+If an agent answers:
+
+“The reimbursement limit is $500.”
+
+the user should be able to see:
+
+Source: Finance Policy.pdf
+
+Page: 18
+
+Last synced: August 2026
+
+Owner: Finance
+
+Effective since: January 2026
+
+Previous value: $300
+
+Confidence: 98%
+
+This is what makes Atmet useful for serious company work.
+
+The user should never have to simply trust that “the AI remembers something.”
+
+Brain should be able to explain where its knowledge came from.
+
+---
+
+# Conflicts and Authority
+
+Companies frequently contain contradictory information.
+
+For example:
+
+Policy document: refunds are allowed for 30 days
+
+Notion: refunds are allowed for 21 days
+
+Slack: refunds are now limited to 14 days
+
+Brain must not assume that the newest sentence is automatically the truth.
+
+Atmet should understand:
+
+source authority
+
+effective dates
+
+owners
+
+versions
+
+confidence
+
+whether information is official or informal
+
+The company can define source priority.
+
+For example:
+
+1. Official policy system
+2. ERP
+3. Notion
+4. Google Drive
+5. Slack
+6. Emails
+
+Brain can then detect contradictions and decide whether to:
+
+use the authoritative value
+
+mark the information as conflicting
+
+or request human review
+
+---
+
+# Syncing and Updating the Brain
+
+Updating Brain should not mean retraining everything again.
+
+Atmet should use incremental synchronization.
+
+Suppose Google Drive contains 40,000 documents and only one document changes.
+
+Brain should:
+
+detect the change
+
+compare the new source with the previous version
+
+reprocess only the affected information
+
+update the relevant canonical objects
+
+update the related embeddings
+
+update affected graph relationships
+
+update versions
+
+mark outdated knowledge as inactive
+
+The same applies when a source is deleted.
+
+If a file is removed from Google Drive, Brain should understand that knowledge derived only from that source may no longer be active.
+
+Users may simply see a button such as:
+
+**Sync Brain**
+
+while the internal process manages all incremental updates.
+
+---
+
+# Retrieval Engine
+
+When a user or agent asks a question, Brain should not simply send the question to a vector database.
+
+For example:
+
+“Why did Q2 revenue decrease?”
+
+The system should first understand that the request involves:
+
+Finance
+
+Q2
+
+Revenue
+
+Analysis
+
+Then determine:
+
+who is asking
+
+which agent is asking
+
+what knowledge that agent is allowed to access
+
+what period is relevant
+
+what structured data may be necessary
+
+The retrieval engine may combine:
+
+semantic vector search
+
+keyword search
+
+metadata filtering
+
+Knowledge Graph traversal
+
+SQL/database queries
+
+timeline retrieval
+
+entity retrieval
+
+reranking
+
+conflict resolution
+
+The result becomes a highly relevant context package.
+
+---
+
+# Context Package
+
+The Context Package is the layer between Atmet Brain and the AI model.
+
+It may contain:
+
+the user’s question
+
+relevant canonical knowledge
+
+structured data
+
+entities
+
+relationships
+
+source citations
+
+permissions
+
+history
+
+confidence
+
+This allows the same company Brain to work with different models.
+
+Atmet can prepare the correct context, then send that package to:
+
+GPT
+
+Claude
+
+Gemini
+
+a local model
+
+a specialized internal model
+
+The Brain does not belong to a specific LLM vendor.
+
+---
+
+# Agents
+
+Once the Brain exists, agents become lightweight.
+
+A user should be able to create an agent by defining:
+
+Name
+
+Parent scope
+
+Instructions
+
+Model
+
+Tools
+
+Permissions
+
+Private knowledge
+
+For example:
+
+LinkedIn Writer
+
+Parent: Marketing → Content
+
+Inherited knowledge:
+
+Company
+
+Marketing
+
+Content
+
+Private knowledge:
+
+brand_examples.pdf
+
+Instructions:
+
+Write content according to our brand and previous work.
+
+Model:
+
+Claude
+
+This should not require traditional model training.
+
+The agent is created by combining behavior with an existing knowledge scope.
+
+This makes it possible to create a very large number of agents without rebuilding company knowledge for every use case.
+
+---
+
+# Automated Company Understanding
+
+The long-term vision is that a company should not have to manually organize everything before Atmet can become useful.
+
+A company may connect:
+
+Google Drive
+
+Slack
+
+Gmail
+
+Notion
+
+HubSpot
+
+GitHub
+
+and Atmet Brain can begin analyzing the organization.
+
+Brain might discover:
+
+Departments
+
+Employees
+
+Customers
+
+Projects
+
+Products
+
+Policies
+
+Processes
+
+Contracts
+
+Decisions
+
+Metrics
+
+Relationships
+
+It can then propose an initial company structure.
+
+For example:
+
+“We found seven departments, 53 employees, 117 customers, 31 active projects, 13 company policies, and several recurring business processes.”
+
+The company reviews the proposed structure, corrects anything necessary, and approves it.
+
+Atmet then continues learning as sources change.
+
+---
+
+# The Human Role
+
+Humans should not manually build the entire Brain.
+
+They should not manually connect every graph node.
+
+They should not manually classify every document.
+
+The Atmet Brain Engine should perform most of this automatically.
+
+The company’s role should primarily be to:
+
+connect sources
+
+define access rules
+
+review uncertain or important information
+
+confirm critical relationships
+
+correct mistakes
+
+define authoritative sources
+
+approve company-specific concepts
+
+Atmet builds the intelligence layer.
+
+Humans govern it.
+
+---
+
+# The Brain Engine
+
+The Brain itself should be separated from the Atmet application.
+
+The **Atmet Brain Engine** contains the reusable intelligence technology:
+
+Ingestion
+
+Parsing
+
+Canonical Knowledge
+
+Knowledge Understanding
+
+Entity Resolution
+
+Knowledge Graph
+
+Metadata
+
+Vector Indexes
+
+Permissions
+
+Versioning
+
+Sync
+
+Conflict Resolution
+
+Retrieval
+
+Context Generation
+
+Above the Brain Engine sits the Atmet product.
+
+The Atmet product may include:
+
+Company Brain interface
+
+Chat
+
+Agents
+
+Automations
+
+Integrations
+
+Model selection
+
+Administration
+
+Analytics
+
+This separation is important because the same Brain Engine can also power Atmet’s service business.
+
+For a custom client implementation:
+
+Client Systems
+→ Atmet Brain Engine
+→ Company Brain
+→ Custom Agents
+→ Custom Interface
+
+For the Atmet SaaS platform:
+
+Company signs up
+→ Connects its systems
+→ Atmet Brain Engine builds the Brain
+→ Users create their own agents and automations
+
+The underlying technology remains the same.
+
+---
+
+# Atmet Brain Architecture
+
+The overall architecture can be understood as:
+
+**Sources**
+
+Files, apps, APIs, databases, conversations, audio, video and company systems.
+
+↓
+
+**Ingestion and Sync**
+
+Connect, read, detect changes, preserve original sources and understand source permissions.
+
+↓
+
+**Knowledge Understanding**
+
+Parse, classify, extract entities, extract facts, identify relationships, resolve duplicates, detect conflicts and enrich metadata.
+
+↓
+
+**Canonical Knowledge**
+
+Create a consistent internal representation of what the company knows.
+
+↓
+
+**Knowledge Representations**
+
+Raw Data Store
+
+Canonical Knowledge Store
+
+Vector Indexes
+
+Knowledge Graph
+
+↓
+
+**Brain Governance**
+
+Knowledge scopes
+
+Inheritance
+
+Permissions
+
+Metadata
+
+Versions
+
+Provenance
+
+Source authority
+
+↓
+
+**Retrieval Engine**
+
+Vector search
+
+Keyword search
+
+Graph traversal
+
+SQL
+
+Metadata filters
+
+Reranking
+
+Conflict resolution
+
+↓
+
+**Context Package**
+
+The right company context for the specific task.
+
+↓
+
+**Models**
+
+GPT
+
+Claude
+
+Gemini
+
+Local models
+
+Custom models
+
+↓
+
+**Agents**
+
+Finance
+
+Sales
+
+HR
+
+Engineering
+
+Operations
+
+Management
+
+and unlimited custom agents.
+
+---
+
+# What Atmet Brain Really Is
+
+Atmet Brain should not be positioned simply as a knowledge base.
+
+A traditional knowledge base stores information.
+
+Atmet Brain should understand information.
+
+It should understand:
+
+what the company knows
+
+where that knowledge came from
+
+what each piece of information means
+
+how different pieces of knowledge are related
+
+which information is currently valid
+
+what changed
+
+which sources are authoritative
+
+who is allowed to access each piece of knowledge
+
+which context an agent needs for a specific task
+
+The AI model becomes only the reasoning layer placed on top of this intelligence infrastructure.
+
+This gives companies the freedom to run different models while preserving the same organizational knowledge.
+
+---
+
+# The Vision
+
+A company should not need a new disconnected AI tool for every task.
+
+Instead, it should build its Brain once.
+
+Connect its knowledge once.
+
+Keep that Brain continuously synchronized.
+
+Then use that same intelligence layer across:
+
+chat
+
+agents
+
+departments
+
+workflows
+
+automation
+
+analysis
+
+operations
+
+internal tools
+
+customer-facing systems
+
+and future AI models.
+
+The long-term vision for Atmet Brain is simple:
+
+**Connect the company once. Understand it continuously. Use that understanding everywhere.**
+
+Atmet Brain becomes the intelligence layer between a company’s existing systems and everything AI can do for that company.
