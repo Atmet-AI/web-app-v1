@@ -8,7 +8,7 @@ const interHeading = Inter({ subsets: ["latin"], variable: "--font-heading" });
 const interMono = Inter({ subsets: ["latin"], variable: "--font-mono" });
 
 const appUrl = "https://atmetai.com";
-const faviconUrl = "/Atmet%20Favicon.png";
+const faviconUrl = "/Atmet%20Logos/Atmet%20Light%20mode.svg";
 const previewImageUrl = "/Preview%20Image%20Link.png";
 const appDescription =
   "Atmet connects your team's tools into one permission-aware AI workspace for sourced answers, agents, and automations.";
@@ -21,9 +21,9 @@ export const metadata: Metadata = {
     canonical: appUrl,
   },
   icons: {
-    icon: [{ url: faviconUrl, type: "image/png", sizes: "1028x1028" }],
-    shortcut: [{ url: faviconUrl, type: "image/png", sizes: "1028x1028" }],
-    apple: [{ url: faviconUrl, type: "image/png", sizes: "1028x1028" }],
+    icon: [{ url: faviconUrl, type: "image/svg+xml" }],
+    shortcut: [{ url: faviconUrl, type: "image/svg+xml" }],
+    apple: [{ url: faviconUrl, type: "image/svg+xml" }],
   },
   openGraph: {
     title: "Atmet | One AI workspace for every tool",

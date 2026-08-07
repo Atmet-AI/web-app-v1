@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { ChevronsUpDown } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -35,6 +34,7 @@ import {
   getInitialCtaAccentPreference,
   type CtaAccentPreference,
 } from "@/lib/cta-accent";
+import { ParticleCube } from "@/components/particle-cube";
 
 const workTypeOptions = [
   "Technology",
@@ -321,6 +321,12 @@ const countryOptions = [
   { flag: "🇿🇼", name: "Zimbabwe" },
 ];
 
+const loginHeadlines = [
+  '“Turn company knowledge into actionable workflows.”',
+  '“Preserve provenance, resolve conflicts, and trust the answers.”',
+  '“One canonical Brain across tools, teams, and time.”',
+];
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -342,6 +348,8 @@ export default function LoginPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeHeadlineIndex, setActiveHeadlineIndex] = useState(0);
+  const [isHeadlineVisible, setIsHeadlineVisible] = useState(true);
   const [ctaAccentPreference, setCtaAccentPreference] = useState<CtaAccentPreference>(
     getInitialCtaAccentPreference,
   );
@@ -403,6 +411,21 @@ export default function LoginPage() {
       window.removeEventListener("storage", syncCtaAccentPreference);
     };
   }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setActiveHeadlineIndex((current) => (current + 1) % loginHeadlines.length);
+    }, 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    setIsHeadlineVisible(false);
+    const timeoutId = window.setTimeout(() => setIsHeadlineVisible(true), 180);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [activeHeadlineIndex]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -750,34 +773,14 @@ export default function LoginPage() {
       : "Sign in to continue to your Atmet workspace.";
 
   return (
-    <main className="relative grid min-h-svh bg-background px-5 text-foreground">
-      <div className="absolute left-1/2 top-8 z-10 -translate-x-1/2">
-        <span className="grid h-3 w-8 place-items-center">
-          <Image
-            alt="Atmet"
-            className="h-auto w-full dark:hidden"
-            height={12}
-            priority
-            src="/Atmet Logos/Atmet Light mode.svg"
-            width={32}
-          />
-          <Image
-            alt="Atmet"
-            className="hidden h-auto w-full dark:block"
-            height={12}
-            priority
-            src="/Atmet Logos/Atmet Dark mode.svg"
-            width={32}
-          />
-        </span>
-      </div>
-
-      <section
-        className={cn(
-          "mx-auto flex w-full flex-col justify-center px-3 pb-28 pt-20 sm:px-0",
-          isWaitlistMode ? "max-w-3xl" : "max-w-sm",
-        )}
-      >
+    <main className="grid min-h-svh bg-background text-foreground lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="relative grid min-h-svh px-5">
+        <section
+          className={cn(
+            "mx-auto flex w-full flex-col justify-center px-3 pb-28 pt-20 sm:px-0",
+            isWaitlistMode ? "max-w-3xl" : "max-w-sm",
+          )}
+        >
         <div className="mb-8 text-center">
           <h1 className="text-balance text-2xl font-semibold tracking-tight">
             {title}
@@ -1144,28 +1147,47 @@ export default function LoginPage() {
             </button>
           )}
         </form>
-      </section>
+        </section>
 
-      <p className="absolute bottom-8 left-1/2 w-full -translate-x-1/2 px-5 text-center text-muted-foreground text-sm">
-        {isWaitlistMode ? "Already have access?" : "Don't have an account?"}{" "}
-        <button
-          className={cn(
-            "font-medium text-foreground outline-none transition-[color,opacity,scale] duration-150 hover:opacity-75 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]",
-            ctaAccentPreference === "blue" && "text-[#1e90ff]",
-          )}
-          onClick={() => {
-            void playAtmetSound("tick");
-            if (isWaitlistMode) {
-              backToSignIn();
-            } else {
-              startWaitlist();
-            }
-          }}
-          type="button"
-        >
-          {isWaitlistMode ? "Sign in" : "Join waitlist"}
-        </button>
-      </p>
+        <p className="absolute bottom-8 left-0 w-full px-5 text-center text-muted-foreground text-sm">
+          {isWaitlistMode ? "Already have access?" : "Don't have an account?"}{" "}
+          <button
+            className={cn(
+              "font-medium text-foreground outline-none transition-[color,opacity,scale] duration-150 hover:opacity-75 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]",
+              ctaAccentPreference === "blue" && "text-[#1e90ff]",
+            )}
+            onClick={() => {
+              void playAtmetSound("tick");
+              if (isWaitlistMode) {
+                backToSignIn();
+              } else {
+                startWaitlist();
+              }
+            }}
+            type="button"
+          >
+            {isWaitlistMode ? "Sign in" : "Join waitlist"}
+          </button>
+        </p>
+      </div>
+
+      <aside className="hidden min-h-svh flex-col items-center justify-center gap-6 border-l bg-muted/35 px-8 py-10 text-center dark:bg-white/[0.035] lg:flex">
+        <ParticleCube className="h-[min(48vw,34rem)] w-[min(48vw,34rem)]" />
+        <div className="w-full max-w-sm overflow-hidden">
+          <div
+            className={cn(
+              "transition-all duration-700 ease-out",
+              isHeadlineVisible
+                ? "translate-y-0 opacity-100"
+                : "translate-y-2 opacity-0",
+            )}
+          >
+            <p className="text-balance text-xl font-semibold tracking-normal text-foreground sm:text-2xl">
+              {loginHeadlines[activeHeadlineIndex]}
+            </p>
+          </div>
+        </div>
+      </aside>
     </main>
   );
 }
