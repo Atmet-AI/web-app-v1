@@ -3224,7 +3224,7 @@ export default function Home() {
           >
           <div
             className={cn(
-              "flex min-h-0 w-60 shrink-0 flex-col pb-3 pl-2 pr-0 pt-2 transition-[opacity,translate] duration-300 ease-out",
+              "flex h-full min-h-0 w-60 shrink-0 flex-col pb-3 pl-2 pr-0 pt-2 transition-[opacity,translate] duration-300 ease-out",
               sidebarOpen
                 ? "translate-x-0 opacity-100"
                 : "-translate-x-2 opacity-0 pointer-events-none",
@@ -3261,7 +3261,7 @@ export default function Home() {
               workflowChatMeta={workflowSidebarChatMeta}
             />
 
-            <nav className="mt-auto grid gap-0.5 pr-1">
+            <nav className="mt-auto grid shrink-0 gap-0.5 pt-2 pr-1">
               {visibleSecondaryNavigation.map((item) => (
                 <NavButton
                   key={item.key}
@@ -4766,8 +4766,12 @@ function SidebarChatHistory({
   );
 
   return (
-    <Collapsible onOpenChange={onOpenChange} open={open}>
-      <div className="mt-3 pr-1">
+    <Collapsible
+      className="mt-3 min-h-0 flex-1 pr-1"
+      onOpenChange={onOpenChange}
+      open={open}
+    >
+      <div className="flex min-h-0 flex-col">
         <CollapsibleTrigger className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs font-medium text-muted-foreground transition-[background-color,color] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
           <Icon
             className={cn("size-3.5 transition-transform", open && "rotate-180")}
@@ -4777,7 +4781,7 @@ function SidebarChatHistory({
           <span className="text-[0.625rem] tabular-nums">{chats.length}</span>
         </CollapsibleTrigger>
         <CollapsiblePanel>
-          <div className="mt-1 grid gap-0.5">
+          <div className="mt-1 grid max-h-[calc(100svh-23rem)] gap-0.5 overflow-y-auto overscroll-contain pr-0.5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {orderedChats.map((chat) => {
               const workflowMeta = workflowChatMeta.get(chat.id);
               const isWorkflowChat = Boolean(workflowMeta);

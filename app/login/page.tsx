@@ -327,6 +327,8 @@ const loginHeadlines = [
   '“One canonical Brain across tools, teams, and time.”',
 ];
 
+type LoginFieldErrors = Partial<Record<"email" | "password", string>>;
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -346,6 +348,8 @@ export default function LoginPage() {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [loginFieldErrors, setLoginFieldErrors] = useState<LoginFieldErrors>({});
+  const [loginFieldShakeKey, setLoginFieldShakeKey] = useState(0);
   const [successMessage, setSuccessMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeHeadlineIndex, setActiveHeadlineIndex] = useState(0);
@@ -547,6 +551,7 @@ export default function LoginPage() {
       void playAtmetSound("tick");
     }
     setErrorMessage("");
+    setLoginFieldErrors({});
     setSuccessMessage("");
 
     if (mode === "waitlist") {
@@ -689,7 +694,10 @@ export default function LoginPage() {
 
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}));
-          setErrorMessage(payload.error ?? "Could not sign in.");
+          const message = payload.error ?? "Could not sign in.";
+          setErrorMessage(message);
+          setLoginFieldErrors({ password: message });
+          setLoginFieldShakeKey((current) => current + 1);
           return;
         }
 
@@ -701,7 +709,10 @@ export default function LoginPage() {
     }
 
     if (passwordVisible) {
-      setErrorMessage("Enter your password.");
+      const message = "Enter your password.";
+      setErrorMessage(message);
+      setLoginFieldErrors({ password: message });
+      setLoginFieldShakeKey((current) => current + 1);
     }
   }
 
@@ -720,6 +731,7 @@ export default function LoginPage() {
     setMode("forgot");
     window.history.replaceState(null, "", "/login");
     setErrorMessage("");
+    setLoginFieldErrors({});
     setSuccessMessage("");
     setPasswordVisible(false);
     setOtpVisible(false);
@@ -730,6 +742,7 @@ export default function LoginPage() {
     setMode("login");
     window.history.replaceState(null, "", "/login");
     setErrorMessage("");
+    setLoginFieldErrors({});
     setSuccessMessage("");
     setOtpVisible(false);
     setNewPassword("");
@@ -741,6 +754,7 @@ export default function LoginPage() {
     setMode("waitlist");
     window.history.replaceState(null, "", "/login#waitlist");
     setErrorMessage("");
+    setLoginFieldErrors({});
     setSuccessMessage("");
     setPasswordVisible(false);
     setOtpVisible(false);
@@ -966,10 +980,41 @@ export default function LoginPage() {
                     <Label className="text-muted-foreground" htmlFor="email">
                       Email
                     </Label>
+                    {loginFieldErrors.email && (
+                      <p
+                        className="text-xs font-medium text-destructive"
+                        id="email-error"
+                      >
+                        {loginFieldErrors.email}
+                      </p>
+                    )}
                     <Input
+                      key={`email-${loginFieldShakeKey}`}
+                      aria-describedby={
+                        loginFieldErrors.email ? "email-error" : undefined
+                      }
+                      aria-invalid={Boolean(loginFieldErrors.email)}
                       autoComplete="email"
+                      className={cn(
+                        loginFieldErrors.email &&
+                          "animate-[login-field-shake_280ms_cubic-bezier(0.5,1,0.89,1)] border-destructive/64 ring-destructive/16 shadow-none",
+                      )}
                       id="email"
-                      onChange={(event) => setEmail(event.target.value)}
+                      onChange={(event) => {
+                        setEmail(event.target.value);
+                        setLoginFieldErrors((current) => ({
+                          ...current,
+                          email: undefined,
+                        }));
+                      }}
+                      onInvalid={(event) => {
+                        event.preventDefault();
+                        setErrorMessage("Enter a valid email address.");
+                        setLoginFieldErrors({
+                          email: "Enter a valid email address.",
+                        });
+                        setLoginFieldShakeKey((current) => current + 1);
+                      }}
                       placeholder="you@company.com"
                       required={!waitlistSubmitted}
                       type="email"
@@ -995,12 +1040,45 @@ export default function LoginPage() {
                     >
                       Password
                     </Label>
+                    {loginFieldErrors.password && (
+                      <p
+                        className="text-xs font-medium text-destructive"
+                        id="password-error"
+                      >
+                        {loginFieldErrors.password}
+                      </p>
+                    )}
                     <Input
+                      key={`password-${loginFieldShakeKey}`}
+                      aria-describedby={
+                        loginFieldErrors.password
+                          ? "password-error"
+                          : undefined
+                      }
+                      aria-invalid={Boolean(loginFieldErrors.password)}
                       autoComplete="current-password"
+                      className={cn(
+                        loginFieldErrors.password &&
+                          "animate-[login-field-shake_280ms_cubic-bezier(0.5,1,0.89,1)] border-destructive/64 ring-destructive/16 shadow-none",
+                      )}
                       disabled={!passwordVisible || isForgotMode}
                       id="password"
                       nativeInput
-                      onChange={(event) => setPassword(event.target.value)}
+                      onChange={(event) => {
+                        setPassword(event.target.value);
+                        setLoginFieldErrors((current) => ({
+                          ...current,
+                          password: undefined,
+                        }));
+                      }}
+                      onInvalid={(event) => {
+                        event.preventDefault();
+                        setErrorMessage("Enter your password.");
+                        setLoginFieldErrors({
+                          password: "Enter your password.",
+                        });
+                        setLoginFieldShakeKey((current) => current + 1);
+                      }}
                       placeholder="Enter your password"
                       ref={passwordInputRef}
                       required={passwordVisible && !isForgotMode}
@@ -1100,11 +1178,13 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {errorMessage && (
-                <p className="mt-4 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-center text-destructive text-sm">
-                  {errorMessage}
-                </p>
-              )}
+              {errorMessage &&
+                !loginFieldErrors.email &&
+                !loginFieldErrors.password && (
+                  <p className="mt-4 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-center text-destructive text-sm">
+                    {errorMessage}
+                  </p>
+                )}
 
               {successMessage && (
                 <p className="mt-4 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-center text-emerald-700 text-sm dark:text-emerald-300">
