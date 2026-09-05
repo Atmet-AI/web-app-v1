@@ -13514,7 +13514,7 @@ function SettingsPage({
 
                 if (tab.value === "support") {
                   event.preventDefault();
-                  window.location.href = "mailto:team@atmetai.com";
+                  window.location.href = "mailto:team@atmet.pro";
                 }
               }}
               value={tab.value}
